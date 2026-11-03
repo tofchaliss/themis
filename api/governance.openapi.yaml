@@ -76,6 +76,37 @@ paths:
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
+  /findings/{id}/scope-targets:
+    get:
+      operationId: getScopeTargets
+      summary: >
+        Preview who a decision of the given scope on this Finding would reach now (EDR-SYNC-01
+        D7): the same CVE, the same component, undecided, on the releases of the same project or
+        product. Read scope. 503 when no Registry seam is configured (the owners cannot be
+        resolved, and "nobody" must not be answered for "cannot tell").
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+        - name: scope
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [release, project, product]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScopeTargetsView'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /findings/{id}/proposals:
     post:
       operationId: raiseProposal
@@ -690,6 +721,54 @@ components:
         proof:
           type: string
           description: Reference (URL or document id) to the justification (D2). Stored as text, never fetched.
+        scope:
+          type: string
+          enum: [release, project, product]
+          description: How wide the decider said this decision reaches (EDR-SYNC-01 D1); release when not stated.
+        propagated_from_finding_id:
+          type: string
+          description: >-
+            Set on a Position Governance applied from a scoped decision elsewhere (D3): the Finding
+            the person decided on. Absent on a Position the person established directly.
+        propagated_from_version:
+          type: integer
+          description: The source Position's version, beside propagated_from_finding_id.
+    ScopeTargetsView:
+      type: object
+      description: >-
+        Who a decision of the given scope on this Finding would reach NOW (EDR-SYNC-01 D7): the
+        preview shown before the person clicks. Findings born later are reached at their evaluation
+        and are not counted here.
+      properties:
+        finding_id:
+          type: string
+        scope:
+          type: string
+          enum: [release, project, product]
+        count:
+          type: integer
+        projects:
+          type: integer
+          description: How many distinct projects the targets span.
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScopeTargetView'
+    ScopeTargetView:
+      type: object
+      properties:
+        finding_id:
+          type: string
+        release_id:
+          type: string
+        product_id:
+          type: string
+        project_id:
+          type: string
+        level:
+          type: string
+          enum: [artifact, component]
+          description: artifact = the same purls; component = the same packages at other versions (EDR-ROLLFORWARD-01 D3).
     ProposalView:
       type: object
       properties:
@@ -1425,6 +1504,18 @@ components:
             fetched. Allowed only on accepted_risk and deferred. Changing the owner, treatment or
             proof later is a new Position version: raise a proposal with the same stance and
             accept it with the new terms.
+        scope:
+          type: string
+          enum: [release, project, product]
+          description: >-
+            How wide this decision reaches (EDR-SYNC-01 D1). `release` (default) is this Finding
+            only. `project` / `product` make Governance establish the SAME Position, recorded
+            against the same decider, on every Finding of the same CVE that carries the same
+            component (same purls, or the same packages at other versions) on the releases of the
+            same project / of every project of the same product — within a sweep (minutes), and on
+            Findings that open later. A different component is never synced; a Finding that
+            already has a Position is never overwritten. GET /findings/{id}/scope-targets previews
+            who it reaches.
     Problem:
       type: object
       properties:

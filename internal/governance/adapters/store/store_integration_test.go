@@ -1309,3 +1309,72 @@ func TestFixNoticeStore(t *testing.T) {
 		t.Errorf("limit 0 = %+v err=%v", p, err)
 	}
 }
+
+// The decision scope (EDR-SYNC-01): the scope and the source round-trip as Position inputs; a
+// directly taken scoped Position is pending for the sweep until marked, a release-scoped or a
+// propagated one never is; marking is idempotent and the index-backed listing is oldest-first.
+func TestDecisionScopeRoundTripAndPendingQueue(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	decide := func(id string, at time.Time, terms domain.AcceptanceTerms) domain.Position {
+		t.Helper()
+		if err := st.Save(ctx, newFinding(t, id, "rel-"+id, "fl-scope", "CVE-2026-S"), true, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+		f, _, _ := load(t, st, domain.FindingID(id))
+		prev := f.Version()
+		p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceNotAffected, "built without the codec", at, value.TrustAsserted)
+		_ = f.RaiseProposal(p)
+		pos, err := f.AcceptProposalWith("p1", human, at, terms)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Save(ctx, f, false, prev, nil); err != nil {
+			t.Fatal(err)
+		}
+		return pos
+	}
+	decide("plain", epoch, domain.AcceptanceTerms{})
+	decide("later", epoch.Add(2*time.Hour), domain.AcceptanceTerms{Scope: domain.ScopeProject})
+	decide("first", epoch.Add(time.Hour), domain.AcceptanceTerms{Scope: domain.ScopeProduct})
+	decide("applied", epoch.Add(3*time.Hour), domain.AcceptanceTerms{Scope: domain.ScopeProduct, PropagatedFrom: domain.PropagationSource{FindingID: "first", Version: 1}})
+
+	got, _, _ := load(t, st, "applied")
+	pos, _ := got.CurrentPosition()
+	if pos.Scope() != domain.ScopeProduct || pos.IsScopedSource() {
+		t.Errorf("propagated = scope %q source %v", pos.Scope(), pos.IsScopedSource())
+	}
+	if src, ok := pos.PropagatedFrom(); !ok || src != (domain.PropagationSource{FindingID: "first", Version: 1}) {
+		t.Errorf("propagated from = %+v %v", src, ok)
+	}
+	if plain, _, _ := load(t, st, "plain"); func() bool {
+		p, _ := plain.CurrentPosition()
+		return p.Scope() != domain.ScopeRelease || p.Inputs().Scope != ""
+	}() {
+		t.Error("a plain decision did not read back as release-scoped")
+	}
+	if n := count(t, pool, `SELECT count(*) FROM finding_positions WHERE finding_id = 'applied' AND scope_applied_at IS NOT NULL`); n != 1 {
+		t.Errorf("a propagated Position is not born applied (%d)", n)
+	}
+
+	pending, err := st.PendingScopedPositions(ctx, 10)
+	if err != nil || len(pending) != 2 || pending[0].FindingID != "first" || pending[1].FindingID != "later" || pending[0].Version != 1 {
+		t.Fatalf("pending = %+v %v, want [first later] oldest first", pending, err)
+	}
+	if one, _ := st.PendingScopedPositions(ctx, 1); len(one) != 1 || one[0].FindingID != "first" {
+		t.Errorf("limit = %+v", one)
+	}
+	if err := st.MarkScopeApplied(ctx, "first", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkScopeApplied(ctx, "first", 1); err != nil {
+		t.Fatal("second mark failed:", err)
+	}
+	if err := st.MarkScopeApplied(ctx, "ghost", 7); err != nil {
+		t.Fatal("unknown row mark failed:", err)
+	}
+	if left, _ := st.PendingScopedPositions(ctx, 10); len(left) != 1 || left[0].FindingID != "later" {
+		t.Errorf("after mark = %+v", left)
+	}
+}

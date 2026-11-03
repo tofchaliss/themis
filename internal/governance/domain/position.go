@@ -26,6 +26,11 @@ type PositionInputs struct {
 	Owner     string
 	Treatment Treatment
 	Proof     string
+	// Scope is how wide the decider said this decision reaches (EDR-SYNC-01 D1); empty means
+	// release. PropagatedFrom names the Position this one was applied from when it was not
+	// taken directly (D3). Both are inputs the decision rested on, like the terms above.
+	Scope          DecisionScope
+	PropagatedFrom PropagationSource
 }
 
 // Position is one immutable version of an Enterprise Position — the authoritative,

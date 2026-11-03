@@ -100,6 +100,10 @@ type ReleaseEvaluationWorker struct {
 	// Findings once its project is known (EDR-ROLLFORWARD-01). It runs BEFORE publish-and-mark
 	// so a failure defers the row and the pass is retried; it is idempotent per pair.
 	rollForward *RollForward
+	// scope, when wired, applies the standing scoped decisions (EDR-SYNC-01 D4) to the release's
+	// undecided Findings once its owners are known; same posture as roll-forward, and it runs
+	// BEFORE it, so a Finding the person decided for the whole product carries no proposal.
+	scope *ScopePropagation
 	// rejudge, when wired, judges the release's open Findings against their cards (VEX-RAISE-2)
 	// once correlation completes; same posture as roll-forward: before publish-and-mark, a
 	// failure defers the row.
@@ -126,6 +130,12 @@ func NewReleaseEvaluationWorker(st ReleaseEvaluations, identity ReleaseIdentityR
 // WithRollForward wires the same-CVE roll-forward pass to run per evaluated release.
 func (w *ReleaseEvaluationWorker) WithRollForward(rf *RollForward) *ReleaseEvaluationWorker {
 	w.rollForward = rf
+	return w
+}
+
+// WithScopePropagation wires the scoped-decision pass (EDR-SYNC-01 D4) to run per evaluated release.
+func (w *ReleaseEvaluationWorker) WithScopePropagation(sp *ScopePropagation) *ReleaseEvaluationWorker {
+	w.scope = sp
 	return w
 }
 
@@ -198,6 +208,11 @@ func (w *ReleaseEvaluationWorker) publish(ctx context.Context, row PendingEvalua
 	// proposal — the deterministic verdict is the stronger, cheaper answer.
 	if w.rejudge != nil {
 		if _, err := w.rejudge.ForRelease(ctx, row.ReleaseID); err != nil {
+			return err
+		}
+	}
+	if w.scope != nil {
+		if _, err := w.scope.ForRelease(ctx, row.ReleaseID, productID, projectID); err != nil {
 			return err
 		}
 	}

@@ -1,6 +1,6 @@
 # EDR-SYNC-01 — One decision, chosen scope: a CVE assessment applied across the projects of a product
 
-Status: **PROPOSED — 2026-11-03, awaiting owner acceptance before any code (beta period)**
+Status: **ACCEPTED — 2026-11-03 (owner merged PR #222; "go s1" the same day). S1 built 2026-11-03, see Realization notes.**
 Date: 2026-11-03
 Author: the design discussion of 2026-11-03 (thread "Nessus report intake"); owner picked
 "scope at decision time" over "auto copy" and "proposals only" the same day.
@@ -147,6 +147,32 @@ with the owner's own case (two projects of one product, same version, same CVE: 
 scope `product` on A → B shows the Position within a sweep, recorded against the same person,
 with the "applied from" line; a third project's later upload gets it at evaluation). Beta-period
 change: each step ships only on the owner's explicit go.
+
+## Realization notes
+
+### Step S1 (2026-11-03) — scope on the decision, propagation, preview
+
+- **The Position row is the queue**, not a `scoped_decisions` table: `finding_positions` gained
+  `scope`, `propagated_from_finding`, `propagated_from_version`, `scope_applied_at` (governance
+  migration 000023). A scoped Position with `scope_applied_at IS NULL` is pending; the sweep
+  (`THEMIS_SCOPE_SWEEP_INTERVAL`, 1m) marks it after one successful pass and any failure leaves
+  it pending. Written in the accept's own transaction, so a decision and its queue entry cannot
+  disagree. A propagated Position is **born applied** — D6's "never a source" is structural.
+- `release` scope is stored as `""`, so every pre-record Position reads back as release-scoped
+  with no data migration.
+- Propagation is an ordinary accept in the person's name: proposal
+  `scoped:<target>:<source>:v<n>` (Asserted — the person's claim, not a rule's), accepted at
+  once with the source's terms (review_by, owner, treatment, proof) and `PropagatedFrom`. The
+  usual notes fire, so Communication and the SLA clocks see it like any decision.
+- Two roads, one target rule: the sweep walks the source Faultline's siblings
+  (`ScopePropagation.Targets`, shared with `GET /findings/{id}/scope-targets`); the
+  release-evaluation worker walks a new release's undecided Findings looking for a standing
+  scoped source, **before** roll-forward so roll-forward sees them decided. Disagreeing standing
+  sources apply nothing and are counted (`conflicts` in the sweep report); the D5
+  `scope_conflict` flag on the Finding is S3.
+- No Registry seam ⇒ no scope: the node logs it at startup and the preview answers 503.
+- Still open: S2 (GUI picker, preview count, "applied from" line), S3 (re-decision follow,
+  `scope_withdrawn`, `scope_conflict` flags).
 
 ## What this record does NOT decide
 

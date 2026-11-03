@@ -142,7 +142,9 @@ unblocks the most, highest first:
     accepted · unknown), page + API. C: `rescan_due` when a fix is known `THEMIS_RESCAN_AFTER`
     (7d) with no newer evidence. Patched is proven only by new evidence; nothing auto-decides.
 
-14. **SYNC-1 — one decision, chosen scope** (EDR-SYNC-01, **PROPOSED 2026-11-03**; owner picked
+14. **SYNC-1 — one decision, chosen scope** (EDR-SYNC-01, **ACCEPTED 2026-11-03; S1 BUILT
+    2026-11-03** — scope on the decision, sweep + worker propagation, `scope-targets` preview,
+    governance migration 23; S2 GUI and S3 follow/flags open; owner picked
     "scope at decision time" over auto-copy and proposals-only). A decision carries a scope
     (`release` default · `project` · `product`); Themis establishes the same Position, recorded
     against the same person, on every same-CVE same-component Finding in scope — now, on a 1m
