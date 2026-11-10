@@ -1,125 +1,19 @@
-# Tasks — phase3-report-intake
+# Tasks — phase3-pending-tests
 
-Source of truth: `docs/engineering/decisions/EDR-INTAKE-01.md`. Every group ends by making
-`make vet-tags` green (a tagged file is invisible to the default build and rots silently).
+No `specs/` deltas — archive with `openspec archive phase3-pending-tests --skip-specs -y`.
 
-## Group 1 — Detection and the converter registry (D4, D5) — M3's foundation, built first
+Each task below was moved here **verbatim** from the change named in its section, on 2026-11-10,
+so that change could be archived with its built code. The task numbers keep their original
+numbering, so a reference in an EDR or a PR still finds them.
 
-- [x] 1.1 `internal/evidence/adapters/report/registry.go`: `Detect(contentType string, body []byte)
-      (Kind, Dialect, error)` implementing D5's closed table, and a `Converter` port
-      `Convert(body []byte, observedAt time.Time) (curated []byte, Stats, error)`.
-      Tests: one case per table row **plus** the unrecognised row; the array-shaped Cortex body from
-      the 2026-10-05 incident is a named fixture, because it is the regression this change exists for.
-- [x] 1.2 `report/curated.go` — pass-through + `scannerRecord` schema validation (the E1 half).
-- [x] 1.3 `report/cortex.go` — **ported**, not reimplemented, from
-      `scripts/cortex-csv-to-scan-report.sh`. Both containers: CSV (RFC 4180, multi-line quoted
-      fields — a 1264-physical-line export is 557 logical rows) and the JSON array. Must carry over
-      every judgement the 2026-09-10 case paid for: ecosystem from the purl, the `(\.|\+)el[0-9]`
-      RPM-build inference for `APP` rows (KN-SCAN-3b), `origin_package_name` → `component.source`,
-      `fix_versions` split on `[;,]` for CSV and taken as a list for JSON, `Unknown` severity → "".
-- [x] 1.4 **The equivalence gate (D4).** A fixture corpus under `report/testdata/` and a test that
-      runs the **existing Python script** and the Go converter over each fixture and asserts
-      **byte-identical** curated output. This gate is the whole reason the port is safe; it closes
-      GUI-10. Fixtures must include a real Cortex CSV slice, the JSON array, an `APP`/el8 row, a
-      multi-version `fix_versions`, and a row with no purl.
-- [x] 1.5 `report/trivy.go` — ported from the browser's `translateTrivy` (EDR-GUI-01 D16), with the
-      same equivalence approach (the JS output on committed fixtures is the oracle).
-- [x] 1.6 `observedAt` derivation per dialect (D3): Cortex `max(last_observed)` (epoch **ms**),
-      Trivy `CreatedAt` when present, curated `max(observed_at)`; **never `now`** —
-      `ErrObservedAtUnderivable` when none and none supplied. Property test: `Convert` is pure in
-      (bytes, observedAt).
+## Section 1 — from `phase3-report-intake` (EDR-INTAKE-01)
 
-## Group 2 — Domain, app, and the validation taxonomy (D6, D7, D11)
+The intake door (`POST /intake`, groups 1–4) is built and merged (#138–#141). What is left is
+proof: the gate, the live estate round, the contract test matrix, and the D10 follow-through.
 
-- [x] 2.1 `domain/intake.go`: `RejectReason` as a closed enum (D11's twelve), `Receipt` with its
-      state machine (`accepted → validating → converting → registering → filed` | `rejected` |
-      `failed`), and `Provenance` gaining `SourceDigest`, `ConvertedBy`, `WithoutSBOM`. Domain
-      tests: every transition legal/illegal; a terminal receipt is immutable.
-- [x] 2.2 `app/intake.go`: `IntakeService.Intake` in the design's step order (size → detect →
-      resolve → convert → schema → SBOM-first → file), with the **first failure winning** and
-      **nothing filed until step 7**. New ports: `ReleaseResolver` (D7, read-only) and
-      `InventoryReader` (D6). Tests through fakes: one per reason, plus the ordering assertion that
-      an invalid-and-early report reports `schema_invalid`, not `no_inventory_for_release`.
-- [x] 2.3 `TestIntakeReasonTaxonomyIsClosed` — fails when the enum grows without the spec and the
-      dashboard being updated in the same change. #116 cost: a consumer knowing 6 of 15 reasons
-      asserted "no reason given" for the other nine.
-- [x] 2.4 **`trust.Gate` curated-shape check for `kind=scanner-report`** — the cheap half of E1 on
-      the OLD door (`POST /evidence`), so the poison class is unreachable there too. Test: the
-      incident body is refused by the gate.
+- [ ] 4.6 `make check` green.
 
-## Group 3 — Persistence and API (D1, D9, D12)
-
-- [x] 3.1 Migration `000003_intake_receipts` (+ down, reversibility is a task gate):
-      `intake_receipts(intake_id PK, idempotency_key UNIQUE NULL, status, reason, detail,
-      evidence_id NULL, release_id, detected_kind, detected_format, findings_total,
-      findings_skipped, components, source_digest, converted_by, created_at, updated_at)`.
-      Register `evidence/adapters/store` is already in `scripts/check-coverage.sh`; confirm the tier
-      still passes with the new rows.
-- [x] 3.2 `api/evidence.openapi.yaml`: `POST /intake` (raw body + query metadata — see the design's
-      "why the body is raw"), `GET /intake/{intakeId}`, `IntakeReceipt`, `IntakeProblem` with the
-      closed `reason`. Additive only; **`POST /evidence` is unmodified**. Regenerate with
-      `make generate-api-evidence` — handlers are generated, never hand-edited.
-- [x] 3.3 `adapters/http/intake.go` + routing; `reason` → HTTP status per D11's table;
-      `Idempotency-Key` replay returning the original receipt (D12).
-- [x] 3.4 `adapters/store/intake.go`: receipt load/save + `THEMIS_INTAKE_RECEIPT_TTL` retention
-      sweep (default 30d). Receipts are operational records, **not** evidence — they are deletable.
-      Also `FailStaleNonTerminalReceipts`: a receipt advances in the process doing the work, so a
-      crash leaves one stuck non-terminal and only the NEXT process can close it out — run at
-      startup, named `interrupted by restart; resubmit`.
-- [x] 3.5 The `202` slow path (D9): `THEMIS_INTAKE_INLINE_BUDGET` (default `5s`), work continues in a
-      bounded worker, receipt advances. Integration test (`-tags=integration`, embedded Postgres):
-      a forced-slow intake returns `202`, the receipt reaches `filed`, and the evidence exists.
-      The worker is ONE goroutine behind a 64-deep queue, and the fast path does not use it — a
-      backlog that is full answers `503` + `Retry-After` and creates **no** receipt, so the whole
-      request is safe to retry verbatim.
-- [x] 3.6 `next_checks` from `THEMIS_KNOWLEDGE_URL` / `THEMIS_GOVERNANCE_URL` (D10). Absent env →
-      the field is **omitted**, never a broken URL.
-
-## Group 4 — Wiring, docs, and retiring the duplicates (D4)
-
-- [x] 4.1 `cmd/evidence`: wire `ReleaseResolver` + `InventoryReader` onto the registry/evidence
-      store (the `SubjectRef` precedent, `main.go:103` — same pool, `registry` schema co-locates).
-      `deploy/node.env.example` gains the four `THEMIS_INTAKE_*` vars, self-documented (CONVENTIONS R2).
-      Verified already done with group 3 (no change needed): `wiring.EvidenceAPI` passes
-      `subjectref.NewResolver(cfg.Registry)` as the resolver and the evidence store as the
-      `InventoryReader`, and `registryReader` in `cmd/evidence/main.go` is reads-only by
-      construction. `deploy/node.env.example` documents THREE `THEMIS_INTAKE_*` vars because
-      three are what the binary reads (`MAX_BYTES`, `INLINE_BUDGET`, `RECEIPT_TTL`) — D13's
-      `MAX_RECORDS`/`MAX_DEPTH`/`MAX_FIELD` are constants, not env, so documenting a fourth
-      would document a knob that does not exist. `THEMIS_KNOWLEDGE_URL`/`THEMIS_GOVERNANCE_URL`
-      (D10) are documented in the same block.
-- [x] 4.2 `scripts/cortex-csv-to-scan-report.sh` → thin wrapper that POSTs to intake, **same name
-      and CLI** so documented procedures survive. Only after 1.4 is green.
-      Its Python moved **verbatim** to `report/testdata/oracle/cortex_csv_to_scan_report.py` as a
-      frozen test oracle (with a README saying it is on no operator road) and 1.4's live
-      equivalence run now execs it there — so the byte-equality gate survives the rewiring
-      instead of being retired with the script.
-- [x] 4.3 Dashboard: upload posts to intake; **delete** the D16 in-browser translators; keep the
-      file-note UX by reading `findings_total`/`findings_skipped`/`detected_format` from the
-      response. `make js-check` green.
-      `translateTrivy` + `TRIVY_ECOSYSTEMS` + `detectTranslator` are gone; the translator moved
-      verbatim to `report/testdata/oracle/translate_trivy.js`, where 1.5's oracle now runs it
-      (it used to be extracted from `app.js`, which deleting the function would have broken).
-      Uploads go through the dashboard's own proxy (EDR-GUI-01 D1/D4) — `/api/evidence/intake` is
-      now a `documentPosts` route, so a multi-megabyte body streams instead of hitting the 1 MiB
-      identity buffer (GUI-14). A refusal renders `reason` and `detail` as TWO fields. A **VEX**
-      still takes `POST /evidence`: intake's D5a table does not name that kind, and a door that
-      cannot identify a document must refuse it rather than guess.
-- [x] 4.4 `scripts/gf-upload-sbom.sh` → one intake call per document, keeping `-r` (reuse release).
-      The JSON envelope and its temp file are gone (the body is the artifact), both scripts send
-      `X-API-Key` from `THEMIS_API_KEY` when it is set, and every write uses `--fail-with-body` so
-      a refusal's `reason`/`detail` reaches the operator instead of being swallowed by `-f`.
-- [x] 4.5 TESTING.md § scanner reports rewritten around intake, with the design's curl commands;
-      INSTALLATION.md and API.md updated. BACKLOG: close **GUI-16b**, **GUI-10**, **E11**, and E1
-      for the intake path (E1 stays open for non-scanner kinds on the old door until 2.4 lands).
-      E1 is recorded as **partly** closed in PARITY-GAP: the unreadable-document class is refused
-      by name at the border (and 2.4 put the same check on the old door), while validation against
-      the embedded CycloneDX/SPDX/OpenVEX/CSAF schemas is the half still open. GUI-10 closed **by
-      removal** — there is no JavaScript converter left to test — and GUI-15 was re-shaped to name
-      a Go `Converter` rather than a browser translator.
-- [ ] 4.6 `make check` green; `openspec archive phase3-report-intake --skip-specs -y`.
-
-## Group 5 — Live verification on the estate (the gate that has caught every real defect)
+### Group 5 — Live verification on the estate (the gate that has caught every real defect)
 
 - [ ] 5.1 Re-run the **2026-10-05 body** through intake on the VM: it must be converted and filed
       (427/427), or refused by name — never filed unreadable.
@@ -131,24 +25,13 @@ Source of truth: `docs/engineering/decisions/EDR-INTAKE-01.md`. Every group ends
 - [ ] 5.5 `scripts/vm-verify.sh` clean afterwards, **and** the evidence stream not halted — the
       failure mode this change exists to make impossible.
 
-## Dependencies and sequencing
-
-- **M1 = groups 1 (minus 1.5), 2, 3.1–3.3, 4.1, 4.5.** This alone closes the incident class.
-- **M2 = 3.4–3.6.** Receipts and the slow path.
-- **M3 = 1.5, 4.2–4.4.** Converter consolidation. Until it lands, duplicate converters exist and
-  TESTING.md's one-converter rule is enforced by review rather than by construction — acceptable
-  for one milestone, not indefinitely.
-- **1.4 gates 4.2.** Do not rewire the script before the Go converter is proven byte-equivalent;
-  that ordering is what keeps the 2026-09-10 false-positive class from recurring with better
-  ergonomics.
-
-## Group 6 — The intake contract test matrix (review gate, 2026-10-09)
+### Group 6 — The intake contract test matrix (review gate, 2026-10-09)
 
 Adopted verbatim from the architecture review as the **implementation approval gate**. Every check
 is a test, not a manual step. Grouped as the review grouped them; the EDR decision each one defends
 is named so a failing check points at a contract, not just a line.
 
-### Format identification (D5a)
+#### Format identification (D5a)
 
 - [ ] 6.1 Valid SPDX JSON and CycloneDX JSON are identified as SBOMs.
 - [ ] 6.2 Valid Trivy JSON, Cortex JSON and Cortex CSV are each identified as their own dialect.
@@ -158,7 +41,7 @@ is named so a failing check points at a contract, not just a line.
       and an ambiguous body are each refused — `unrecognised_format` or `source_invalid`, never
       admitted as "probably a scanner report".
 
-### Cardinality and conversion (D5b, CONVENTIONS R5)
+#### Cardinality and conversion (D5b, CONVENTIONS R5)
 
 - [ ] 6.5 An **empty** Cortex array is refused (`empty_report`) **without indexing element zero** —
       the 0/1/>1 cardinalities, and 0 is the one that panics.
@@ -169,7 +52,7 @@ is named so a failing check points at a contract, not just a line.
 - [ ] 6.8 Missing, duplicate and ambiguous component identities preserve EDR-IDENTITY-01 D6:
       exactly-one match resolves, anything else **abstains**. No invented identities.
 
-### Timestamp and idempotency (D3)
+#### Timestamp and idempotency (D3)
 
 - [ ] 6.9 Same bytes + same effective timestamp → byte-identical output (property test: `Convert`
       is pure in `(bytes, observedAt)`).
@@ -181,7 +64,7 @@ is named so a failing check points at a contract, not just a line.
       (`created=true`), and **the same source after a converter-version bump still dedups** —
       the defect the review found. `force_reconvert=true` is the only way to refile it.
 
-### Inventory and processing (D6, D10)
+#### Inventory and processing (D6, D10)
 
 - [ ] 6.13 No SBOM for the release → `no_inventory_for_release`, naming what to upload first.
 - [ ] 6.14 **No `inventory_not_ready` state exists** — asserted, not assumed: a test proves the
@@ -191,7 +74,7 @@ is named so a failing check points at a contract, not just a line.
 - [ ] 6.16 A successful upload is distinguishable from downstream completion: a terminal receipt
       says `filed`, **never** "correlated", and carries `next_checks`.
 
-### Immutability and recovery (D13)
+#### Immutability and recovery (D13)
 
 - [ ] 6.17 Invalid input creates **no** evidence row and **no** outbox note — only a `rejected`
       receipt.
@@ -207,7 +90,7 @@ is named so a failing check points at a contract, not just a line.
 estate round. 6.5, 6.7 and 6.12 are the three that encode defects already paid for; if time
 pressure forces triage, those three are not negotiable.
 
-## Group 7 — The three verification points (review, second pass 2026-10-09)
+### Group 7 — The three verification points (review, second pass 2026-10-09)
 
 Raised as pre-publication conditions on D3/D3a/D5b. Each is a test, and each defends a property
 that a happy-path demo would not exercise.
@@ -240,14 +123,14 @@ that a happy-path demo would not exercise.
       `source_invalid` naming index **47**. A general "invalid input is refused" test passes without
       ever reaching element 47, which is exactly how this class survived the first draft.
 
-## Group 8 — The two approval proof obligations (review, third pass 2026-10-09)
+### Group 8 — The two approval proof obligations (review, third pass 2026-10-09)
 
 The reviewer's standing condition: **evidence for the uniqueness-conflict response path, and for the
 downstream effects of deliberate reconversion.** Neither is satisfied by a declaration. Approval is
 gated on these, and the principle the review generalized applies throughout — *test the specific
 counterexample that motivated the rule, not a broad success or failure condition*.
 
-### 8.1–8.2 The uniqueness-conflict response path (D3)
+#### 8.1–8.2 The uniqueness-conflict response path (D3)
 
 - [ ] 8.1 **A source-digest conflict must read as an ordinary duplicate, not a persistence
       failure.** Today `Save` resolves the benign case via `errors.Is(err, pgx.ErrNoRows)`
@@ -268,7 +151,7 @@ counterexample that motivated the rule, not a broad success or failure condition
       source-digest branch; (c) pass-through rows (empty `source_digest`) are **outside** the index
       and unaffected, which is what keeps `POST /evidence` behaviour unchanged.
 
-### 8.3–8.4 Downstream effects of deliberate reconversion (D3a)
+#### 8.3–8.4 Downstream effects of deliberate reconversion (D3a)
 
 - [ ] 8.3 **Occurrence cardinality across a reconversion — the measurement, not the assertion.**
       `faultline_matches` is keyed `(release_id, faultline_id, component_purl)` with **no evidence
@@ -293,7 +176,7 @@ counterexample that motivated the rule, not a broad success or failure condition
 until 8.3 is measured on a real estate, `force_reconvert` stays out of documented remediation
 procedure. Neither blocks M1, which does not ship `force_reconvert`.
 
-## Group 9 — D10 correction follow-through (2026-10-09, post-merge)
+### Group 9 — D10 correction follow-through (2026-10-09, post-merge)
 
 D10's "no correlation-complete signal exists" limit was stale on the day this change merged: PR #129
 shipped `knowledge.release_correlation_completed.v1` on 2026-10-07, keyed by `sbom_id`. Verified
@@ -312,3 +195,16 @@ shipped `knowledge.release_correlation_completed.v1` on 2026-10-07, keyed by `sb
       entirely. Not proposed here: the event's schema says it describes one SBOM, and widening a
       published integration-contract v1 belongs to its author. **This is the question that decides
       whether 9.1 and 9.2 are two code paths or one.**
+
+## Section 2 — from `phase3-decision-scope-s1` (EDR-SYNC-01 step S1)
+
+The scope API (S1, #223) passed its VM round on 2026-11-03. The GUI scope picker (#226) has not
+had its VM check yet.
+
+- [ ] 4.3 VM: open a finding on a release whose CVE is open on other projects; pick scope
+  product; the preview lists the sibling projects by name; Raise & accept; the sibling's drawer
+  shows "applied from another release" and the scoped proposal within a minute.
+
+## Gate
+
+- [ ] G.1 `make check` green after the last test lands; then archive this change.

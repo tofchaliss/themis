@@ -131,6 +131,9 @@ Live greenfield status → `docs/engineering/PHASE3-STATUS.md`. Backlog → `doc
 
 Live greenfield narrative and the resume point → `docs/engineering/PHASE3-STATUS.md`.
 
+**Open changes (2026-11-10):** `phase3-pending-tests` (the test and VM-check backlog moved out of the
+changes archived that day) and `phase3-outward-actions` (owner decisions + the runtime poller).
+
 ## Archived Phase-3 changes
 
 The greenfield rebuild shipped as these changes, all under `openspec/changes/archive/`. (`phase3-*` changes
@@ -143,12 +146,23 @@ carry **no `specs/` deltas** — EDRs are the source of truth — so each was ar
 | `phase3-knowledge` | M7 — Knowledge / Faultline aggregate + reconciliation | 25/25 | 2026-07-25 |
 | `phase3-knowledge-feeds` | M7+ — real OSV/NVD clients · CVSS-4.0 (D-NVD-2) · source tiers (D-FEED-2) · scanner Proposals | 19/19 | 2026-07-23 |
 | `phase3-governance` | M8 — Findings + append-only Enterprise Positions | 24/24 | 2026-07-25 |
-| `phase3-rollforward` | EDR-ROLLFORWARD-01 — same-CVE roll-forward as a deterministic proposal (artifact/component level, Inferred, worker + re-judge) | 7/8 (3.4 = VM verify) | 2026-10-16 |
+| `phase3-rollforward` | EDR-ROLLFORWARD-01 — same-CVE roll-forward as a deterministic proposal (artifact/component level, Inferred, worker + re-judge) | 8/8 | 2026-11-10 |
 | `phase3-communication` | M9 — Publication aggregate + 6-serializer registry | 22/22 | 2026-07-25 |
 | `phase3-intelligence` | M4 — AI Gateway Δ1 (reactive `recommend_position`) | 37/37 | 2026-07-25 |
 | `phase3-intelligence-d2` | M4 — Δ2: `[Rule → LLM]` dispatch + admission spine + `insufficient` | 9/9 | 2026-07-25 |
 | `phase3-event-infrastructure` | M5 — the platform event bus (`EDR-EVENTBUS-01` D1–D11) | 43/43 | 2026-07-29 |
 | `phase3-trust-model` | the enterprise trust model (`EDR-TRUST-01` T1–T12) — cross-context: Knowledge + Governance + Intelligence | 63/63 | 2026-08-06 |
+| `phase3-component-identity` | KN-SCAN-3b — component identity at intake | 21/21 | 2026-11-10 |
+| `phase3-correlation-sanity` | EDR-CORRELATION-01 D9 — the fan-out guard, `GET /sanity` | 5/5 | 2026-11-10 |
+| `phase3-decision-scope-s1` | EDR-SYNC-01 S1 — decision scope release/project/product | 13/13 (4.3 moved to `phase3-pending-tests`) | 2026-11-10 |
+| `phase3-harness-integration` | EDR-HARNESS-01 — runtime executions as Governance evidence | 15/15 | 2026-11-10 |
+| `phase3-incident-b` | EDR-INCIDENT-01 step B — Watches | 12/12 | 2026-11-10 |
+| `phase3-intelligence-d4a` | Intelligence Δ4a — operational store + LLMOps replay harness | 18/18 | 2026-11-10 |
+| `phase3-intelligence-d4b` | Intelligence Δ4b — autonomy walking skeleton | 16/16 | 2026-11-10 |
+| `phase3-occurrence-verdicts` | KN-VERDICT-1 — per-occurrence verdicts + the ownership bridge | 25/25 | 2026-11-10 |
+| `phase3-range-ecosystem` | EDR-KNOWLEDGE-01 D13–D14 — range statements per ecosystem | 6/6 | 2026-11-10 |
+| `phase3-report-intake` | EDR-INTAKE-01 — the one `POST /intake` door | 21/21 (4.6 + Groups 5–9 moved to `phase3-pending-tests`) | 2026-11-10 |
+| `phase3-vendor-will-not-fix` | EDR-VEX-02 D18–D21 — vendor will-not-fix proposes `accepted_risk` | 5/5 | 2026-11-10 |
 | `phase3-{shared-kernel,evidence}-prescaffold` | pre-scaffold drafts (superseded by the real changes) | — | 2026-07-15 |
 
 Post-M5 parity / VEX / auth / estate / D14 work (parity clusters, EDR-VEX-01 Phase 1–3, EDR-SECURITY-01,

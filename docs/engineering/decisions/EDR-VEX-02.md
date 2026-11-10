@@ -555,7 +555,7 @@ carries. No API change.
 
 Implementation: `reactToApplicabilityCounted` (the raise, beside the `not_affected` path),
 `watchDispositions` (the vendor-fix drift), `scripts/vex-accept-applicable.sh`
-(`--include-will-not-fix`). OpenSpec `openspec/changes/phase3-vendor-will-not-fix`.
+(`--include-will-not-fix`). OpenSpec `openspec/changes/archive/2026-11-10-phase3-vendor-will-not-fix`.
 
 ### D22 — A new release is judged against its cards when its correlation completes (VEX-RAISE-2, 2026-10-17)
 

@@ -942,7 +942,7 @@ and the resume pointer, never item state.
 >
 > **Δ4a GRILLED + DESIGNED (2026-08-24, no code):** the Δ4 split was accepted (Δ4a store+LLMOps first, Δ4b
 > autonomy next). Δ4a's eight decisions are in **EDR-INTELLIGENCE-01 § Δ4a** (D-Δ4a-1…6) and scaffolded as
-> **`openspec/changes/phase3-intelligence-d4a`** (proposal/design/tasks). Net shape: co-locate an operational
+> **`openspec/changes/archive/2026-11-10-phase3-intelligence-d4a`** (proposal/design/tasks). Net shape: co-locate an operational
 > store in the existing `intelligence` DB (capped invocation log · durable golden set · eval reports · version
 > stamp) + an offline live-model eval command — NO DB prompt registry, NO model registry, NO automated
 > promotion, NO scheduled loop, NO CI net. **Δ4a IMPLEMENTED (2026-08-24, 5 groups, `make check-ci` green): store (migrations 000003:
