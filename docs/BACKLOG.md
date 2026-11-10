@@ -175,7 +175,7 @@ file before the next is started.
 > an architecture test that named a reachability wall and asserted nothing (`_ = ex` loop body), and
 > the intake adapter unregistered in `scripts/check-coverage.sh` and therefore silently unmeasured.
 > Open follow-ups: **`HARNESS-COV-1`** and **`HARNESS-SEAM-1`** (§C). See
-> `openspec/changes/phase3-harness-integration/tasks.md`.
+> `openspec/changes/archive/2026-11-10-phase3-harness-integration/tasks.md`.
 
 > **2026-09-30 — `phase3-outward-actions` N-M0 (EDR-DELIVERY-01) implemented.** Governance write
 > routes authorize EXPLICITLY: `delivery:callback` refused on every write, `admin` allowed,
@@ -434,7 +434,7 @@ three angles, and two of them proposed fixes that would not have worked.
 
 - [x] **KN-RANGE-ECO-1 — a card's ranges lose their ecosystem, so a range published for another
   product keeps a Go Finding open (filed and closed 2026-10-16, the measured tail of the KN-GO
-  arc; EDR-KNOWLEDGE-01 D13–D14, `openspec/changes/phase3-range-ecosystem`).** MED,
+  arc; EDR-KNOWLEDGE-01 D13–D14, `openspec/changes/archive/2026-11-10-phase3-range-ecosystem`).** MED,
   false-positive. The 60 open stdlib Findings are 17 CVEs. Thirteen (CVE-2026-56857, -56866,
   -78659/60/63/67/69, -94439/40/48, -97030/31/32) carry `>=0,<1.26.9` and `>=1.27.0-0,<1.27.2`:
   go1.27.1 and 1.26.8 are IN range — genuinely affected, fix in Go 1.27.2 / 1.26.9 — and the
@@ -488,7 +488,7 @@ three angles, and two of them proposed fixes that would not have worked.
 
 - [x] **KN-SANITY-1 — a feed answering with a package's whole history opens every CVE it ever had
   (filed 2026-10-16, closed 2026-10-17; the shape of KN-GO-1; EDR-CORRELATION-01 D9,
-  `openspec/changes/phase3-correlation-sanity`).** MED, false-positive guard. **Done:** the
+  `openspec/changes/archive/2026-11-10-phase3-correlation-sanity`).** MED, false-positive guard. **Done:** the
   fan-out guard flags (never drops) a component whose discovery returns ≥
   `THEMIS_CORRELATION_FANOUT_SUSPECT_AT` (50) distinct CVEs for a version
   `value.VersionParsable` cannot read — `correlation_sanity` row, `GET /sanity`, census section
@@ -517,7 +517,7 @@ three angles, and two of them proposed fixes that would not have worked.
   moved) — never at vulnerability level, and never from a rule's verdict (policy-decided, or a
   human confirming a system proposal — the AI-RF-4b line). The scope-only fixture
   CVE-2026-33006 gets no proposal. The one-time re-judge pass sweeps it for existing Findings
-  (`rollforward_raised`). EDR-ROLLFORWARD-01 D1–D6; `openspec/changes/phase3-rollforward`.
+  (`rollforward_raised`). EDR-ROLLFORWARD-01 D1–D6; `openspec/changes/archive/2026-11-10-phase3-rollforward`.
   **Measured on the VM (2026-10-16):** the pass raised `rollforward:` proposals — ten listed, all
   artifact level, stances affected / not_affected / mitigated, rationale as designed (source
   release, Position v1, decided by human, original reason). Same-project confirmed: 11 proposals
@@ -623,7 +623,7 @@ three angles, and two of them proposed fixes that would not have worked.
   by policy, re-surfaced by the disposition watcher when the vendor's state changes — would make
   the queue reflect what is actually undecided. Design before code; it is a stance the enterprise
   takes, not a vendor fact. **VEX-WNF-1 DONE 2026-10-16** (EDR-VEX-02 amendment D18–D21,
-  `openspec/changes/phase3-vendor-will-not-fix`): an applicable `will_not_fix` / `fix_deferred` /
+  `openspec/changes/archive/2026-11-10-phase3-vendor-will-not-fix`): an applicable `will_not_fix` / `fix_deferred` /
   `out_of_support` raises a system `accepted_risk` proposal (`vexwnf:<finding>:<pkg>`, Asserted,
   never auto-accepted, the vendor's words as rationale); a later applicable `fixed` for the same
   package re-surfaces the acceptance (the RF-2 mark, reason naming build + advisory);
@@ -1607,7 +1607,7 @@ under the 2026-08-07 re-derivation standard.
   "the whole Finding disappears".
   **GRILLED + DESIGNED 2026-09-02 (same session, eight decisions, no code yet):**
   **`docs/engineering/decisions/EDR-VERDICT-01.md`** (D1–D9) is the decision record;
-  **`openspec/changes/phase3-occurrence-verdicts`** (proposal/design/tasks) is the change. Net shape:
+  **`openspec/changes/archive/2026-11-10-phase3-occurrence-verdicts`** (proposal/design/tasks) is the change. Net shape:
   Finding stays one-per-(release,CVE), verdict state moves to the OCCURRENCE (component row) —
   every examined occurrence is RECORDED with a state ("checked and fine" becomes visible; the
   scanner-path gap closes by unifying intake, not by a parallel gate); the ownership bridge runs at
@@ -6310,7 +6310,7 @@ under the 2026-08-07 re-derivation standard.
   filing predicted, and the JSON road is **GUI-16b** below.
 
 - [x] **GUI-16b — the one sanctioned Cortex converter takes CSV only; Cortex also exports JSON
-  (filed 2026-10-06, user ask).** ✅ **CLOSED 2026-10-12** — `openspec/changes/phase3-report-intake`
+  (filed 2026-10-06, user ask).** ✅ **CLOSED 2026-10-12** — `openspec/changes/archive/2026-11-10-phase3-report-intake`
   groups 1–4. **Both containers of a Cortex export are now accepted inputs** to one converter, and
   the converter moved to where a converter belongs: `internal/evidence/adapters/report` behind
   `POST /api/v1/intake` (EDR-INTAKE-01 D1/D4). The CSV and the JSON array are two **request
@@ -6364,7 +6364,7 @@ under the 2026-08-07 re-derivation standard.
   (`max(last_observed)`, epoch **milliseconds** in this export → RFC3339), never a file mtime, or a
   re-conversion produces different bytes and Evidence files a second scan instead of deduping.
   **Dep:** none. **Scope:** SMALL. Related: GUI-16 (CSV road), E1 (ingest validation), KN-SCAN-3b.
-  **Superseded in approach (2026-10-11): folded into `openspec/changes/phase3-report-intake`.**
+  **Superseded in approach (2026-10-11): folded into `openspec/changes/archive/2026-11-10-phase3-report-intake`.**
   EDR-INTAKE-01 D4 moves the one Cortex converter server-side into
   `internal/evidence/adapters/report`; task **1.3** ports the script for **both** the CSV and the JSON
   array, and task **4.2** turns `scripts/cortex-csv-to-scan-report.sh` into a thin wrapper that POSTs

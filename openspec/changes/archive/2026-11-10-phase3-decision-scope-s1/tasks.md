@@ -43,6 +43,5 @@ No `specs/` deltas — archive with `openspec archive phase3-decision-scope-s1 -
   as such; `scope` on the accept body; toast names the scope.
 - [x] 4.2 Current position chips "decided for <scope>" / "applied from another release";
   proposal chips "applied by scope" / "roll-forward". `make js-check` green.
-- [ ] 4.3 VM: open a finding on a release whose CVE is open on other projects; pick scope
-  product; the preview lists the sibling projects by name; Raise & accept; the sibling's drawer
-  shows "applied from another release" and the scoped proposal within a minute.
+- 4.3 → moved to `phase3-pending-tests` (section 2) on 2026-11-10: the GUI picker (#226) still
+  needs its VM check; the scope API passed its VM round on 2026-11-03.

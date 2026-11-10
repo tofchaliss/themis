@@ -33,6 +33,6 @@ No `specs/` deltas — archive with `openspec archive phase3-incident-b --skip-s
 - [x] 4.1 Dashboard `#/watches` (create, list) and `#/watches/{id}` (table, state filter
   chips with counts, CSV export, add identifiers, delete); rail link. `make js-check` green.
 - [x] 4.2 CHANGELOG, EDR-INCIDENT-01 step B realization note, BACKLOG INC-1.
-- [ ] 4.3 VM: migration governance 24; create a Watch from one RHSA id and two CVE ids of the
+- [x] 4.3 VM (passed 2026-11-03: API and GUI): migration governance 24; create a Watch from one RHSA id and two CVE ids of the
   estate; the table lists every project's release with the expected states; CSV export;
   an unseen RHSA shows `unknown`.

@@ -112,4 +112,4 @@ Implementation: `internal/governance/domain/rollforward.go` (D3, D4),
 `internal/governance/app/rollforward.go` (D1, D2, D5), `worker_release_evaluation.go` and
 `rejudge.go` hooks (D5), `store.UndecidedFindingsByRelease`. Fixture:
 `TestRollForward_DoesNotProposeAcrossProjectsRulesOrPackages` (scope-only target, CVE-2026-33006).
-OpenSpec: `openspec/changes/phase3-rollforward`.
+OpenSpec: `openspec/changes/archive/2026-11-10-phase3-rollforward`.

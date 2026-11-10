@@ -694,7 +694,7 @@ blocks M1, which does not ship `force_reconvert`.
 Corrected before implementation started, so no code was written against the wrong assumption.
 
 The reviewer's 20-check contract matrix is adopted as the implementation gate and mapped into
-`openspec/changes/phase3-report-intake/tasks.md` group 6.
+`openspec/changes/archive/2026-11-10-phase3-report-intake/tasks.md` group 6.
 
 **2026-10-12 — Bot-friendly intake: a version may be created, and Registry identity becomes
 idempotent.**
