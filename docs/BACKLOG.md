@@ -349,6 +349,13 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### A. Milestones not yet implemented (in dependency order)
 
+- [ ] **Layered CVSS scoring** (id `KN-CVSS-LAYERS-1`, S3 severity: the shown score does not
+  match the vendor's or CNA's for the component). EDR-SCORING-01 (PROPOSED 2026-11-20; domain
+  model accepted by the owner 2026-11-19) + `openspec/changes/phase3-cvss-scoring`. Steps S1-S8,
+  one PR each on the owner's go; S1-S5 (calculator, source ratings, CR/IR/AR, per-component
+  assessment in shadow, read-only GUI panel) change no existing behaviour. Depends on
+  EV-CURRENT-SBOM-1 (removal), GUI users and roles (S6 only).
+
 - [x] **M4 Δ1 — Intelligence (AI Gateway) walking skeleton** — `phase3-intelligence`, `EDR-INTELLIGENCE-01`
   (Revision 2, D1–D13). **IMPLEMENTED + gated** (2026-07-18): one reactive capability `recommend_position`
   (affected/not-affected triage) end-to-end, pure Go, **disable-able** (D13 no-op gate) — `internal/intelligence/
