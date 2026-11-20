@@ -5,7 +5,7 @@ how the steps map onto the code.
 
 - **Kernel (S1).** A pure package beside `internal/kernel/value/cvss.go`: parse to a metric set
   that keeps X, compute the three scores with the 3.1 Roundup (3.0 rounding for 3.0 vectors),
-  refuse with a reason. `BaseScoreFromVector` keeps its signature and is re-implemented on top.
+  refuse with a reason. `BaseScoreFromVector` and today's headline score are left unchanged in S1 (no behaviour change); S2 decides whether the headline moves onto the new calculator.
   100% coverage; property tests (rapid) for monotonicity and X-equals-default; the official
   examples plus FIRST-checked vectors as table tests.
 - **Knowledge (S2).** New tables beside the Proposals (append-only, never updated): observations,
