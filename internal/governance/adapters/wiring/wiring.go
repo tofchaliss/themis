@@ -72,6 +72,10 @@ type Governance struct {
 	// THEMIS_SCOPE_SWEEP_INTERVAL. Nil without a Registry seam — the owners of a release cannot
 	// be resolved, so a scoped decision stays pending, visibly, rather than guessed at.
 	Scope *app.ScopePropagation
+	// Scores is the CVSS assessment re-assessment sweep (EDR-SCORING-01 S4, shadow): the
+	// composition root runs it on THEMIS_SCORE_SWEEP_INTERVAL. Nil without a Knowledge seam —
+	// the source ratings live there, so there is nothing to assess.
+	Scores *app.ScoreSweep
 }
 
 // Wire builds the Governance components over the given pool, outbox publisher, an optional
@@ -168,6 +172,19 @@ func Wire(
 		watches = watches.WithEvidence(ev)
 	}
 	handler = handler.WithWatches(watches)
+	// The CVSS assessment (EDR-SCORING-01 S4, shadow): source ratings and the card from
+	// Knowledge, CR / IR / AR from Registry when wired (else X). It writes only its own
+	// revisions; priority, SLA and Positions never read them (EDR 8.6).
+	var scores *app.ScoreSweep
+	if kn != nil {
+		var reqs app.RequirementsReader
+		if reg != nil {
+			reqs = reg
+		}
+		svc := app.NewScoreService(st, kn, kn, reqs, st, sysClock{})
+		handler = handler.WithScores(svc)
+		scores = app.NewScoreSweep(svc)
+	}
 	// The release-evaluation worker (N-M2b) — the half of the path that may fail. The inbound
 	// consumer only records a pending row; this resolves the Release's owners, counts its
 	// Findings and publishes. Without a Registry seam there is nothing to resolve them WITH, so
@@ -210,6 +227,7 @@ func Wire(
 		SLA:          sla,
 		FixAvailable: app.NewFixAvailableSweep(st, sysClock{}),
 		Scope:        scope,
+		Scores:       scores,
 	}
 }
 

@@ -8,8 +8,8 @@
 // each level, and that the down migration really drops them.
 //
 // These tests move the schema between versions 2 and 3, because version 2 is the only shape in
-// which a duplicate can be seeded at all. Every one of them restores version 3 afterwards
-// through golang-migrate, which is also what proves the driver executes the file's explicit
+// which a duplicate can be seeded at all. Every one of them restores the latest version
+// afterwards through golang-migrate, which is also what proves the driver executes the file's explicit
 // BEGIN/COMMIT as written.
 //
 // The embedded-Postgres harness lives in store_integration_test.go (TestMain, testDSN, newPool,
@@ -108,7 +108,7 @@ func migrateTo(t *testing.T, v uint) {
 }
 
 // withoutUniquenessIndexes takes the schema back to version 2 for the duration of the test and
-// restores version 3 afterwards, from whatever state the test left behind: the tables are
+// restores the latest version afterwards, from whatever state the test left behind: the tables are
 // emptied first (a refusal test deliberately leaves duplicates, which the pre-flight would
 // refuse again), the indexes dropped, and the version forced back to 2 — which also clears the
 // `dirty` flag golang-migrate sets when the pre-flight raises.
@@ -124,8 +124,11 @@ func withoutUniquenessIndexes(t *testing.T, pool *pgxpool.Pool) {
 		if err := m.Force(preUniquenessVersion); err != nil {
 			t.Fatalf("restore: force %d: %v", preUniquenessVersion, err)
 		}
-		if err := m.Migrate(uniquenessVersion); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-			t.Fatalf("restore: migrate to %d: %v", uniquenessVersion, err)
+		// Back to the LATEST version, not to 3: stopping at 3 left every later migration's
+		// tables dropped for the tests that run after this one (registry_tags,
+		// registry_security_requirements).
+		if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+			t.Fatalf("restore: migrate up: %v", err)
 		}
 	})
 	migrateTo(t, preUniquenessVersion)

@@ -501,6 +501,9 @@ components:
           type: string
         revision:
           type: string
+        fingerprint:
+          type: string
+          description: The canonical content fingerprint; identifies the revision when the source states none.
         updated_at:
           $ref: '#/components/schemas/SourceTime'
         complete:
@@ -528,6 +531,11 @@ components:
           type: string
         assessor:
           type: string
+        assessor_key:
+          type: string
+          description: >
+            The assessor under the linking policy's alias table (one key per organisation, e.g.
+            nvd@nist.gov and NVD both read nvd). Consumers compare assessors by this key.
         publisher:
           type: string
         nvd_type:

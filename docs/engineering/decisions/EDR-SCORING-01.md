@@ -2,7 +2,7 @@
 
 Status: **ACCEPTED — 2026-11-21 (owner merged PR #229).** Domain model accepted by the owner on 2026-11-19 after review rounds v1 to v4.9.7
 (decision of 2026-11-19: selection details and ingestion details SETTLED, O1-O7 closed, lifecycle and
-integration items left OPEN for this record, section 10.3). S1 built 2026-11-21 (kernel calculator). S2 built 2026-11-21 (Knowledge source truth; realization notes in 12.1). S3 built 2026-11-21 (Registry requirements; 12.2).
+integration items left OPEN for this record, section 10.3). S1 built 2026-11-21 (kernel calculator). S2 built 2026-11-21 (Knowledge source truth; realization notes in 12.1). S3 built 2026-11-21 (Registry requirements; 12.2). S4 built 2026-11-21 (Governance assessment in shadow; 12.3).
 Date: 2026-11-20
 Author: the CVSS scoring design discussion of 2026-11-17 to 2026-11-19.
 
@@ -983,6 +983,67 @@ choice the model left to the build, or a gap still open.
    affected Findings and recalculate as new revisions) is Governance's: Registry has no event
    outbox, so S4 reads the resolved requirements over the read seam, records the records it used,
    and a different current record is its `requirement_changed` trigger.
+
+### 12.3 S4 realization notes (2026-11-21)
+
+1. **Where it lives.** The selection (4.1-4.1b), the roll-up (6) and the cause rule are pure
+   Governance domain code (`cvss_select.go`, `cvss_context.go`, `cvss_rollup.go`,
+   `cvss_cause.go`), tested with the cases of section 11 at 100% coverage. The app ring
+   (`ScoreService`) reads Knowledge's `GET /faultlines/{id}/ratings`, the card (KEV, fixes) and
+   Registry's resolved requirements over the existing read seams; no cross-context import.
+2. **Policy versions** recorded on every revision: `select-1`, `class-1`, `applicability-1`,
+   `temporal-1`, calculator `kernel-cvss3-1`.
+3. **Applicability policy `applicability-1`.** An effective context is a list of items. A CPE
+   whose product scope can be placed is compared with the component's own scope (the kernel
+   `ProductScope` used by EDR-VEX-02): same family and major applies, a known different one does
+   not apply, an unplaceable component leaves it unresolved. Any other item applies only when one
+   of its parts equals the component's name, source package or purl name. An inherited product
+   list that does not name the component is `unresolved`, never `does_not_apply`. A single
+   **asserted** package naming another package, or another ecosystem, does not apply; a bare
+   asserted ecosystem is too broad (`unresolved`). An empty context is `unresolved`.
+4. **Class policy `class-1`.** Vendor map: family enterprise-linux (RHEL, Rocky, Alma) -> the
+   Red Hat assessor; no other family has a vendor yet. `vendor_platform` needs the context to
+   name the platform (a platform CPE of the component's family) or to **assert** the package: an
+   inherited product list in an NVD copy is not the vendor's platform statement, which keeps the
+   step 6 example (the NVD copy is `cna`). The CNA of a CVE is the assessor of its CVE.org CNA
+   container publications (publisher `cve.org/cna`); `adp` = `cisa-adp`; `nvd_analyst` = `nvd`.
+   Knowledge now exposes the alias-normalised `assessor_key` so Governance compares assessors by
+   one key. The assessor-pair precedence table is empty in this version.
+5. **Context order.** unstated < ecosystem / family < package in that ecosystem. A CPE product, a
+   product name without an ecosystem, a platform CPE against an ecosystem, and any list are
+   incomparable (never ranked).
+6. **Unresolved and not calculable.** An unresolved candidate whose vector is unsupported or
+   invalid is treated like one with no vector: disposition `unresolved`, contribution none, and
+   it sets `same_class_unresolved` where D10 / D28 row d would. This is the conservative reading:
+   the uncertainty stays visible and never drops a condition.
+7. **Temporal policy `temporal-1`** (O2): RL:O is accepted by policy when a published fix is
+   attributable to this open component (the same rule as the Finding's fix list); KEV proposes
+   E:F, which stays X. The assessment vector is the source vector's Base metrics plus the
+   assessment's own temporal and environmental values; a source vector's temporal metrics are
+   never used (4.3).
+8. **Triggers and idempotency (8.2, 8.3, R-H2).** In shadow, one re-assessment sweep re-reads
+   every Finding's inputs (at startup, then every `THEMIS_SCORE_SWEEP_INTERVAL`, default 6h; one
+   read per card and per release per run). A revision is written only when the snapshot's content
+   fingerprint differs from the current one, so a re-delivered or repeated trigger writes nothing.
+   The cause is derived from the difference, in a fixed order: `component_added`,
+   `calculator_changed`, `selection_policy_changed`, `temporal_policy_changed`,
+   `eligibility_changed`, `applicability_changed`, `requirement_changed`, `source_added`,
+   `source_withdrawn`, `identity_relinked`, `classification_changed`, `temporal_accepted`, else
+   `source_corrected`. Event-driven triggers (shorter delay) are a follow-up before S7; the
+   priority switch needs them.
+9. **Membership.** A retired component gets no new assessment revision; the roll-up gets one with
+   cause `component_removed`.
+10. **Store and API.** Migration 000025: `component_score_revisions` and
+    `finding_score_revisions`, append-only, JSONB snapshot (the complete candidate evaluation of
+    8.1), numbered per component and per Finding under an advisory lock. `GET
+    /findings/{id}/score` serves the current roll-up, the current revision per current component
+    and the history. 200 without a roll-up means "not yet assessed".
+11. **Failures.** A failed read (Knowledge, Registry, the store) writes nothing for that Finding:
+    an assessment is never built from partial inputs. Without a Registry seam every requirement
+    is X at level `default`.
+12. **Known gaps.** A component whose platform cannot be placed (no `.elN` marker and no `distro=`
+    qualifier) gets no `vendor_platform` rating. An RPM sub-package matches a product list only
+    through its source package. Both read as `unresolved` (provisional), never as a hidden score.
 
 ---
 

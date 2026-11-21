@@ -18,5 +18,6 @@ how the steps map onto the code.
 - **Governance (S4).** ComponentAssessment revisions keyed by (finding, purl), immutable, with the
   complete candidate snapshot (EDR 8.1) as JSONB; roll-up revisions per Finding. Triggers arrive
   through the existing Knowledge / Evidence / Registry events and read seams; no cross-context
-  import. Read API `GET /findings/{id}/score`. Nothing reads it for priority yet (shadow).
+  import. Read API `GET /findings/{id}/score`. Nothing reads it for priority yet (shadow). Built
+  2026-11-21: migration 000025, re-assessment sweep `THEMIS_SCORE_SWEEP_INTERVAL` (EDR 12.3).
 - **GUI (S5).** Dashboard reads the provenance API; numbers are never computed in the browser.

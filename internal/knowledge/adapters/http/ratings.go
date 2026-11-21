@@ -45,7 +45,8 @@ func toRatings(v app.RatingsView) gen.SourceRatings {
 	for _, o := range v.Observations {
 		out.Observations = append(out.Observations, gen.SourceObservation{
 			Id: o.ID, Source: o.Source, Feed: o.Feed, DocumentRef: o.DocumentRef, Revision: optString(o.Revision),
-			UpdatedAt: toSourceTime(o.UpdatedAt), Complete: o.Complete, Applicability: optStrings(o.Applicability),
+			Fingerprint: optString(o.Fingerprint),
+			UpdatedAt:   toSourceTime(o.UpdatedAt), Complete: o.Complete, Applicability: optStrings(o.Applicability),
 			SeverityWord: optString(o.SeverityWord), FirstObservedAt: o.FirstObservedAt,
 		})
 	}
@@ -53,7 +54,8 @@ func toRatings(v app.RatingsView) gen.SourceRatings {
 		r := rv.Rating
 		g := gen.SourceRating{
 			Id: r.ID, ObservationId: r.ObservationID, Source: r.Source, Feed: r.Feed, Assessor: r.Assessor,
-			Publisher: optString(r.Publisher), NvdType: optString(r.NVDType), CvssVersion: r.Version, Vector: r.Vector,
+			AssessorKey: optString(domain.NormaliseAssessor(r.Assessor)),
+			Publisher:   optString(r.Publisher), NvdType: optString(r.NVDType), CvssVersion: r.Version, Vector: r.Vector,
 			SeverityWord: optString(r.SeverityWord), AssertedContext: optString(r.AssertedContext),
 			InheritedContext: optString(r.InheritedContext), EffectiveContext: optString(r.EffectiveContext()),
 			RecordedAt: r.RecordedAt, Status: gen.SourceRatingStatus(rv.Status),
