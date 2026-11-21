@@ -113,10 +113,10 @@ func TestCVEOrgObservation(t *testing.T) {
 	if len(obs.Ratings) != 3 {
 		t.Fatalf("ratings: %+v", obs.Ratings)
 	}
-	if r := obs.Ratings[0]; r.Assessor != "redhat" || r.Publisher != "cve.org" || r.Version != "3.1" {
+	if r := obs.Ratings[0]; r.Assessor != "redhat" || r.Publisher != feed.CVEOrgPublisherCNA || r.Version != "3.1" {
 		t.Errorf("cna: %+v", r)
 	}
-	if r := obs.Ratings[1]; r.Assessor != "134c704f-9b21-4f2e-91b3-4a467353bcc0" || r.Version != "4.0" {
+	if r := obs.Ratings[1]; r.Assessor != "134c704f-9b21-4f2e-91b3-4a467353bcc0" || r.Version != "4.0" || r.Publisher != feed.CVEOrgPublisherADP {
 		t.Errorf("adp v4: %+v", r)
 	}
 	if r := obs.Ratings[2]; r.Version != "3.1" || r.StatedScore != 9.8 {

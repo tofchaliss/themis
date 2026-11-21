@@ -126,9 +126,12 @@ func CVEOrgObservation(body []byte) (domain.ObservationInput, bool, error) {
 			obs.Applicability = append(obs.Applicability, s)
 		}
 	}
-	obs.Ratings = append(obs.Ratings, cveOrgRatings(rec.Containers.CNA)...)
+	// The container a rating sits in is WHERE it was published, so it is the publisher: the
+	// CNA container's assessor is the CVE's CNA (EDR 4.1 relationship table), which Governance
+	// reads from this publisher value rather than guessing it from a name.
+	obs.Ratings = append(obs.Ratings, cveOrgRatings(rec.Containers.CNA, CVEOrgPublisherCNA)...)
 	for _, adp := range rec.Containers.ADP {
-		obs.Ratings = append(obs.Ratings, cveOrgRatings(adp)...)
+		obs.Ratings = append(obs.Ratings, cveOrgRatings(adp, CVEOrgPublisherADP)...)
 	}
 	return obs, true, nil
 }
@@ -143,7 +146,13 @@ func cveOrgProduct(vendor, product, pkg string) string {
 	return strings.Join(parts, ":")
 }
 
-func cveOrgRatings(c cveOrgContainer) []domain.PublishedRating {
+// Publishers of CVE.org ratings: the record's CNA container and its ADP containers.
+const (
+	CVEOrgPublisherCNA = "cve.org/cna"
+	CVEOrgPublisherADP = "cve.org/adp"
+)
+
+func cveOrgRatings(c cveOrgContainer, publisher string) []domain.PublishedRating {
 	assessor := strings.TrimSpace(c.ProviderMetadata.ShortName)
 	if assessor == "" {
 		assessor = strings.TrimSpace(c.ProviderMetadata.OrgID)
@@ -162,7 +171,7 @@ func cveOrgRatings(c cveOrgContainer) []domain.PublishedRating {
 				version = x.version
 			}
 			out = append(out, domain.PublishedRating{
-				Assessor: assessor, Publisher: "cve.org", Version: version, Vector: x.cvss.VectorString,
+				Assessor: assessor, Publisher: publisher, Version: version, Vector: x.cvss.VectorString,
 				StatedScore: x.cvss.BaseScore, HasStatedScore: true, SeverityWord: x.cvss.BaseSeverity,
 			})
 		}
