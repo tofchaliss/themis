@@ -34,6 +34,8 @@ type Handler struct {
 	// sanity serves the fan-out guard's flags (KN-SANITY-1). nil ⇒ GET /sanity answers an empty
 	// list with a header saying the guard is not wired, never "all clear" by accident.
 	sanity app.SanityReader
+	// ratings serves GET /faultlines/{id}/ratings (EDR-SCORING-01 S2). nil ⇒ 503.
+	ratings *app.RatingService
 }
 
 // WithSanity wires the fan-out guard's flag reader (KN-SANITY-1).

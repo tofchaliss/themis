@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -57,7 +58,10 @@ var _ app.RockyFixSource = (*RockyClient)(nil)
 type rockyAdvisoryPage struct {
 	Advisories []struct {
 		Name string `json:"name"`
-		Cves []struct {
+		// Severity is the advisory's word ("Important", or Apollo's "SEVERITY_IMPORTANT"). It
+		// has no score, so it is kept as observation metadata only (EDR-SCORING-01 O1).
+		Severity string `json:"severity"`
+		Cves     []struct {
 			Name string `json:"name"`
 		} `json:"cves"`
 		Rpms map[string]struct {
@@ -169,6 +173,7 @@ func (c *RockyClient) VulnsForCVE(ctx context.Context, cve value.CVEID) (app.CVE
 		return app.CVEFacts{}, err
 	}
 	var fixes []domain.FixedVersion
+	var words []string
 	seen := map[string]struct{}{}
 	for _, adv := range pg.Advisories {
 		if !rockyIsSecurityAdvisory(adv.Name) {
@@ -178,6 +183,9 @@ func (c *RockyClient) VulnsForCVE(ctx context.Context, cve value.CVEID) (app.CVE
 		// Only an advisory that actually lists this CVE states a fix for it.
 		if !rockyAdvisoryCovers(adv.Cves, cve) {
 			continue
+		}
+		if w := rockySeverityWord(adv.Severity); w != "" {
+			words = append(words, w)
 		}
 		for _, product := range adv.Rpms {
 			for _, nvra := range product.Nvras {
@@ -206,7 +214,35 @@ func (c *RockyClient) VulnsForCVE(ctx context.Context, cve value.CVEID) (app.CVE
 	if err != nil {
 		return app.CVEFacts{}, err
 	}
+	p = p.WithObservation(domain.ObservationInput{
+		Source: "rocky", Feed: "rocky-apollo", DocumentRef: "rocky:" + cve.String(), Complete: true,
+		SeverityWord: strings.Join(sortedUnique(words), ","),
+	})
 	return app.CVEFacts{Proposal: app.ProposalFor{CVE: cve, Proposal: p}, Found: true}, nil
+}
+
+// rockySeverityWord normalises an advisory severity: "SEVERITY_IMPORTANT" and "important" both
+// read "Important". Empty and Apollo's "unknown" read "".
+func rockySeverityWord(s string) string {
+	s = strings.ToLower(strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(s)), "SEVERITY_"))
+	if s == "" || s == "unknown" {
+		return ""
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+func sortedUnique(in []string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, s := range in {
+		if _, dup := seen[s]; dup {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // rockyIsSecurityAdvisory keeps the security advisory classes and drops everything else the

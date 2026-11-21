@@ -27,6 +27,7 @@ func TestConstructors_Defaults(t *testing.T) {
 
 func TestExtractNVDCVSS_V2TopLevelSeverity(t *testing.T) {
 	m := nvdMetrics{V2: []nvdMetric{{Type: "Primary", BaseSeverity: "HIGH", CVSSData: struct {
+		Version      string  `json:"version"`
 		BaseScore    float64 `json:"baseScore"`
 		BaseSeverity string  `json:"baseSeverity"`
 		VectorString string  `json:"vectorString"`

@@ -213,7 +213,49 @@ func (c *RedHatClient) FetchCVE(ctx context.Context, cve string) ([]app.Proposal
 			out = append(out, app.ProposalFor{CVE: cveID, Proposal: p})
 		}
 	}
+	// The document as source truth (EDR-SCORING-01 S2). It rides the first Proposal: the
+	// vuln-facts one when Red Hat scored the CVE, else any statement Proposal. That is the F11
+	// fix: a complete document that no longer carries cvss3 is still recorded, and its earlier
+	// rating is withdrawn there. (A document with no Proposal at all records nothing.)
+	if len(out) > 0 {
+		out[0].Proposal = out[0].Proposal.WithObservation(redhatObservation(cveID, doc, c.baseURL))
+	}
 	return out, nil
+}
+
+// redhatObservation reads the Red Hat CVE document as one complete revision. Hydra states no
+// revision id or modified date, so the revision is the content fingerprint. The applicability
+// is the distinct product CPEs the document names; the cvss3 rating asserts no context of its
+// own, so it inherits them (D12).
+func redhatObservation(cve value.CVEID, doc redhatCVEDocument, baseURL string) domain.ObservationInput {
+	obs := domain.ObservationInput{
+		Source: "redhat", Feed: "redhat-hydra", DocumentRef: "redhat:" + cve.String(), Complete: true,
+		Fetch: domain.FetchMeta{Endpoint: baseURL + "/cve/" + cve.String() + ".json", HTTPStatus: http.StatusOK},
+	}
+	for _, ps := range doc.PackageState {
+		if cpe := strings.TrimSpace(ps.CPE); cpe != "" {
+			obs.Applicability = append(obs.Applicability, cpe)
+		}
+	}
+	for _, ar := range doc.AffectedRelease {
+		if cpe := strings.TrimSpace(ar.CPE); cpe != "" {
+			obs.Applicability = append(obs.Applicability, cpe)
+		}
+	}
+	if vector := strings.TrimSpace(doc.CVSS3.Vector); vector != "" {
+		r := domain.PublishedRating{
+			Assessor: "redhat", Publisher: "redhat", Version: value.CVSSVectorVersion(vector), Vector: vector,
+			SeverityWord: strings.TrimSpace(doc.ThreatSeverity),
+		}
+		if score, err := strconv.ParseFloat(strings.TrimSpace(doc.CVSS3.BaseScore), 64); err == nil {
+			r.StatedScore, r.HasStatedScore = score, true
+		}
+		if r.Version == "" {
+			r.Version = "3.x"
+		}
+		obs.Ratings = append(obs.Ratings, r)
+	}
+	return obs
 }
 
 // redhatFixStateStatus maps Red Hat's package_state fix_state onto the closed statement set

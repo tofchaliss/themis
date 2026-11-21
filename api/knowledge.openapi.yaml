@@ -150,6 +150,32 @@ paths:
                 type: array
                 items:
                   type: string
+  /faultlines/{id}/ratings:
+    get:
+      operationId: getFaultlineRatings
+      summary: Source CVSS ratings of a Faultline's CVE, one row per publication (EDR-SCORING-01 S2).
+      description: >
+        Source truth only. Every publication any source carried for this CVE, with its derived
+        status (active, superseded, withdrawn), Themis's own validation of its vector, and its
+        assessment identity under the latest grouping. Nothing here is selected or decided;
+        selection belongs to Governance. 503 when this node records no ratings.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceRatings'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /faultlines/gather:
     post:
       operationId: gatherCVE
@@ -435,6 +461,152 @@ components:
           description: Vendor VEX applicability statements held on the card (carried, not applied — Governance decides whether to honor a not_affected for a release).
           items:
             $ref: '#/components/schemas/Applicability'
+    SourceRatings:
+      type: object
+      required: [cve, observations, ratings]
+      properties:
+        cve:
+          type: string
+        observations:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceObservation'
+        ratings:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceRating'
+    SourceTime:
+      type: object
+      description: A source's own timestamp kept as received, its UTC reading, and how it was read.
+      properties:
+        original:
+          type: string
+        instant:
+          type: string
+          format: date-time
+        interpretation:
+          type: string
+          enum: [zone_stated, zone_assumed_utc, unparseable]
+    SourceObservation:
+      type: object
+      required: [id, source, feed, document_ref, complete, first_observed_at]
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+        feed:
+          type: string
+        document_ref:
+          type: string
+        revision:
+          type: string
+        updated_at:
+          $ref: '#/components/schemas/SourceTime'
+        complete:
+          type: boolean
+        applicability:
+          type: array
+          items:
+            type: string
+        severity_word:
+          type: string
+        first_observed_at:
+          type: string
+          format: date-time
+    SourceRating:
+      type: object
+      required: [id, observation_id, source, feed, assessor, cvss_version, vector, status, recorded_at]
+      properties:
+        id:
+          type: string
+        observation_id:
+          type: string
+        source:
+          type: string
+        feed:
+          type: string
+        assessor:
+          type: string
+        publisher:
+          type: string
+        nvd_type:
+          type: string
+        cvss_version:
+          type: string
+        vector:
+          type: string
+        stated_score:
+          type: number
+        severity_word:
+          type: string
+        asserted_context:
+          type: string
+        inherited_context:
+          type: string
+        effective_context:
+          type: string
+        recorded_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, superseded, withdrawn]
+        status_event:
+          $ref: '#/components/schemas/SourceRatingEvent'
+        validation:
+          $ref: '#/components/schemas/RatingValidation'
+        identity:
+          $ref: '#/components/schemas/AssessmentIdentity'
+    SourceRatingEvent:
+      type: object
+      required: [kind, caused_by, learned_at]
+      properties:
+        kind:
+          type: string
+          enum: [superseded, withdrawn]
+        caused_by:
+          type: string
+        replaced_by:
+          type: string
+        source_time:
+          $ref: '#/components/schemas/SourceTime'
+        learned_at:
+          type: string
+          format: date-time
+    RatingValidation:
+      type: object
+      required: [calculator_version, result]
+      properties:
+        calculator_version:
+          type: string
+        spec_version:
+          type: string
+        result:
+          type: string
+          enum: [valid, invalid_vector, unsupported_cvss_version]
+        reason:
+          type: string
+        base_score:
+          type: number
+        temporal_score:
+          type: number
+        stated_comparison:
+          type: string
+          enum: [equal, differs, not_stated]
+        validated_at:
+          type: string
+          format: date-time
+    AssessmentIdentity:
+      type: object
+      required: [key]
+      properties:
+        key:
+          type: string
+        linked:
+          type: boolean
+        ambiguous_link:
+          type: boolean
     FixedVersion:
       type: object
       properties:

@@ -2,7 +2,7 @@
 
 Status: **ACCEPTED — 2026-11-21 (owner merged PR #229).** Domain model accepted by the owner on 2026-11-19 after review rounds v1 to v4.9.7
 (decision of 2026-11-19: selection details and ingestion details SETTLED, O1-O7 closed, lifecycle and
-integration items left OPEN for this record, section 10.3). S1 built 2026-11-21 (kernel calculator).
+integration items left OPEN for this record, section 10.3). S1 built 2026-11-21 (kernel calculator). S2 built 2026-11-21 (Knowledge source truth; realization notes in 12.1).
 Date: 2026-11-20
 Author: the CVSS scoring design discussion of 2026-11-17 to 2026-11-19.
 
@@ -936,6 +936,38 @@ Roll-up mixed-state cases (state order of section 6):
 S1 to S5 are self-contained and keep today's priority, SLA, Jira and notifications unchanged.
 
 **Release scope (owner decision 2026-11-20):** Themis 0.5.x carries S1-S5 (read-only GUI, shadow). S6-S8 follow in a later release.
+
+### 12.1 S2 realization notes (2026-11-21)
+
+How S2 maps the model onto the code. None of these change a rule of sections 3.1-3.5; each is a
+choice the model left to the build, or a gap still open.
+
+1. **One door.** Every feed path already folds through `FaultlineService.FoldProposal`. A feed attaches
+   the source revision it parsed to a Proposal (`Proposal.WithObservation`, transport only: never
+   persisted with the Proposal, never part of restatement detection), and the fold records it in the
+   rating store first. CVE.org raises no Proposal, so its sweep records directly. The headline
+   (`EnterpriseView.CVSS`, F8) and `BaseScoreFromVector` are unchanged; nothing reads the new tables
+   yet except `GET /faultlines/{id}/ratings`.
+2. **Unchanged means "equal to the latest revision"** of the same document. A document that changes
+   back to an earlier content is a new revision (it can withdraw or supersede again), so the
+   fingerprint is not unique per document.
+3. **A publication carried unchanged** by a later revision of the same document keeps its first
+   SourceRating; no copy is recorded per revision. A rating identical to a terminal one is a new
+   publication (3.4 item 5a).
+4. **Seen events** are recorded for successful fetches (`success_new_revision`,
+   `success_unchanged`). Failed fetches stay on the existing `feed_health` rows (3.4 item 3: they
+   change no rating state); per-document failure events are a follow-up.
+5. **Assessor names** differ by publisher (NVD gives a contact address or UUID, CVE.org a short
+   name). Linking policy `link-1` folds a short alias table (NVD, Red Hat, CISA ADP, GitHub, MITRE);
+   an assessor not listed keeps its own name, so nothing is merged by guess.
+6. **Feeds covered:** NVD (every metric of every version, Primary and Secondary, with `source`: F10),
+   Red Hat (the document rides its first Proposal even without `cvss3`, so a complete revision without
+   it withdraws the old rating: F11), Rocky (advisory severity word as observation metadata, O1),
+   CVE.org (CNA + every ADP, opt-in `THEMIS_CVEORG_ENABLED`, F13). Alpine secdb states no severity
+   word, so it records nothing. OSV ratings are not recorded yet.
+7. **Residual gaps:** a Red Hat document that yields no Proposal at all, and an NVD record with no
+   metric left, record no revision, so a rating they dropped stays active until a later revision of
+   that document is seen.
 
 ---
 

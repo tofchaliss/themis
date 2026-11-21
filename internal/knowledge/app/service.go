@@ -28,6 +28,21 @@ type FaultlineService struct {
 	// matches is optional (nil = no re-announcement). It exists so a card that gains carrier
 	// attribution after correlation can correct the classes already stamped on its matches.
 	matches MatchReader
+	// ratings is optional (nil = source ratings are not recorded). It records the source
+	// revision a feed attached to a Proposal (EDR-SCORING-01 S2).
+	ratings RatingRecorder
+}
+
+// RatingRecorder records one source revision's ratings.
+type RatingRecorder interface {
+	Record(ctx context.Context, cve value.CVEID, in domain.ObservationInput) error
+}
+
+// WithRatings wires the optional rating recorder. Every feed path folds through FoldProposal,
+// so this is the one place a feed's ratings reach the rating store.
+func (s *FaultlineService) WithRatings(r RatingRecorder) *FaultlineService {
+	s.ratings = r
+	return s
 }
 
 // WithMatchReader wires the optional match reader and returns the service for chaining. Kept off
@@ -144,6 +159,13 @@ func reannounceNotes(ctx context.Context, matches MatchReader, f domain.Faultlin
 func (s *FaultlineService) FoldProposal(ctx context.Context, cve value.CVEID, p domain.Proposal) (domain.Faultline, bool, error) {
 	if cve.IsZero() {
 		return domain.Faultline{}, false, fmt.Errorf("knowledge: zero cve")
+	}
+	// The source revision is recorded first and independently of the fold: an unchanged
+	// revision still owes its seen event (R-S7), and a restated Proposal is still a fetch.
+	if obs, ok := p.Observation(); ok && s.ratings != nil {
+		if err := s.ratings.Record(ctx, cve, obs); err != nil {
+			return domain.Faultline{}, false, fmt.Errorf("knowledge: record source ratings: %w", err)
+		}
 	}
 	for attempt := 0; attempt < maxSaveRetries; attempt++ {
 		existing, found, err := s.repo.GetByCVE(ctx, cve.String())

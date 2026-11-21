@@ -16,7 +16,8 @@ var tierBySource = map[string]domain.Tier{
 	"rocky":     domain.Tier2Recommended, // the sole fix source for Rocky SIG/RXSA packages (EDR-VEX-01 D11)
 	"exploitdb": domain.Tier2Recommended,
 	"vexfeed":   domain.Tier3Enrichment,
-	"scanner":   domain.Tier1Critical, // scanner evidence (Trivy/Grype) — Tier-1 per the taxonomy
+	"cveorg":    domain.Tier3Enrichment, // CNA / ADP ratings, source truth only (EDR-SCORING-01 S2)
+	"scanner":   domain.Tier1Critical,   // scanner evidence (Trivy/Grype) — Tier-1 per the taxonomy
 }
 
 // Tier returns the intelligence tier for a feed source, or domain.TierUnknown if the source

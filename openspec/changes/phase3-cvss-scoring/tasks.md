@@ -17,10 +17,11 @@ Every step waits for the owner's go and lands as its own PR.
 
 ## Group 2 — S2 Knowledge source truth
 
-- [ ] 2.1 Domain: observation, seen event, rating, rating event, validation, identity + link.
-- [ ] 2.2 Feeds: NVD Secondary kept + `source` read (F10); Red Hat complete-revision withdrawal (F11);
-  Rocky / Alpine severity word kept as metadata (O1); CVE.org feed opt-in (CNA + ADP).
-- [ ] 2.3 Store + migrations (up / down), read API, wiring, tests.
+- [x] 2.1 Domain: observation, seen event, rating, rating event, validation, identity + link.
+- [x] 2.2 Feeds: NVD Secondary kept + `source` read (F10); Red Hat complete-revision withdrawal (F11);
+  Rocky / Alpine severity word kept as metadata (O1); CVE.org feed opt-in (CNA + ADP). Alpine secdb
+  has no severity word; realization notes in EDR 12.1.
+- [x] 2.3 Store + migrations (up / down), read API, wiring, tests.
 
 ## Group 3 — S3 Registry requirements
 
