@@ -1860,6 +1860,8 @@ async function viewCVE(cve) {
     const v = (c && c.view) || {};
     let releases = [];
     try { releases = asArray(await apiGET("knowledge", `/faultlines/${encodeURIComponent(c.id)}/releases`)); } catch (e) { releases = []; }
+    let ratings;
+    try { ratings = await apiGET("knowledge", `/faultlines/${encodeURIComponent(c.id)}/ratings`); } catch (e) { ratings = undefined; }
     const list = (xs, f) => { const a = asArray(xs); return a.length ? a.map(f).join(", ") : `<span class="card-sub">none</span>`; };
     main.innerHTML = `
       <div class="card">
@@ -1872,6 +1874,7 @@ async function viewCVE(cve) {
           <tr><th>Published fixes</th><td>${list(v.fixed_versions, (f) => `<span class="mono">${esc(typeof f === "string" ? f : [f.package, f.version].filter(Boolean).join(" "))}</span>`)}</td></tr>
           <tr><th>Filed under</th><td id="cve-releases">${releases.length ? `<span class="card-sub">resolving ${releases.length} release${releases.length === 1 ? "" : "s"}…</span>` : `<span class="card-sub">none in the estate</span>`}</td></tr>
           <tr><th>Source proposals</th><td>${asArray(c.proposals).length}</td></tr>
+          <tr><th>Source ratings</th><td>${ratings === undefined ? `<span class="card-sub">unavailable (Knowledge did not answer)</span>` : sourceRatingsRows(ratings)}</td></tr>
         </tbody></table></div>
       </div>`;
     if (releases.length) {
@@ -1882,6 +1885,174 @@ async function viewCVE(cve) {
   } catch (e) {
     main.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
   }
+}
+
+
+/* ---------- CVSS: how Themis got this score (EDR-SCORING-01 S5, read only) ----------
+   Every number below comes from Governance's stored assessment (GET /findings/{id}/score);
+   nothing is computed in the browser. In this release the score is SHADOW: priority, SLA and
+   notifications still use the old headline score. Provisional is always labelled, with the
+   conditions that made it provisional, in words. */
+const SCORE_STATE_WORDS = {
+  no_components: "No component is currently matched",
+  no_carrier: "Only rebuild-set (scope) components; none is evidenced to carry the flaw",
+  no_open_occurrences: "Every carrier copy is cleared by a vendor fix",
+  unavailable: "No usable rating for any open component",
+  scored: "Scored",
+};
+const SCORE_COND_WORDS = {
+  independent_assessor_disagreement: "two assessors give different vectors",
+  assessor_self_inconsistency: "one assessor gives two different vectors",
+  unscorable_peer_assessment: "another assessor's rating is CVSS 4.0 or 2.0, which Themis cannot score yet",
+  higher_class_unresolved: "a higher-ranked rating (for example the vendor's) may apply; not yet decided",
+  same_class_unresolved: "a rating of the same rank may apply; not yet decided",
+};
+const SCORE_UNSCORED_WORDS = {
+  unsupported_cvss_version: "only CVSS 4.0 / 2.0 ratings, which are not scored yet",
+  invalid_vector: "the rating's vector is invalid",
+  no_calculable_rating: "no rating Themis can calculate",
+  no_vector: "no source gave a CVSS vector",
+  no_applicable_rating: "no rating applies to this component",
+  rating_applicability_unresolved: "a vendor rating may apply; not yet decided",
+};
+const SCORE_FLAG_WORDS = {
+  peer_rating_invalid: "another assessor's rating could not be validated",
+  context_ambiguity: "one assessor rated this in two contexts that cannot be ranked (same vector)",
+};
+const SCORE_CLASS_WORDS = {
+  vendor_platform: "platform vendor", cna: "CNA", adp: "CISA ADP", nvd_analyst: "NVD",
+  other_assessor: "other assessor", unattributed: "assessor unknown",
+};
+const SCORE_DISP_WORDS = {
+  reference: "used", supporting: "same assessment, another copy", competing: "disagrees",
+  unresolved: "may apply, not decided", available_not_selected: "lower rank, not used",
+  available_not_compared: "cannot be calculated", not_selected: "set aside", rejected: "not used",
+};
+const SCORE_REASON_WORDS = {
+  same_identity: "same assessment", higher_class: "decides the outcome", same_class: "same rank",
+  differs_from_competing_vectors: "a different vector", cannot_affect: "cannot change the result",
+  same_vector_as_competing_identity: "same vector as a competing one",
+  lower_supported_version_unresolved: "older CVSS version", lower_class: "lower rank",
+  unsupported_peer: "CVSS 4.0 / 2.0", unsupported_same_assessor: "CVSS 4.0 / 2.0 beside a 3.x one",
+  unsupported_only: "CVSS 4.0 / 2.0", unsupported_lower_class: "CVSS 4.0 / 2.0, lower rank",
+  invalid_peer: "invalid vector", invalid_vector: "invalid vector", invalid_lower_class: "invalid vector, lower rank",
+  less_specific_same_assessor: "less specific than the assessor's other rating",
+  lower_supported_version: "CVSS 3.0 beside the assessor's 3.1", inactive: "withdrawn or superseded",
+  does_not_apply: "for another product", independent_assessor_disagreement: "another assessor disagrees",
+  assessor_self_inconsistency: "the assessor disagrees with itself",
+};
+const words = (map, code) => esc(map[code] || code || "");
+const scoreNum = (x) => (typeof x === "number" ? x.toFixed(1) : "—");
+
+function scoreStatusChip(status) {
+  if (status === "final") return `<span class="chip chip-good" title="selection settled">final</span>`;
+  if (status === "provisional") return `<span class="chip chip-warn" title="a condition keeps this score open; the conditions say which">provisional</span>`;
+  return `<span class="chip chip-info">unavailable</span>`;
+}
+
+function coverageText(r, noun) {
+  if (!r || r.value === "not_applicable") return `<span class="card-sub">not applicable</span>`;
+  return `${esc(r.numerator)} of ${esc(r.denominator)} ${noun} <span class="chip chip-info">${esc(r.value)}</span>`;
+}
+
+function scoreSection(score) {
+  const head = `<h3 class="section-h">How Themis got this score <span class="chip chip-info" title="EDR-SCORING-01: shown for review; priority, SLA and notifications still use the old score">shadow</span></h3>`;
+  if (score === undefined) return `<section>${head}<div class="empty"><b>Score unavailable</b>Governance did not answer, or the assessment is not wired on this node.</div></section>`;
+  if (!score || !score.rollup) return `<section>${head}<div class="empty"><b>Not yet assessed</b>The assessment sweep has not reached this Finding yet.</div></section>`;
+  const r = score.rollup.snapshot || {};
+  const comps = asArray(score.components);
+  const conds = new Set();
+  comps.forEach((c) => {
+    const s = c.snapshot || {};
+    if ((r.at_maximum || []).includes(c.purl)) [...(s.conflict_conditions || []), ...(s.applicability_conditions || [])].forEach((x) => conds.add(x));
+  });
+  const unassessed = asArray(r.unassessed);
+  return `<section>${head}
+    <dl class="kv">
+      <dt>Score</dt><dd>${r.state === "scored"
+        ? `<b>${scoreNum(r.score)}</b> ${bandChip(r.band)} ${scoreStatusChip(r.score_status)} <span class="card-sub">highest Environmental score among ${asArray(r.contributors).length} contributing component${asArray(r.contributors).length === 1 ? "" : "s"}</span>`
+        : `<span class="chip chip-info">${words(SCORE_STATE_WORDS, r.state)}</span> <span class="card-sub">no number, and never 0</span>`}</dd>
+      ${r.score_status === "provisional" && conds.size ? `<dt>Why provisional</dt><dd>${[...conds].map((c) => words(SCORE_COND_WORDS, c)).join("; ")}</dd>` : ""}
+      <dt>Scoring coverage</dt><dd>${coverageText(r.scoring_coverage, "open carrier components scored")}</dd>
+      <dt>Assessment finality</dt><dd>${coverageText(r.assessment_finality, "scored components final")}</dd>
+      ${unassessed.length ? `<dt>Not scored</dt><dd>${unassessed.map((u) => `<div><span class="mono">${esc(u.purl)}</span> <span class="card-sub">${words(SCORE_UNSCORED_WORDS, u.reason)}</span></div>`).join("")}</dd>` : ""}
+    </dl>
+    ${comps.map(componentScoreBlock).join("")}
+    ${scoreHistory(score.history)}
+  </section>`;
+}
+
+function componentScoreBlock(rev) {
+  const s = rev.snapshot || {};
+  const conds = [...(s.conflict_conditions || []), ...(s.applicability_conditions || [])];
+  const sc = s.scores || null;
+  const req = s.requirements || {};
+  const reqCell = (k) => { const v = req[k] || {}; return `${esc(k.toUpperCase())}:${esc(v.value || "X")} <span class="card-sub">(${esc(v.level || "default")})</span>`; };
+  const roles = {};
+  asArray(s.identities).forEach((i) => { roles[i.identity_key] = i; });
+  const cands = asArray(s.candidates);
+  return `<details class="score-comp" style="margin:8px 0">
+    <summary><span class="mono">${esc(rev.purl)}</span> ${sc ? `<b>${scoreNum(sc.environmental)}</b>` : ""} ${scoreStatusChip(s.score_status)}
+      ${s.eligible === false ? `<span class="chip chip-info" title="rebuild-set component: shown, never in the roll-up">scope, not counted</span>` : ""}
+      ${s.open === false ? `<span class="chip chip-good" title="cleared by a vendor fix: shown, not in the current roll-up">cleared, not counted</span>` : ""}
+      <span class="card-sub">revision ${esc(rev.revision)} · ${esc(rev.cause)} · ${esc(fmtWhen(rev.recorded_at))}</span></summary>
+    <dl class="kv">
+      <dt>Outcome</dt><dd>${s.outcome ? esc(s.outcome) : `<span class="card-sub">no outcome</span>`}${s.deciding_class ? ` <span class="card-sub">deciding rank: ${words(SCORE_CLASS_WORDS, s.deciding_class)}</span>` : ""}${s.unscored_reason ? ` — ${words(SCORE_UNSCORED_WORDS, s.unscored_reason)}` : ""}</dd>
+      ${conds.length ? `<dt>Conditions</dt><dd>${conds.map((c) => words(SCORE_COND_WORDS, c)).join("; ")}</dd>` : ""}
+      ${(s.flags || []).length ? `<dt>Notes</dt><dd>${s.flags.map((f) => words(SCORE_FLAG_WORDS, f)).join("; ")}</dd>` : ""}
+      ${sc ? `<dt>Scores</dt><dd>Base ${scoreNum(sc.base)} · Temporal ${scoreNum(sc.temporal)} · Environmental ${scoreNum(sc.environmental)}<div class="mono" style="font-size:.85em">${esc(s.assessment_vector || "")}</div></dd>` : ""}
+      <dt>Temporal</dt><dd>${asArray(s.temporal).map((m) => `${esc(m.metric)}:${esc(m.used)} <span class="card-sub">(${esc(m.state.replace(/_/g, " "))}${m.proposed && m.used !== m.proposed ? `, ${esc(m.metric)}:${esc(m.proposed)} proposed, not counted` : ""})</span>`).join(" · ")}</dd>
+      <dt>Requirements</dt><dd>${reqCell("cr")} · ${reqCell("ir")} · ${reqCell("ar")}</dd>
+    </dl>
+    ${cands.length ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Assessor</th><th>Rank</th><th>Rating</th><th>Applies?</th><th>Result</th><th title="the value this rating put into a provisional maximum">In maximum</th></tr></thead><tbody>
+      ${cands.map((c) => {
+        const role = roles[c.identity_key];
+        return `<tr${c.disposition === "rejected" ? ` class="muted"` : ""}>
+          <td>${esc(c.assessor || "unknown")}<div class="card-sub">${esc([c.publisher, c.feed].filter(Boolean).join(" via "))}</div></td>
+          <td>${c.class ? words(SCORE_CLASS_WORDS, c.class) : "—"}</td>
+          <td>${c.scores ? `<b>${scoreNum(c.scores.environmental)}</b> ` : ""}<span class="card-sub">CVSS ${esc(c.cvss_version || "?")}</span><div class="mono" style="font-size:.75em;word-break:break-all">${esc(c.vector || "")}</div>${c.validation_reason ? `<div class="card-sub">${esc(c.validation_reason)}</div>` : ""}</td>
+          <td>${esc(c.applicability || "—")}${c.context_inherited ? ` <span class="card-sub" title="the publication states no context of its own; this is the document's product list">(document list)</span>` : ""}</td>
+          <td>${words(SCORE_DISP_WORDS, c.disposition)}${c.reason ? ` <span class="card-sub">${words(SCORE_REASON_WORDS, c.reason)}${c.cannot_affect ? ` (${esc(c.cannot_affect)})` : ""}</span>` : ""}${role && role.representative && c.disposition === "reference" ? ` <span class="chip chip-info" title="technical anchor for one link; implies no authority">representative</span>` : ""}</td>
+          <td>${typeof c.contribution === "number" ? scoreNum(c.contribution) : "—"}</td>
+        </tr>`;
+      }).join("")}
+    </tbody></table></div>` : `<div class="empty">No source rating for this CVE.</div>`}
+  </details>`;
+}
+
+function scoreHistory(hist) {
+  const h = asArray(hist);
+  if (h.length <= 1) return "";
+  return `<details style="margin:8px 0"><summary class="card-sub">History (${h.length} revisions; older ones are kept unchanged)</summary>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>Component</th><th>Revision</th><th>Why</th><th>Score</th></tr></thead><tbody>
+    ${h.map((x) => `<tr><td>${esc(fmtWhen(x.recorded_at))}</td><td class="mono">${esc(x.purl)}</td><td>${esc(x.revision)}</td><td>${esc(x.cause)}</td><td>${scoreNum(x.score)} ${scoreStatusChip(x.score_status)}</td></tr>`).join("")}
+    </tbody></table></div></details>`;
+}
+
+/* Source ratings of one CVE (EDR-SCORING-01 S5, 5.2): one row per assessment; the same
+   assessment seen in several publications (for example the vendor's site and its NVD copy) is
+   ONE row listing every place it was seen. */
+function sourceRatingsRows(ratings) {
+  const rs = asArray(ratings && ratings.ratings);
+  if (!rs.length) return `<span class="card-sub">no source rating recorded</span>`;
+  const groups = new Map();
+  rs.forEach((r) => {
+    const key = (r.identity && r.identity.key) || r.id;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  });
+  return `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Assessor</th><th>Rating</th><th>Seen in</th><th>Status</th></tr></thead><tbody>
+    ${[...groups.values()].map((g) => {
+      const r = g[0];
+      const v = r.validation || {};
+      return `<tr>
+        <td>${esc(r.assessor_key || r.assessor)}${r.nvd_type ? ` <span class="chip chip-info">${esc(r.nvd_type)}</span>` : ""}</td>
+        <td>CVSS ${esc(r.cvss_version)} <span class="mono" style="font-size:.85em">${esc(r.vector)}</span>${typeof v.base_score === "number" ? ` <b>${scoreNum(v.base_score)}</b>` : ""}${v.result && v.result !== "valid" ? ` <span class="chip chip-warn">${esc(v.result.replace(/_/g, " "))}</span>` : ""}</td>
+        <td>${g.map((x) => `<div>${esc([x.publisher || x.source, x.feed].filter(Boolean).join(" via "))}${x.effective_context ? ` <span class="card-sub">${esc(x.effective_context.length > 60 ? x.effective_context.slice(0, 60) + "…" : x.effective_context)}</span>` : ""}</div>`).join("")}</td>
+        <td>${g.map((x) => `<div>${esc(x.status)}</div>`).join("")}</td>
+      </tr>`;
+    }).join("")}
+  </tbody></table></div>`;
 }
 
 /* --- Admin: the dashboard's own sign-in --- */
@@ -2469,6 +2640,8 @@ async function openDrawer(entry) {
   let assessment = null, similar = null;
   try { assessment = await apiGET("governance", `/findings/${encodeURIComponent(entry.finding_id)}/assessment`); } catch { /* rendered below */ }
   try { similar = await apiGET("intelligence", `/findings/${encodeURIComponent(entry.finding_id)}/similar?k=5`); } catch { /* node optional */ }
+  let score;
+  try { score = await apiGET("governance", `/findings/${encodeURIComponent(entry.finding_id)}/score`); } catch { score = undefined; }
 
   const k = assessment ? (assessment.knowledge || {}) : {};
   const f = assessment ? (assessment.finding || {}) : {};
@@ -2497,6 +2670,8 @@ async function openDrawer(entry) {
       <h3 class="section-h">What it means here <span class="chip chip-accent" title="Information (T7): ephemeral, never stored. The summary above is evidence; this is the AI's overlay on it — what the flaw means for THESE components">AI</span> ${LOCAL_ONLY_CHIP}</h3>
       <div id="explain-out"></div>
     </section>
+
+    ${scoreSection(score)}
 
     ${attributionSection(assessment)}
 

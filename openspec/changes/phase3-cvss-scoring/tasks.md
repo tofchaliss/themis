@@ -37,8 +37,8 @@ Every step waits for the owner's go and lands as its own PR.
 
 ## Group 5 — S5 GUI (read only)
 
-- [ ] 5.1 Finding page: score panel (roll-up, coverage, finality, per-component provenance).
-- [ ] 5.2 CVE page: source ratings by publication, linked duplicates as one row.
+- [x] 5.1 Finding page: score panel (roll-up, coverage, finality, per-component provenance).
+- [x] 5.2 CVE page: source ratings by publication, linked duplicates as one row.
 - [ ] 5.3 VM check on a release with RPM and Alpine components.
 
 ## Group 6 — S6 to S8 (later steps, owner's go each)
