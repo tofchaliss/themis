@@ -2,7 +2,7 @@
 
 Status: **ACCEPTED — 2026-11-21 (owner merged PR #229).** Domain model accepted by the owner on 2026-11-19 after review rounds v1 to v4.9.7
 (decision of 2026-11-19: selection details and ingestion details SETTLED, O1-O7 closed, lifecycle and
-integration items left OPEN for this record, section 10.3). S1 built 2026-11-21 (kernel calculator). S2 built 2026-11-21 (Knowledge source truth; realization notes in 12.1). S3 built 2026-11-21 (Registry requirements; 12.2). S4 built 2026-11-21 (Governance assessment in shadow; 12.3).
+integration items left OPEN for this record, section 10.3). S1 built 2026-11-21 (kernel calculator). S2 built 2026-11-21 (Knowledge source truth; realization notes in 12.1). S3 built 2026-11-21 (Registry requirements; 12.2). S4 built 2026-11-21 (Governance assessment in shadow; 12.3). S5 built 2026-11-21 (read-only GUI: the Finding drawer's "How Themis got this score" panel and the CVE page's source ratings, one row per assessment; VM check pending).
 Date: 2026-11-20
 Author: the CVSS scoring design discussion of 2026-11-17 to 2026-11-19.
 
