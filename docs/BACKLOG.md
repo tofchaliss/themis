@@ -350,7 +350,7 @@ three angles, and two of them proposed fixes that would not have worked.
 ### A. Milestones not yet implemented (in dependency order)
 
 - [ ] **Layered CVSS scoring** (id `KN-CVSS-LAYERS-1`, S3 severity: the shown score does not
-  match the vendor's or CNA's for the component). EDR-SCORING-01 (PROPOSED 2026-11-20; domain
+  match the vendor's or CNA's for the component). EDR-SCORING-01 (ACCEPTED 2026-11-21; domain
   model accepted by the owner 2026-11-19) + `openspec/changes/phase3-cvss-scoring`. Steps S1-S8,
   one PR each on the owner's go; S1-S5 (calculator, source ratings, CR/IR/AR, per-component
   assessment in shadow, read-only GUI panel) change no existing behaviour. Depends on
