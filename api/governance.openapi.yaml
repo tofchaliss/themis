@@ -457,6 +457,29 @@ paths:
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
+  /findings/{id}/score:
+    get:
+      operationId: getFindingScore
+      summary: >
+        How Themis got this score (EDR-SCORING-01 S4, shadow): the Finding roll-up and, per
+        current component, the newest ComponentAssessment revision with its complete candidate
+        snapshot (every source publication with its applicability, class, disposition and
+        reason; the identity roles; outcome, conditions, score status; metrics with state;
+        CR / IR / AR with level), plus the revision history. Read only. Nothing reads these
+        numbers for priority or SLA yet. 200 with no rollup means "not yet assessed".
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingScore'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /releases/{releaseId}/posture:
     get:
       operationId: getReleasePosture
@@ -1032,6 +1055,65 @@ components:
             Plain-language premise of the verdict (e.g. "vendor fix 0:39.2.0-9.el8_10 present"),
             stated by Knowledge and rendered verbatim - a clearance nobody can read the reason
             for is one nobody can audit.
+    FindingScore:
+      type: object
+      required: [finding_id, cve, components, history]
+      properties:
+        finding_id: { type: string }
+        cve: { type: string }
+        rollup:
+          $ref: '#/components/schemas/FindingScoreRollup'
+        components:
+          type: array
+          items:
+            $ref: '#/components/schemas/ComponentScoreRevision'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScoreRevisionSummary'
+    FindingScoreRollup:
+      type: object
+      required: [revision, cause, recorded_at, snapshot]
+      properties:
+        revision: { type: integer }
+        cause: { type: string }
+        recorded_at: { type: string, format: date-time }
+        snapshot:
+          type: object
+          additionalProperties: true
+          description: >
+            The roll-up (EDR 6): state (no_components, no_carrier, no_open_occurrences,
+            unavailable, scored), score and band, score_status, contributors, at_maximum,
+            scoring_coverage and assessment_finality ({numerator, denominator, value}),
+            unassessed components with their reason.
+    ComponentScoreRevision:
+      type: object
+      required: [purl, revision, cause, recorded_at, snapshot]
+      properties:
+        purl: { type: string }
+        revision: { type: integer }
+        cause: { type: string }
+        recorded_at: { type: string, format: date-time }
+        snapshot:
+          type: object
+          additionalProperties: true
+          description: >
+            The complete ComponentAssessment snapshot (EDR 8.1): eligibility, outcome,
+            conditions, diagnostic flags, score status and unscored reason, the three scores and
+            the assessment vector, contributing and competing identities, relations,
+            representative, identity roles, every candidate with its disposition, reason and
+            contribution, temporal metrics with state, CR / IR / AR with level, and the policy
+            and calculator versions.
+    ScoreRevisionSummary:
+      type: object
+      required: [purl, revision, cause, score_status, recorded_at]
+      properties:
+        purl: { type: string }
+        revision: { type: integer }
+        cause: { type: string }
+        score_status: { type: string }
+        score: { type: number, format: double }
+        recorded_at: { type: string, format: date-time }
     FindingAssessment:
       type: object
       properties:

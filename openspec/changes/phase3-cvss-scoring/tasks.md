@@ -30,9 +30,10 @@ Every step waits for the owner's go and lands as its own PR.
 
 ## Group 4 — S4 Governance assessment (shadow)
 
-- [ ] 4.1 Domain: selection (4.1-4.1b), outcome / conditions / score status, roll-up (6).
-- [ ] 4.2 Triggers (8.2) through existing events and read seams; idempotency (10.3).
-- [ ] 4.3 Store + migration, provenance API, tests incl. every case in EDR section 11.
+- [x] 4.1 Domain: selection (4.1-4.1b), outcome / conditions / score status, roll-up (6).
+- [x] 4.2 Triggers (8.2) through the read seams (re-assessment sweep, causes from the snapshot
+  difference); idempotency by content fingerprint (EDR 12.3 item 8; event-driven triggers before S7).
+- [x] 4.3 Store + migration, provenance API, tests incl. the cases in EDR section 11.
 
 ## Group 5 — S5 GUI (read only)
 

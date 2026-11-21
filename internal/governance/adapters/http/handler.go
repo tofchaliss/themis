@@ -46,6 +46,8 @@ type Handler struct {
 	scope *app.ScopePropagation
 	// watches serves the Watch list and its table (EDR-INCIDENT-01 D2). Nil ⇒ /watches answers 503.
 	watches *app.WatchService
+	// scores serves GET /findings/{id}/score (EDR-SCORING-01 S4). Nil ⇒ 503.
+	scores *app.ScoreService
 	// now stamps generated_at; replaceable in tests.
 	now func() time.Time
 	// logger carries the DETAIL of an authorization refusal, which the HTTP response

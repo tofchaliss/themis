@@ -87,6 +87,12 @@ type config struct {
 	// release-evaluation worker regardless. Go duration, default 1m; "0" disables the sweep
 	// (decisions stay pending; nothing is lost).
 	scopeSweepInterval time.Duration
+	// THEMIS_SCORE_SWEEP_INTERVAL — cadence of the CVSS assessment sweep (EDR-SCORING-01 S4,
+	// shadow): every Finding's components are re-assessed from Knowledge's source ratings and
+	// Registry's CR / IR / AR, and a revision is written only where something changed. It runs
+	// once at startup. Go duration, default 6h; "0" disables (GET /findings/{id}/score then
+	// shows only what was assessed before). Nothing reads these scores for priority yet.
+	scoreSweepInterval time.Duration
 	rejudgeRanges      bool // THEMIS_GOVERNANCE_REJUDGE_RANGES=1 — run the ONE-TIME version-range re-judge at startup (KN-GO-2): every undecided Finding is re-checked against its card's reconciled ranges with the same rule an enrichment applies, and (VEX-RAISE-1) against its card's vendor statements, so a not_affected that applies to the release gets its proposal; the configured policy decides. For after a comparator correction (KN-GO-1), when the cards did not change and nothing else re-triggers the rule. Idempotent; set it once, restart, unset it.
 
 	busDSN            string // THEMIS_BUS_DATABASE_DSN — DSN of the platform `bus` database holding the event_log. When set, the outbox relay publishes to the real event bus (EB-04); when empty, a logging stand-in is used (single-context dev without the bus).
@@ -122,6 +128,7 @@ func loadConfig() config {
 		reviewWarning:        envDurationDefault("THEMIS_REVIEW_WARNING", domain.DefaultReviewWarning),
 		fixAvailableInterval: envDurationDefault("THEMIS_FIX_AVAILABLE_INTERVAL", app.DefaultFixAvailableInterval),
 		scopeSweepInterval:   envDurationDefault("THEMIS_SCOPE_SWEEP_INTERVAL", app.DefaultScopeSweepInterval),
+		scoreSweepInterval:   envDurationDefault("THEMIS_SCORE_SWEEP_INTERVAL", app.DefaultScoreSweepInterval),
 		busMigrate:           os.Getenv("THEMIS_BUS_MIGRATE") == "1",
 		busMigrationsPath:    envDefault("THEMIS_BUS_MIGRATIONS", eventbus.DefaultMigrationsPath),
 
@@ -269,6 +276,28 @@ func main() {
 		logger.Info("fix-available sweep enabled", observability.String("interval", cfg.fixAvailableInterval.String()))
 	} else {
 		logger.Warn("fix-available sweep DISABLED (THEMIS_FIX_AVAILABLE_INTERVAL=0) — a vendor fix published for an open component is recorded but never announced")
+	}
+	// The CVSS assessment sweep (EDR-SCORING-01 S4, shadow). It writes assessment revisions only.
+	switch {
+	case gov.Scores == nil:
+		logger.Warn("CVSS assessment DISABLED: no Knowledge read seam (THEMIS_KNOWLEDGE_URL)")
+	case cfg.scoreSweepInterval > 0:
+		sc := logger.Component("cvss-assessment")
+		go gov.Scores.RunEvery(ctx, cfg.scoreSweepInterval, func(r app.SweepResult, err error) {
+			if err != nil {
+				sc.Error("CVSS assessment sweep failed", observability.Err(err))
+				return
+			}
+			fields := []observability.Field{observability.Int("assessed", r.Assessed), observability.Int("changed", r.Changed), observability.Int("failed", r.Failed)}
+			if r.FirstError != nil {
+				sc.Warn("CVSS assessment sweep", append(fields, observability.Err(r.FirstError))...)
+				return
+			}
+			sc.Info("CVSS assessment sweep", fields...)
+		})
+		logger.Info("CVSS assessment sweep enabled", observability.String("interval", cfg.scoreSweepInterval.String()))
+	default:
+		logger.Warn("CVSS assessment sweep DISABLED (THEMIS_SCORE_SWEEP_INTERVAL=0)")
 	}
 	// The scoped-decision sweep (EDR-SYNC-01 D4): a person's project- or product-wide decision
 	// reaches the Findings it covers. It applies the person's own decision; it decides nothing.

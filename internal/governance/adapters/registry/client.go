@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/themis-project/themis/internal/governance/app"
+	"github.com/themis-project/themis/internal/governance/domain"
 )
 
 // Client reads blast radius from a Registry service.
@@ -231,4 +232,30 @@ func unionTags(sets ...[]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+var _ app.RequirementsReader = (*Client)(nil)
+
+type resolvedRequirementsResponse struct {
+	CR resolvedRequirement `json:"cr"`
+	IR resolvedRequirement `json:"ir"`
+	AR resolvedRequirement `json:"ar"`
+}
+
+type resolvedRequirement struct {
+	Value string `json:"value"`
+	Level string `json:"level"`
+}
+
+// ResolvedRequirements reads a release's CR / IR / AR, each with the level it came from
+// (EDR-SCORING-01 4.4). Resolution is Registry's; Governance only reads the result.
+func (c *Client) ResolvedRequirements(ctx context.Context, releaseID string) (domain.ScoreRequirements, error) {
+	var body resolvedRequirementsResponse
+	if err := c.get(ctx, "/api/v1/releases/"+url.PathEscape(releaseID)+"/requirements/resolved", &body); err != nil {
+		return domain.ScoreRequirements{}, fmt.Errorf("registry: requirements %s: %w", releaseID, err)
+	}
+	conv := func(r resolvedRequirement) domain.RequirementValue {
+		return domain.RequirementValue{Value: r.Value, Level: r.Level}
+	}
+	return domain.ScoreRequirements{CR: conv(body.CR), IR: conv(body.IR), AR: conv(body.AR)}, nil
 }
