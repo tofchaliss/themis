@@ -2,7 +2,7 @@
 
 Status: **ACCEPTED — 2026-11-21 (owner merged PR #229).** Domain model accepted by the owner on 2026-11-19 after review rounds v1 to v4.9.7
 (decision of 2026-11-19: selection details and ingestion details SETTLED, O1-O7 closed, lifecycle and
-integration items left OPEN for this record, section 10.3). S1 built 2026-11-21 (kernel calculator). S2 built 2026-11-21 (Knowledge source truth; realization notes in 12.1).
+integration items left OPEN for this record, section 10.3). S1 built 2026-11-21 (kernel calculator). S2 built 2026-11-21 (Knowledge source truth; realization notes in 12.1). S3 built 2026-11-21 (Registry requirements; 12.2).
 Date: 2026-11-20
 Author: the CVSS scoring design discussion of 2026-11-17 to 2026-11-19.
 
@@ -968,6 +968,21 @@ choice the model left to the build, or a gap still open.
 7. **Residual gaps:** a Red Hat document that yields no Proposal at all, and an NVD record with no
    metric left, record no revision, so a rating they dropped stays active until a later revision of
    that document is seen.
+
+### 12.2 S3 realization notes (2026-11-21)
+
+1. **Records.** `registry_security_requirements` (migration 000005) is append-only: each change at a
+   Product, Project or Release is a new row with CR, IR, AR (H / M / L / X), a required reason and
+   actor, and the API key name when auth is on. The current value of a level is its latest row.
+2. **Resolution** is per metric in the domain (`ResolveRequirements`): Release, then Project, then
+   Product, then X with level `default`. X at a level states nothing, so the metric falls through.
+3. **API.** `GET` / `POST /products|projects|releases/{id}/requirements` (history newest first;
+   writing is a product write, like tags) and `GET /releases/{id}/requirements/resolved` (each
+   metric with the level it came from).
+4. **Not in S3.** The component exception (4.4 item 2) needs the S6 permission. R-E5 (list the
+   affected Findings and recalculate as new revisions) is Governance's: Registry has no event
+   outbox, so S4 reads the resolved requirements over the read seam, records the records it used,
+   and a different current record is its `requirement_changed` trigger.
 
 ---
 

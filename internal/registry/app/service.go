@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/themis-project/themis/internal/registry/domain"
 )
@@ -22,6 +23,9 @@ var (
 type RegistryService struct {
 	repo Repository
 	ids  IDGenerator
+	// reqs is optional (nil = security requirements are not served; EDR-SCORING-01 S3).
+	reqs  RequirementStore
+	clock func() time.Time
 }
 
 // NewRegistryService wires the use-case ports.

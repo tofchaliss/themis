@@ -13,11 +13,81 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
 	"github.com/oapi-codegen/runtime"
 )
+
+// Defines values for RequirementRecordLevel.
+const (
+	RequirementRecordLevelProduct RequirementRecordLevel = "product"
+	RequirementRecordLevelProject RequirementRecordLevel = "project"
+	RequirementRecordLevelRelease RequirementRecordLevel = "release"
+)
+
+// Valid indicates whether the value is a known member of the RequirementRecordLevel enum.
+func (e RequirementRecordLevel) Valid() bool {
+	switch e {
+	case RequirementRecordLevelProduct:
+		return true
+	case RequirementRecordLevelProject:
+		return true
+	case RequirementRecordLevelRelease:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RequirementValue.
+const (
+	H RequirementValue = "H"
+	L RequirementValue = "L"
+	M RequirementValue = "M"
+	X RequirementValue = "X"
+)
+
+// Valid indicates whether the value is a known member of the RequirementValue enum.
+func (e RequirementValue) Valid() bool {
+	switch e {
+	case H:
+		return true
+	case L:
+		return true
+	case M:
+		return true
+	case X:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ResolvedRequirementLevel.
+const (
+	ResolvedRequirementLevelDefault ResolvedRequirementLevel = "default"
+	ResolvedRequirementLevelProduct ResolvedRequirementLevel = "product"
+	ResolvedRequirementLevelProject ResolvedRequirementLevel = "project"
+	ResolvedRequirementLevelRelease ResolvedRequirementLevel = "release"
+)
+
+// Valid indicates whether the value is a known member of the ResolvedRequirementLevel enum.
+func (e ResolvedRequirementLevel) Valid() bool {
+	switch e {
+	case ResolvedRequirementLevelDefault:
+		return true
+	case ResolvedRequirementLevelProduct:
+		return true
+	case ResolvedRequirementLevelProject:
+		return true
+	case ResolvedRequirementLevelRelease:
+		return true
+	default:
+		return false
+	}
+}
 
 // BlastRadius defines model for BlastRadius.
 type BlastRadius struct {
@@ -108,6 +178,65 @@ type ReleaseView struct {
 	Version   *string   `json:"version,omitempty"`
 }
 
+// RequirementChange defines model for RequirementChange.
+type RequirementChange struct {
+	// Actor Who decided the change. Required.
+	Actor string            `json:"actor"`
+	Ar    *RequirementValue `json:"ar,omitempty"`
+	Cr    *RequirementValue `json:"cr,omitempty"`
+	Ir    *RequirementValue `json:"ir,omitempty"`
+
+	// Reason Why the requirements change. Required.
+	Reason string `json:"reason"`
+}
+
+// RequirementHistory defines model for RequirementHistory.
+type RequirementHistory struct {
+	Current *RequirementRecord  `json:"current,omitempty"`
+	History []RequirementRecord `json:"history"`
+}
+
+// RequirementRecord defines model for RequirementRecord.
+type RequirementRecord struct {
+	Actor      string                 `json:"actor"`
+	Ar         RequirementValue       `json:"ar"`
+	Cr         RequirementValue       `json:"cr"`
+	EntityId   string                 `json:"entity_id"`
+	Ir         RequirementValue       `json:"ir"`
+	Level      RequirementRecordLevel `json:"level"`
+	Reason     string                 `json:"reason"`
+	RecordedAt time.Time              `json:"recorded_at"`
+
+	// Via The API key that recorded the change, when auth is on.
+	Via *string `json:"via,omitempty"`
+}
+
+// RequirementRecordLevel defines model for RequirementRecord.Level.
+type RequirementRecordLevel string
+
+// RequirementValue defines model for RequirementValue.
+type RequirementValue string
+
+// ResolvedRequirement defines model for ResolvedRequirement.
+type ResolvedRequirement struct {
+	// Level The level the value came from; default when no level states it (X).
+	Level ResolvedRequirementLevel `json:"level"`
+	Value RequirementValue         `json:"value"`
+}
+
+// ResolvedRequirementLevel The level the value came from; default when no level states it (X).
+type ResolvedRequirementLevel string
+
+// ResolvedRequirements defines model for ResolvedRequirements.
+type ResolvedRequirements struct {
+	Ar      ResolvedRequirement `json:"ar"`
+	Cr      ResolvedRequirement `json:"cr"`
+	Ir      ResolvedRequirement `json:"ir"`
+	Product *RequirementRecord  `json:"product,omitempty"`
+	Project *RequirementRecord  `json:"project,omitempty"`
+	Release *RequirementRecord  `json:"release,omitempty"`
+}
+
 // TagSet defines model for TagSet.
 type TagSet struct {
 	// Effective Own tags plus the parents' (a release adds its project's and product's).
@@ -172,17 +301,26 @@ type RegisterProductJSONRequestBody = RegisterProductRequest
 // RegisterMicroserviceJSONRequestBody defines body for RegisterMicroservice for application/json ContentType.
 type RegisterMicroserviceJSONRequestBody = RegisterMicroserviceRequest
 
+// PostProductRequirementsJSONRequestBody defines body for PostProductRequirements for application/json ContentType.
+type PostProductRequirementsJSONRequestBody = RequirementChange
+
 // PutProductTagsJSONRequestBody defines body for PutProductTags for application/json ContentType.
 type PutProductTagsJSONRequestBody = TagsPut
 
 // RegisterProjectJSONRequestBody defines body for RegisterProject for application/json ContentType.
 type RegisterProjectJSONRequestBody = RegisterProjectRequest
 
+// PostProjectRequirementsJSONRequestBody defines body for PostProjectRequirements for application/json ContentType.
+type PostProjectRequirementsJSONRequestBody = RequirementChange
+
 // PutProjectTagsJSONRequestBody defines body for PutProjectTags for application/json ContentType.
 type PutProjectTagsJSONRequestBody = TagsPut
 
 // RegisterReleaseJSONRequestBody defines body for RegisterRelease for application/json ContentType.
 type RegisterReleaseJSONRequestBody = RegisterReleaseRequest
+
+// PostReleaseRequirementsJSONRequestBody defines body for PostReleaseRequirements for application/json ContentType.
+type PostReleaseRequirementsJSONRequestBody = RequirementChange
 
 // PutReleaseTagsJSONRequestBody defines body for PutReleaseTags for application/json ContentType.
 type PutReleaseTagsJSONRequestBody = TagsPut
@@ -210,6 +348,12 @@ type ServerInterface interface {
 	// List the projects under a product.
 	// (GET /products/{id}/projects)
 	ListProjectsOfProduct(w http.ResponseWriter, r *http.Request, id string, params ListProjectsOfProductParams)
+	// A product's CVSS security requirements (CR / IR / AR) — current record and history, newest first (EDR-SCORING-01 S3).
+	// (GET /products/{id}/requirements)
+	GetProductRequirements(w http.ResponseWriter, r *http.Request, id string)
+	// Record a change of a product's security requirements, with a reason and an actor. Admin, or a key scoped to the owning product.
+	// (POST /products/{id}/requirements)
+	PostProductRequirements(w http.ResponseWriter, r *http.Request, id string)
 	// A product's own and effective tags (EDR-REMEDIATION-01 D7 — filters only, never a weight).
 	// (GET /products/{id}/tags)
 	GetProductTags(w http.ResponseWriter, r *http.Request, id string)
@@ -225,6 +369,12 @@ type ServerInterface interface {
 	// List the releases under a project.
 	// (GET /projects/{id}/releases)
 	ListReleasesOfProject(w http.ResponseWriter, r *http.Request, id string, params ListReleasesOfProjectParams)
+	// A project's CVSS security requirements (CR / IR / AR) — current record and history, newest first (EDR-SCORING-01 S3).
+	// (GET /projects/{id}/requirements)
+	GetProjectRequirements(w http.ResponseWriter, r *http.Request, id string)
+	// Record a change of a project's security requirements, with a reason and an actor. Admin, or a key scoped to the owning product.
+	// (POST /projects/{id}/requirements)
+	PostProjectRequirements(w http.ResponseWriter, r *http.Request, id string)
 	// A project's own and effective tags (EDR-REMEDIATION-01 D7 — filters only, never a weight).
 	// (GET /projects/{id}/tags)
 	GetProjectTags(w http.ResponseWriter, r *http.Request, id string)
@@ -243,6 +393,15 @@ type ServerInterface interface {
 	// Count the unique customers a release reaches through the estate graph.
 	// (GET /releases/{id}/blast-radius)
 	GetBlastRadius(w http.ResponseWriter, r *http.Request, id string)
+	// A release's CVSS security requirements (CR / IR / AR) — current record and history, newest first (EDR-SCORING-01 S3).
+	// (GET /releases/{id}/requirements)
+	GetReleaseRequirements(w http.ResponseWriter, r *http.Request, id string)
+	// Record a change of a release's security requirements, with a reason and an actor. Admin, or a key scoped to the owning product.
+	// (POST /releases/{id}/requirements)
+	PostReleaseRequirements(w http.ResponseWriter, r *http.Request, id string)
+	// CR / IR / AR resolved for a release, each metric on its own (Release, then Project, then Product, then X), with the level it came from.
+	// (GET /releases/{id}/requirements/resolved)
+	GetReleaseResolvedRequirements(w http.ResponseWriter, r *http.Request, id string)
 	// A release's own and effective tags (EDR-REMEDIATION-01 D7 — filters only, never a weight).
 	// (GET /releases/{id}/tags)
 	GetReleaseTags(w http.ResponseWriter, r *http.Request, id string)
@@ -300,6 +459,18 @@ func (_ Unimplemented) ListProjectsOfProduct(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// A product's CVSS security requirements (CR / IR / AR) — current record and history, newest first (EDR-SCORING-01 S3).
+// (GET /products/{id}/requirements)
+func (_ Unimplemented) GetProductRequirements(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Record a change of a product's security requirements, with a reason and an actor. Admin, or a key scoped to the owning product.
+// (POST /products/{id}/requirements)
+func (_ Unimplemented) PostProductRequirements(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // A product's own and effective tags (EDR-REMEDIATION-01 D7 — filters only, never a weight).
 // (GET /products/{id}/tags)
 func (_ Unimplemented) GetProductTags(w http.ResponseWriter, r *http.Request, id string) {
@@ -327,6 +498,18 @@ func (_ Unimplemented) GetProject(w http.ResponseWriter, r *http.Request, id str
 // List the releases under a project.
 // (GET /projects/{id}/releases)
 func (_ Unimplemented) ListReleasesOfProject(w http.ResponseWriter, r *http.Request, id string, params ListReleasesOfProjectParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// A project's CVSS security requirements (CR / IR / AR) — current record and history, newest first (EDR-SCORING-01 S3).
+// (GET /projects/{id}/requirements)
+func (_ Unimplemented) GetProjectRequirements(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Record a change of a project's security requirements, with a reason and an actor. Admin, or a key scoped to the owning product.
+// (POST /projects/{id}/requirements)
+func (_ Unimplemented) PostProjectRequirements(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -363,6 +546,24 @@ func (_ Unimplemented) GetRelease(w http.ResponseWriter, r *http.Request, id str
 // Count the unique customers a release reaches through the estate graph.
 // (GET /releases/{id}/blast-radius)
 func (_ Unimplemented) GetBlastRadius(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// A release's CVSS security requirements (CR / IR / AR) — current record and history, newest first (EDR-SCORING-01 S3).
+// (GET /releases/{id}/requirements)
+func (_ Unimplemented) GetReleaseRequirements(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Record a change of a release's security requirements, with a reason and an actor. Admin, or a key scoped to the owning product.
+// (POST /releases/{id}/requirements)
+func (_ Unimplemented) PostReleaseRequirements(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CR / IR / AR resolved for a release, each metric on its own (Release, then Project, then Product, then X), with the level it came from.
+// (GET /releases/{id}/requirements/resolved)
+func (_ Unimplemented) GetReleaseResolvedRequirements(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -600,6 +801,58 @@ func (siw *ServerInterfaceWrapper) ListProjectsOfProduct(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
+// GetProductRequirements operation middleware
+func (siw *ServerInterfaceWrapper) GetProductRequirements(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProductRequirements(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PostProductRequirements operation middleware
+func (siw *ServerInterfaceWrapper) PostProductRequirements(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PostProductRequirements(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetProductTags operation middleware
 func (siw *ServerInterfaceWrapper) GetProductTags(w http.ResponseWriter, r *http.Request) {
 
@@ -738,6 +991,58 @@ func (siw *ServerInterfaceWrapper) ListReleasesOfProject(w http.ResponseWriter, 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListReleasesOfProject(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProjectRequirements operation middleware
+func (siw *ServerInterfaceWrapper) GetProjectRequirements(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProjectRequirements(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PostProjectRequirements operation middleware
+func (siw *ServerInterfaceWrapper) PostProjectRequirements(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PostProjectRequirements(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -889,6 +1194,84 @@ func (siw *ServerInterfaceWrapper) GetBlastRadius(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetBlastRadius(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetReleaseRequirements operation middleware
+func (siw *ServerInterfaceWrapper) GetReleaseRequirements(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReleaseRequirements(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PostReleaseRequirements operation middleware
+func (siw *ServerInterfaceWrapper) PostReleaseRequirements(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PostReleaseRequirements(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetReleaseResolvedRequirements operation middleware
+func (siw *ServerInterfaceWrapper) GetReleaseResolvedRequirements(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReleaseResolvedRequirements(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1118,6 +1501,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/products/{id}/projects", wrapper.ListProjectsOfProduct)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/products/{id}/requirements", wrapper.GetProductRequirements)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/products/{id}/requirements", wrapper.PostProductRequirements)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/products/{id}/tags", wrapper.GetProductTags)
 	})
 	r.Group(func(r chi.Router) {
@@ -1131,6 +1520,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/projects/{id}/releases", wrapper.ListReleasesOfProject)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/projects/{id}/requirements", wrapper.GetProjectRequirements)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/projects/{id}/requirements", wrapper.PostProjectRequirements)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/projects/{id}/tags", wrapper.GetProjectTags)
@@ -1151,6 +1546,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/releases/{id}/blast-radius", wrapper.GetBlastRadius)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/releases/{id}/requirements", wrapper.GetReleaseRequirements)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/releases/{id}/requirements", wrapper.PostReleaseRequirements)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/releases/{id}/requirements/resolved", wrapper.GetReleaseResolvedRequirements)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/releases/{id}/tags", wrapper.GetReleaseTags)
 	})
 	r.Group(func(r chi.Router) {
@@ -1168,54 +1572,68 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"7FxtbxtHkv4rhbkDLOGGFGV7d7Ey7oMiKQ6RxBYkJWtg14haM0VOr4fdk+4eMrxAQD7dD7i7X5hfcqh+",
+	"mRmSMyIpS1oL4Reb1PRrdb089VQPf40SOSmkQGF0dPRrpFAXUmi0X86VvMlxQh8TKQwKQx9ZUeQ8YYZL",
+	"cfBPLQX9TScZThh9+neFo+go+reDetwD91QfhPFub2/jKEWdKF7QMNFRdKaUVP2IHvjWNNhXOdPmgqW8",
+	"tF8LJQtUhqNfao5M4088pW9mXmB0FGmjuBhHt3FUCv5ziT8lpTZygko3GnFhcIzKzqbw55IrTKOjvzdH",
+	"bOn/MQ795c0/MTE0yddcpO/ViUJm8MKLbnWliX1ul7m4a6NKhFmGAq6+GV4CrQW1Ad8eTIag5Az2rl8O",
+	"Dq/3YxixXPsO3ADLFbJ0DvgL19Scmg2u9/swNJAwpThqO4RmEwQm9AwVMP8nw0ypIZEpxqAlMEhyjsKA",
+	"yZgBGlaDFNQrbX1GY0iToYKECSEN3CAYmaeQ8tEIFbXWRtIK+lElthspc2SC5MZbhHFF6yrVlE+5GNO+",
+	"X2jgKfz+2//Z6ewu6Qmty4rg2svpGrh2omlMFhRh6Yjt0YbzaDvRhs4vHmKKhvG8VdUMNzm2PLltHz8t",
+	"E/Mjx9nqHB2qLNgE2ydmY9fP4ES3t3B/YEqxeeeC6OPDLKhwu+uyyYdY7wWOSd3ViTfMC2c0q2vvWOSS",
+	"QthWH++Y5xSLXM4nKEznTMFHdG0bxZQrKSbegd69oOZgi13vWuX3PFFSo5ryBB9bIl6Fn2Aa+tO206xR",
+	"wqVVNNrG65d04QJE55IKt+QuPZii0twFzLWrCuPUve5eWFfs2UQIPO0Y3O52Y6/wObvvmnwrt7RmAdt6",
+	"n+2XbEVKtnqSMTFukRxLjFSroe9vmYQUE576oJ/Y7n3wI6YtcS2OmFqHtxoL+pHlJVKv5F69+L16KWQe",
+	"Hy5vd+6wTd1Hb7LnFbhmh4+9VD/efSTfcEIk8zbvrZT3zBtu8AITqVIaP6sHrbRq60FWYl5zk2GGNbvz",
+	"o3Ur3L9UfVAYbuZddnk/5cpxihaOoSgnDVceVX4gigOib0ivnrbWzpZHJE1Mf2JWLUZSTehTlDKDPcMn",
+	"2GaPU87aQe3x+RA+4TzgZzd0w85jB2dZaTJCslKsV323+aZg7dFYWdqjjZetY3FTa7TJCbkh22+iOPo+",
+	"iqPvojj60CrNC9Qyn2LaGGVVG6szWxWSfWSFMqXJIaGkZaTk5A2kOGJlbpyUhPRNKYVBTXnQ3of9vpWF",
+	"W2s486Ye1LrhB2vdwzRseztdXDobN0pQ0HZJr8iqJb/dxEBXZb6hjbZ25PftGMR7H+8XDuk+fVWNULbs",
+	"uwy6m7bTdmRXbHyJLRqNoxEmhk9xVavfzwQQ5IAiL13GXDAKNPoF7DHwSweWpqTEGrwcXmibdHuJvtBW",
+	"tTdHLAHjrBqYcxUvNEi/rm0GXhKXnSVubL5DZPq8bJFZ+xq/kzNUvYRpTGM4/P23//3za/KPiiUGlQY5",
+	"Atb7rxgGvb9aAZE8J0x90pDIXIoYUmliKEWKSidSYQw6ZzqLIZsXGYo3wAxMpDbwckAYo8hZEugRNJ8r",
+	"itXtUzMuRnJ1nw6yqznosiikspSGZdd+MbB3njGNvVcwVohixDFP9y0BojzOtwv2+Rf8/t//Az5Jsp89",
+	"ZAZtVJmYUrEceOqOHTKOiqkkm1vh5VJ+grIIPXQfhqHhf1TdEaTI52/I42pMSkVPrdOFvbdyikowkSBp",
+	"k7aRbb//D4o2ngshlZtwDdVuj8+HjVzmKDrsD/oDkq4sULCCR0fRq/6g/4qcNTOZPYmDBfKukC7lIlWy",
+	"7OMwrcRZ0wGROx7U5iuZzh+MuuxiHW4X9cGoEu0fGizqy8Hhgy+jyvdaqNTQhiD0bRy9Hgy6Rq2WWTOz",
+	"1P7VUxC+QZAabjCXYgxGWk3jYpxjcH9HVgWBCWDphAuLoiZsXpuDFOhJ43IyYQTEq+0Dg6A+b0ChKZXQ",
+	"wEiDb3KEMD0MT90AB5MGg6IPfuXp7UFaUT8bKGDNE1kVVmyCxmru33+NOO2Y1DqQDEeOiFxUnLgh1WX4",
+	"9/Fx1XqV5Nop9j0V+xhqtYGci0+kdVU4h6aakc7XWkppAE8y0AUTOvTQG5pAHL1++XILcXSZTGPtFHEX",
+	"lzuSa6yqVqParsJGaHFjB6FawYmaQyG5MH6WrJwwAfbj2x+GsHd6fPlN73C/D3/jJpOlAZNxHUMFpF5o",
+	"IPuksMU1lEIhSzK7qFLkqF2oT1ie0zZ94SSTua9l/PDD8NTlZ9fn7y+v4MCPqq+hUFwYdHUId0BcA/7C",
+	"EpM7FiORZZFTFGe2OGLTPVus0HS+CidyagsTi27jO67NeRDNisNYKo7RbEEjgBxIH45vNIn5P4HleaUs",
+	"FsdQj59LVPPa2dj/7nIv8fKU3yIWTvPoaDhqW1Ga0zZJ8AQggQvaP1dQ4UCHd/cIYVrQGwDvfh/OTi96",
+	"F2ffn50Oj6+G79/1Bodw+peu9Ro2jtZ6wwVPNNjKtDfiapqVmlUUuGL3779djkR0xNXRxCBtS5bncxjx",
+	"3PoxuJk7VXKHatMhH2QWB/+ai7QnVc9VrmCPpDl8d3X87RkJ8qvX+0fg6pWCVJ0UVIykStwMpKQpM+yG",
+	"wKEUcJ0T1N6jKfevbfkvOBOnxfTAGcNChVFX9k4Dnn0YXl4N370FnsKMmwxs8REUs1VBkzEBI8atXUhF",
+	"Nv3JDa4xkSINGLYPVzNJ8NeTcN5CNYzR2EKfkrM+2MqgkSSwhBFCoB3SIkZc6dDnhV41sqWKxSNjw6W6",
+	"yEYRdPBgq2gtRbfFJ3+mqoqmqyVWnlIq5dgpF2wfMtZvutLnEu+9ifd0IgtMqwhtzci6UErvrU/0HnyP",
+	"iTlpMu6HmB8syxmRtSfq1DiQN8ANCJyi8tcDGrAitkkdPZv7qryd2xoJ167+f/168OoaZhna51KBkL6i",
+	"H1bljPwOOO0btsT9kJGuBH2LoxuRf9E836KpLfNxIPMjGdtCbOiIBaSBr+8Lyd6iqSVOTnx4Cntko0YW",
+	"hMzooz3kJGNc7LeJfTGjWZ/ANEvIzzCFaauA75KYh3ZqjbQjnzu6bdW9NS8cOTQ/kgr52OL5Cdc2hPvW",
+	"+w+YvCwkK25td3mtpsZ0uK4Dz8rqTh/mcbxt9H70iO4s7swKLAHoAOQO/j8k/K/uRW0K/z/L5dt0wZYJ",
+	"vDotq3CrgqqlGtKaQLtQcnpmQbelmP9QBxFHf3KO9T4Hd9ygd05+vLys6fKFCw57JxdwAEP65/jC0foh",
+	"63GlWYvifL0/BoEz1ManODbhuzx5fzF895Zs5/LV/h3Z4nFRIOWLIp8fNerMBAgZjducz+J+pnLuqCRN",
+	"znHehw8wQSY8gFwouAppMi7GNm+0RRg0iicwYnlOzZUsxxkY90zgL8b33vO1hpgeiFC3qL+5WACXiVQE",
+	"bRXSIlmelLm9Cnszh0bRgWm/jSnXXAr9JqyKtujTFtA8R2HyuatLLBrEudRPahGPAXuWLxs9OdhZLaq2",
+	"oB135+BzsM4W7Z/M5C+8AQXLslxp7QVaHUDs8jrLEmop3N1qAfZ6Rh+O0wkXsSM8CWx53OUNSc5EAzO1",
+	"BoJQVV0TAK5c6fZZOX5ffH+UqNt03gRcbCa9BGhawYt14I7I0xYqxT49ZzBDPs48si3KluM4L5/kOB7e",
+	"64Sa/hNzW90KcGlpwS/QvSy5C3vfYMFHVNcw7mn6VVrymYyxZYT36nvQMTToYc8PV2+RNLONih1uMIkO",
+	"sVrQELLB9aSxJ3hpSDtugL2nw6+/Prs4e3dVjWUBTP2KiQcRd/K+1UXAR+V9mxfVd7zvH5v33YAi6cOx",
+	"cERtzeBWSm5J2VQ6qO3OJmAFnBRmTsbD7O0chJu5wZ675JOw3HMulckqHJWa5aDZvMLtwG5c9ZQeaxO4",
+	"RLTo/gG5mOAp1tMw4QpTk4Gxzm0T8jjc73xm5HHNLDwqeWzl2iCPy2LGVApZG4fs75m5K2S9f5SDwava",
+	"3ze+B9Ju5aSqmvmdXFm4cma5ssc6vQ6uLOzO30JzKbicFDkafxfQ7y9s7CC0NIrRRzIxfzOBJaa0tdyM",
+	"dZbdw223HfW2HfXWfPfnaam3oMJNt+UgRqu+b0y9BXywo94egXrz16Z31Ntzot6ezCJ21Nsfg3rzXuDJ",
+	"qLdGINiAeqPWO+qt23k/MfX26Mexo96+ROqtoWz3pt62ynI69GsJdBcLNNXTGP02QHwrED54OBDedO0P",
+	"cTm2ojr9rwTEIROsrsH2Fm/ChvRvg4uvlkubSbiRRsNNyfM0/FZNGISZmkedSHtJPtxy9XLuw4++7YSZ",
+	"JICqsw/HJ1fBwyVMY28k8xTTo8YCLbycMOqDbnZwmgKzTGq03cC/klVRS3Im7Lav1eFfD//Sf/mnP19b",
+	"H3x90fiu0G6relOsk2u9qF67fUyudekXOHZc645rXeZaa+Zr+WKanAny+dVttNDO/cpV+NbKv97Ftz4g",
+	"axoYqqWdtLCm4WXPijUNXnMta1ob6jOjIHwsejzGNEjfMqZtYj24yZk2PVX9Il2XjJs/XPfM5Nxc+qPE",
+	"+RNZChcKfVSu3vJtHIF9fQsbrEZVo4CxYkXWejqbEnKNILIj5B6akKvfx9sRcs+GkHtKi9gRcn8AQq72",
+	"Ak9DyHUHAlq//c2ajSJCyw/zPLvI0LKHLyI2NH0+hFPxL4io4BEp7gc/Somth/CbuEz/7cO+1y5T/awU",
+	"N/XvSbUqzDoG18++Y3C7o/1TMrhPcRw7BveLY3AXle3eDK5h4zGmvY2I3Cvbdjs6192h+DKp3K3vVNw7",
+	"zTuzryOHfM7RkEu+wV5ssedk2NheXombLL1q/AqadRgdN1ns8jWqaTiUUuXRUXTACn4wPYxuP97+fwAA",
+	"AP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
