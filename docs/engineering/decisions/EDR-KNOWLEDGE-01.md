@@ -556,7 +556,7 @@ the GUI (the flat list is what it shows). **Estate note:** cards folded before t
 no statements until a source restates them; the re-discovery sweep re-asks OSV for every
 correlated release in turn, after which the re-judge pass clears the held Findings.
 
-### Amendment 2026-11-20 — CVSS source truth (EDR-SCORING-01, PROPOSED)
+### Amendment 2026-11-20 — CVSS source truth (EDR-SCORING-01, ACCEPTED 2026-11-21)
 
 EDR-SCORING-01 adds, beside the Proposals and without changing them: immutable
 **SourceObservations** (one per source revision, with append-only fetch events), one immutable

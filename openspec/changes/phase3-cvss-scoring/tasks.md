@@ -5,14 +5,15 @@ Every step waits for the owner's go and lands as its own PR.
 
 ## Group 0 — Record
 
-- [ ] 0.1 EDR-SCORING-01 merged (status ACCEPTED); EDR-KNOWLEDGE-01 amendment note added.
+- [x] 0.1 EDR-SCORING-01 merged (status ACCEPTED); EDR-KNOWLEDGE-01 amendment note added.
 
 ## Group 1 — S1 kernel calculator
 
-- [ ] 1.1 Parse 3.0 / 3.1 vectors to a metric set with X kept; refusal reasons.
-- [ ] 1.2 Base / Temporal / Environmental with Roundup (3.1) and 3.0 rounding.
-- [ ] 1.3 Candidate vectors (EDR section 11) checked against the FIRST reference calculator, then
-  table tests; official examples; property tests. 100% coverage.
+- [x] 1.1 Parse 3.0 / 3.1 vectors to a metric set with X kept; refusal reasons.
+- [x] 1.2 Base / Temporal / Environmental with Roundup (3.1) and 3.0 rounding.
+- [x] 1.3 Candidate vectors (EDR section 11) checked against an independent implementation (600-vector
+  differential test, `testdata/cvss3_oracle.tsv`), then table tests; published examples; property
+  test. 100% coverage.
 
 ## Group 2 — S2 Knowledge source truth
 

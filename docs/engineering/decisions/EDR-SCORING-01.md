@@ -1,8 +1,8 @@
 # EDR-SCORING-01 — Layered CVSS: source ratings, per-component assessment, provisional scores
 
-Status: **PROPOSED — 2026-11-20.** Domain model accepted by the owner on 2026-11-19 after review rounds v1 to v4.9.7
+Status: **ACCEPTED — 2026-11-21 (owner merged PR #229).** Domain model accepted by the owner on 2026-11-19 after review rounds v1 to v4.9.7
 (decision of 2026-11-19: selection details and ingestion details SETTLED, O1-O7 closed, lifecycle and
-integration items left OPEN for this record, section 10.3). Becomes ACCEPTED when the owner merges it.
+integration items left OPEN for this record, section 10.3). S1 built 2026-11-21 (kernel calculator).
 Date: 2026-11-20
 Author: the CVSS scoring design discussion of 2026-11-17 to 2026-11-19.
 
