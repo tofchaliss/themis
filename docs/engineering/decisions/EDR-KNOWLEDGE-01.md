@@ -555,3 +555,14 @@ this one.
 the GUI (the flat list is what it shows). **Estate note:** cards folded before this amendment hold
 no statements until a source restates them; the re-discovery sweep re-asks OSV for every
 correlated release in turn, after which the re-judge pass clears the held Findings.
+
+### Amendment 2026-11-20 — CVSS source truth (EDR-SCORING-01, PROPOSED)
+
+EDR-SCORING-01 adds, beside the Proposals and without changing them: immutable
+**SourceObservations** (one per source revision, with append-only fetch events), one immutable
+**SourceRating per publication** with its own asserted context, append-only **SourceRatingEvents**
+(`superseded` / `withdrawn`, at most one per publication), Knowledge-owned derived
+**RatingValidations** (calculator-versioned), and **AssessmentIdentity** links recorded as
+complete groupings. The reconciled single headline (`EnterpriseView.CVSS`, `SeveritySource`, the
+`redhat > nvd > osv` precedence) stays as it is for existing readers; it is no longer what a Finding's
+CVSS assessment uses. Selection per component is Governance's (EDR-SCORING-01 section 4).
