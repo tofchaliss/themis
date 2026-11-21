@@ -11,7 +11,8 @@ how the steps map onto the code.
 - **Knowledge (S2).** New tables beside the Proposals (append-only, never updated): observations,
   seen events, ratings, rating events, validations, identity links. Feed adapters report
   "complete revision" separately from "fetch succeeded" (EDR 3.4 item 7). The single headline
-  (`EnterpriseView.CVSS`) stays for old readers. Read API `GET /faultlines/{id}/ratings`.
+  (`EnterpriseView.CVSS`) stays for old readers. Read API `GET /faultlines/{id}/ratings`. Built
+  2026-11-21: migration 000013, the observation rides the Proposal into `FoldProposal` (EDR 12.1).
 - **Registry (S3).** One requirements row per level with reason and actor; resolution per metric
   (component exception > Release > Project > Product > X) computed in the domain.
 - **Governance (S4).** ComponentAssessment revisions keyed by (finding, purl), immutable, with the

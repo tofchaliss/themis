@@ -82,7 +82,11 @@ type Knowledge struct {
 	// (tiny, Rocky-exclusive packages) and RLSA per-CVE (large, the modular fix bounds).
 	RockyErrata *app.BackfillService
 	Vexfeed     *app.VexEnrichmentService // nil when the generic CSAF-VEX feed is disabled
-	Health      *app.FeedHealthService    // always set; the schedulers record into it (B1)
+	// Ratings records and reads CVSS source truth (EDR-SCORING-01 S2). Always set.
+	Ratings *app.RatingService
+	// CVEOrg records CVE.org CNA / ADP ratings; nil unless THEMIS_CVEORG_ENABLED=1.
+	CVEOrg *app.CVEOrgEnrichmentService
+	Health *app.FeedHealthService // always set; the schedulers record into it (B1)
 	// Reattribute re-asks the discovery feeds about components already in the estate, so cards
 	// folded before fix-attribution existed gain it without a new SBOM (KN-FIX-2). Always set —
 	// it rides the always-on OSV discovery source, not an opt-in feed.
@@ -170,6 +174,15 @@ type RedHatConfig struct {
 	HTTP       *http.Client // optional; nil → http.DefaultClient
 }
 
+// CVEOrgConfig configures the optional CVE.org feed (EDR-SCORING-01 S2, F13): the CNA's and
+// every ADP's CVSS ratings for the already-carded CVEs, recorded as source truth only (no
+// Proposal, so nothing about a card's headline changes). Off by default: no silent outbound call.
+type CVEOrgConfig struct {
+	Enabled bool
+	BaseURL string       // "" → the public CVE Services API
+	HTTP    *http.Client // optional; nil → http.DefaultClient
+}
+
 // RockyConfig configures the optional Rocky errata feeds (GUI-5, EDR-VEX-01 D11; KN-MODULE-4).
 // One flag arms two sweeps over the same Apollo client, because they are one Rocky knowledge
 // source in two shapes:
@@ -240,7 +253,7 @@ type VerdictConfig struct {
 // unauthenticated reads, the auth-off dev case), outbox publisher, and NVD-watch config.
 // Reconciliation precedence ranks NVD over OSV (the authoritative source wins ties — D-FEED-2
 // source tiers), so NVD's watch Proposals become the reconciled headline on cards OSV created.
-func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, rocky RockyConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig, verdict VerdictConfig) Knowledge {
+func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, rocky RockyConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig, verdict VerdictConfig, cveorg CVEOrgConfig) Knowledge {
 	st := store.New(pool)
 	read := app.NewReadService(st, st).WithRecent(st).WithAdvisory(st)
 	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
@@ -252,6 +265,11 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 		// without it, a stable estate — where no new correlation runs — keeps every component
 		// `unknown` forever.
 		WithMatchReader(st)
+	// Source ratings (EDR-SCORING-01 S2) are always recorded: every feed path folds through
+	// FoldProposal, and a feed that attaches its source revision is recorded there. It costs
+	// only local writes, never an outbound call.
+	ratings := app.NewRatingService(st, idGen{}, sysClock{})
+	fold.WithRatings(ratings)
 	evClient := evidenceClient(evidenceBaseURL, readAPIKey)
 	health := app.NewFeedHealthService(st, sysClock{})
 	// OSV is the always-on discovery feed — queried per component on every upload, with no poll
@@ -308,7 +326,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 	// press, never a schedule — so it needs no enable flag either, and it stores nothing.
 	published := app.NewPublishedService(feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st, sysClock{})
 	kn := Knowledge{
-		Handler:     knhttp.NewHandler(read, health).WithGather(gather).WithPublished(published).WithScanner(scanSvc).WithSanity(st).Router(),
+		Handler:     knhttp.NewHandler(read, health).WithGather(gather).WithPublished(published).WithScanner(scanSvc).WithSanity(st).WithRatings(ratings).Router(),
 		Store:       st,
 		Consumer:    inbound.NewConsumer(app.NewCoordinator(corr, vexSvc).WithScanner(scanSvc)),
 		Correlation: corr,
@@ -371,6 +389,10 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 		// including the one this feature was built for, were never reached.
 		kn.RockyErrata = app.NewBackfillService("rocky", rockyClient, st, fold,
 			rocky.BackfillLimit, rocky.StaleAfter)
+	}
+	kn.Ratings = ratings
+	if cveorg.Enabled {
+		kn.CVEOrg = app.NewCVEOrgEnrichmentService(feed.NewCVEOrgClient(cveorg.BaseURL, cveorg.HTTP), st, ratings)
 	}
 	if vexfeed.Enabled {
 		kn.Vexfeed = app.NewVexEnrichmentService(feed.NewCSAFVexClient(vexfeed.BaseURLs, vexfeed.HTTP), st, fold)

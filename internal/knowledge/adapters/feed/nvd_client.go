@@ -15,6 +15,7 @@ import (
 
 	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/app"
+	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
 // NVDBaseURL is the default NVD 2.0 CVE API endpoint.
@@ -226,8 +227,12 @@ type nvdMetrics struct {
 // nvdMetric is one CVSS metric entry. `type` is Primary (NVD analysts) or Secondary (the
 // CNA); baseSeverity sits on cvssData for v3.x/v4.0 and at the top level for v2.
 type nvdMetric struct {
+	// Source is the assessor of this metric: NVD's own address for Primary, the CNA's for
+	// Secondary (F10 — unread until EDR-SCORING-01 S2).
+	Source   string `json:"source"`
 	Type     string `json:"type"`
 	CVSSData struct {
+		Version      string  `json:"version"`
 		BaseScore    float64 `json:"baseScore"`
 		BaseSeverity string  `json:"baseSeverity"`
 		VectorString string  `json:"vectorString"`
@@ -643,7 +648,49 @@ func (c *NVDClient) translate(cve nvdLiveCVE) (app.ProposalFor, bool, error) {
 	if len(translated) == 0 {
 		return app.ProposalFor{}, false, nil
 	}
-	return app.ProposalFor{CVE: translated[0].CVE, Proposal: translated[0].Proposal}, true, nil
+	p := translated[0].Proposal.WithObservation(nvdObservation(cve))
+	return app.ProposalFor{CVE: translated[0].CVE, Proposal: p}, true, nil
+}
+
+// nvdObservation is the NVD record as source truth (EDR-SCORING-01 S2): EVERY metric of every
+// version, Primary and Secondary, each with its assessor. The single headline above is
+// unchanged; this is what it was chosen from. NVD has no revision id, so the revision is the
+// fingerprint of the parsed content, and lastModified is NVD's own update time (zone-less,
+// read as UTC by this contract).
+func nvdObservation(cve nvdLiveCVE) domain.ObservationInput {
+	obs := domain.ObservationInput{
+		Source: "nvd", Feed: "nvd-api-2.0", DocumentRef: "nvd:" + strings.TrimSpace(cve.ID),
+		UpdatedAt: domain.ParseSourceTime(cve.LastModified), Complete: true,
+		Applicability: nvdVulnerableProducts(cve.Configurations),
+	}
+	for _, group := range []struct {
+		version string
+		metrics []nvdMetric
+	}{{"3.1", cve.Metrics.V31}, {"3.0", cve.Metrics.V30}, {"4.0", cve.Metrics.V40}, {"2.0", cve.Metrics.V2}} {
+		for _, m := range group.metrics {
+			if strings.TrimSpace(m.CVSSData.VectorString) == "" {
+				continue
+			}
+			version := strings.TrimSpace(m.CVSSData.Version)
+			if version == "" {
+				version = group.version
+			}
+			word := m.CVSSData.BaseSeverity
+			if word == "" {
+				word = m.BaseSeverity
+			}
+			assessor := strings.TrimSpace(m.Source)
+			if assessor == "" {
+				assessor = "nvd"
+			}
+			obs.Ratings = append(obs.Ratings, domain.PublishedRating{
+				Assessor: assessor, Publisher: "nvd", NVDType: strings.TrimSpace(m.Type), Version: version,
+				Vector: m.CVSSData.VectorString, StatedScore: m.CVSSData.BaseScore, HasStatedScore: true,
+				SeverityWord: word,
+			})
+		}
+	}
+	return obs
 }
 
 // extractNVDCVSS reads CVSS severity/score/vector in a fixed version precedence —

@@ -199,6 +199,29 @@ type Proposal struct {
 	vulnFacts     *VulnFacts
 	exploitSignal *ExploitSignal
 	applicability *Applicability
+	// observation is the source revision this Proposal was parsed from, when the feed reports
+	// one (EDR-SCORING-01 S2). It is TRANSPORT ONLY: never persisted with the Proposal, never
+	// part of its content or of restatement detection. FaultlineService records it as source
+	// ratings beside the fold, which is how every feed path reaches the rating store through
+	// the one door they already share.
+	observation *ObservationInput
+}
+
+// WithObservation returns a copy of the Proposal carrying the source revision it came from.
+func (p Proposal) WithObservation(o ObservationInput) Proposal {
+	c := o
+	c.Ratings = append([]PublishedRating(nil), o.Ratings...)
+	c.Applicability = append([]string(nil), o.Applicability...)
+	p.observation = &c
+	return p
+}
+
+// Observation returns the attached source revision, if any.
+func (p Proposal) Observation() (ObservationInput, bool) {
+	if p.observation == nil {
+		return ObservationInput{}, false
+	}
+	return *p.observation, true
 }
 
 // sameAs reports whether two VulnFacts carry identical content (KN-PROPOSAL-BLOAT-1). Slices

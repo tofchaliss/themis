@@ -89,6 +89,10 @@ type config struct {
 	redhatChangesURL   string        // THEMIS_REDHAT_CHANGES_URL — per-CVE VEX changes.csv the D10 modified-since gate reads (empty → Red Hat's public VEX change log). The gate fails open to a full sweep, so it has no enable switch of its own.
 	redhatPollInterval time.Duration // THEMIS_REDHAT_POLL_INTERVAL — Go duration between Red Hat sweeps (default 12h; falls back to 12h if unparseable).
 
+	cveorgEnabled      bool          // THEMIS_CVEORG_ENABLED=1 — enable the scheduled CVE.org feed (CNA + ADP CVSS ratings of already-carded CVEs, recorded as source ratings only; EDR-SCORING-01 S2; default off).
+	cveorgURL          string        // THEMIS_CVEORG_URL — CVE Services API base URL (empty → the public cveawg.mitre.org/api default; no API key needed).
+	cveorgPollInterval time.Duration // THEMIS_CVEORG_POLL_INTERVAL — Go duration between CVE.org sweeps (default 24h; falls back to 24h if unparseable).
+
 	alpineEnabled      bool          // THEMIS_ALPINE_ENABLED=1 — enable the scheduled Alpine secdb feed (branch-DB fetch, fixed apk version bounds folded onto already-carded CVEs; EDR-VEX-01 D7; default off).
 	alpineURL          string        // THEMIS_ALPINE_URL — Alpine secdb base URL (empty → the public secdb.alpinelinux.org default).
 	alpineBranches     []string      // THEMIS_ALPINE_BRANCHES — comma-separated secdb branches to sweep (e.g. v3.20,v3.21). A branch absent upstream 404s harmlessly, so the default over-covers; set it to the branches your estate actually ships.
@@ -156,6 +160,10 @@ func loadConfig() config {
 		redhatURL:          os.Getenv("THEMIS_REDHAT_URL"),
 		redhatChangesURL:   os.Getenv("THEMIS_REDHAT_CHANGES_URL"),
 		redhatPollInterval: parseDurationDefault(os.Getenv("THEMIS_REDHAT_POLL_INTERVAL"), 12*time.Hour),
+
+		cveorgEnabled:      os.Getenv("THEMIS_CVEORG_ENABLED") == "1",
+		cveorgURL:          os.Getenv("THEMIS_CVEORG_URL"),
+		cveorgPollInterval: parseDurationDefault(os.Getenv("THEMIS_CVEORG_POLL_INTERVAL"), 24*time.Hour),
 
 		alpineEnabled:      os.Getenv("THEMIS_ALPINE_ENABLED") == "1",
 		alpineURL:          os.Getenv("THEMIS_ALPINE_URL"),
@@ -267,6 +275,10 @@ func main() {
 		FanoutSuspectAt:       cfg.fanoutSuspectAt,
 		ReverdictBatch:        cfg.reverdictBatch,
 		ReclassifyBatch:       cfg.reclassifyBatch,
+	}, wiring.CVEOrgConfig{
+		Enabled: cfg.cveorgEnabled,
+		BaseURL: cfg.cveorgURL,
+		HTTP:    &http.Client{Timeout: 30 * time.Second},
 	})
 
 	// Whether the Evidence read seam carries a credential is the difference between a working
@@ -348,6 +360,14 @@ func main() {
 	if kn.RedHat != nil {
 		go redhatLoop(kn.RedHat, kn.Health, cfg.redhatPollInterval, logger.Component("redhat"), kn.Reverdict.Nudge)
 		logger.Info("red hat vendor feed enabled", observability.String("interval", cfg.redhatPollInterval.String()))
+	}
+
+	// Scheduled CVE.org feed (EDR-SCORING-01 S2): records the CNA's and every ADP's CVSS ratings
+	// of already-carded CVEs as source truth. No Proposal, so no headline changes. Off unless
+	// THEMIS_CVEORG_ENABLED=1.
+	if kn.CVEOrg != nil {
+		go cveorgLoop(kn.CVEOrg, kn.Health, cfg.cveorgPollInterval, logger.Component("cveorg"))
+		logger.Info("cve.org feed enabled", observability.String("interval", cfg.cveorgPollInterval.String()))
 	}
 
 	// Scheduled Alpine secdb feed (D5, EDR-VEX-01 D7): folds fixed apk version bounds onto
@@ -764,6 +784,28 @@ func signalLoop(sig *app.SignalEnrichmentService, health *app.FeedHealthService,
 		}
 	}
 	time.Sleep(20 * time.Second) // let the service settle; the bulk feeds are large
+	sweep()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		sweep()
+	}
+}
+
+// cveorgLoop runs the scheduled CVE.org feed: one sweep shortly after startup, then every
+// interval. A failure is logged, recorded on feed health and retried next tick.
+func cveorgLoop(svc *app.CVEOrgEnrichmentService, health *app.FeedHealthService, interval time.Duration, logger *observability.Logger) {
+	sweep := func() {
+		n, err := svc.Enrich(context.Background())
+		if err != nil {
+			logger.Error("cve.org sweep failed", observability.Err(err))
+			recordFeed(health, "cveorg", err, logger)
+			return
+		}
+		recordFeed(health, "cveorg", nil, logger)
+		logger.Info("cve.org sweep recorded", observability.Int("records", n))
+	}
+	time.Sleep(35 * time.Second) // let the service settle; per-CVE fetches scale with the card set
 	sweep()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
