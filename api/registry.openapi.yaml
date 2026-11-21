@@ -382,6 +382,185 @@ paths:
                 $ref: '#/components/schemas/Problem'
         '422':
           $ref: '#/components/responses/Problem'
+  /products/{id}/requirements:
+    get:
+      operationId: getProductRequirements
+      summary: A product's CVSS security requirements (CR / IR / AR) — current record and history, newest first (EDR-SCORING-01 S3).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementHistory'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: postProductRequirements
+      summary: Record a change of a product's security requirements, with a reason and an actor. Admin, or a key scoped to the owning product.
+      description: >
+        Append-only: the change is a new record and the earlier ones stay. X means this level states
+        nothing, so the metric falls through to the next level (Release, then Project, then Product).
+        Scores are recalculated by Governance as new revisions; nothing is changed silently.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementChange'
+      responses:
+        '201':
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /projects/{id}/requirements:
+    get:
+      operationId: getProjectRequirements
+      summary: A project's CVSS security requirements (CR / IR / AR) — current record and history, newest first (EDR-SCORING-01 S3).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementHistory'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: postProjectRequirements
+      summary: Record a change of a project's security requirements, with a reason and an actor. Admin, or a key scoped to the owning product.
+      description: >
+        Append-only: the change is a new record and the earlier ones stay. X means this level states
+        nothing, so the metric falls through to the next level (Release, then Project, then Product).
+        Scores are recalculated by Governance as new revisions; nothing is changed silently.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementChange'
+      responses:
+        '201':
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /releases/{id}/requirements:
+    get:
+      operationId: getReleaseRequirements
+      summary: A release's CVSS security requirements (CR / IR / AR) — current record and history, newest first (EDR-SCORING-01 S3).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementHistory'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: postReleaseRequirements
+      summary: Record a change of a release's security requirements, with a reason and an actor. Admin, or a key scoped to the owning product.
+      description: >
+        Append-only: the change is a new record and the earlier ones stay. X means this level states
+        nothing, so the metric falls through to the next level (Release, then Project, then Product).
+        Scores are recalculated by Governance as new revisions; nothing is changed silently.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequirementChange'
+      responses:
+        '201':
+          description: Recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequirementRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /releases/{id}/requirements/resolved:
+    get:
+      operationId: getReleaseResolvedRequirements
+      summary: CR / IR / AR resolved for a release, each metric on its own (Release, then Project, then Product, then X), with the level it came from.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolvedRequirements'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /products/{id}/tags:
     get:
       operationId: getProductTags
@@ -615,6 +794,70 @@ components:
           type: string
         version:
           type: string
+    RequirementValue:
+      type: string
+      enum: [H, M, L, X]
+    RequirementChange:
+      type: object
+      required: [reason, actor]
+      properties:
+        cr: { $ref: '#/components/schemas/RequirementValue' }
+        ir: { $ref: '#/components/schemas/RequirementValue' }
+        ar: { $ref: '#/components/schemas/RequirementValue' }
+        reason:
+          type: string
+          description: Why the requirements change. Required.
+        actor:
+          type: string
+          description: Who decided the change. Required.
+    RequirementRecord:
+      type: object
+      required: [level, entity_id, cr, ir, ar, reason, actor, recorded_at]
+      properties:
+        level:
+          type: string
+          enum: [product, project, release]
+        entity_id: { type: string }
+        cr: { $ref: '#/components/schemas/RequirementValue' }
+        ir: { $ref: '#/components/schemas/RequirementValue' }
+        ar: { $ref: '#/components/schemas/RequirementValue' }
+        reason: { type: string }
+        actor: { type: string }
+        via:
+          type: string
+          description: The API key that recorded the change, when auth is on.
+        recorded_at:
+          type: string
+          format: date-time
+    RequirementHistory:
+      type: object
+      required: [history]
+      properties:
+        current:
+          $ref: '#/components/schemas/RequirementRecord'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/RequirementRecord'
+    ResolvedRequirement:
+      type: object
+      required: [value, level]
+      properties:
+        value: { $ref: '#/components/schemas/RequirementValue' }
+        level:
+          type: string
+          enum: [release, project, product, default]
+          description: The level the value came from; default when no level states it (X).
+    ResolvedRequirements:
+      type: object
+      required: [cr, ir, ar]
+      properties:
+        cr: { $ref: '#/components/schemas/ResolvedRequirement' }
+        ir: { $ref: '#/components/schemas/ResolvedRequirement' }
+        ar: { $ref: '#/components/schemas/ResolvedRequirement' }
+        release: { $ref: '#/components/schemas/RequirementRecord' }
+        project: { $ref: '#/components/schemas/RequirementRecord' }
+        product: { $ref: '#/components/schemas/RequirementRecord' }
     TagSet:
       type: object
       required: [tags, effective]

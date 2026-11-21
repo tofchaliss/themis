@@ -25,7 +25,8 @@ Every step waits for the owner's go and lands as its own PR.
 
 ## Group 3 — S3 Registry requirements
 
-- [ ] 3.1 CR / IR / AR per Product / Project / Release with reason; per-metric resolution; API.
+- [x] 3.1 CR / IR / AR per Product / Project / Release with reason; per-metric resolution; API
+  (EDR 12.2; component exception waits for S6).
 
 ## Group 4 — S4 Governance assessment (shadow)
 

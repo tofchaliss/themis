@@ -7,6 +7,7 @@ package wiring
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -21,7 +22,8 @@ import (
 // /api/v1) plus the Store for operational tasks.
 func RegistryAPI(pool *pgxpool.Pool) (http.Handler, *store.Store) {
 	st := store.New(pool)
-	svc := app.NewRegistryService(st, idGen{})
+	// Security requirements (EDR-SCORING-01 S3) ride the same store and database.
+	svc := app.NewRegistryService(st, idGen{}).WithRequirements(st, func() time.Time { return time.Now().UTC() })
 	return reghttp.NewHandler(svc).Router(), st
 }
 
