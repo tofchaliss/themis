@@ -349,6 +349,12 @@ three angles, and two of them proposed fixes that would not have worked.
 
 ### A. Milestones not yet implemented (in dependency order)
 
+- [ ] **Dashboard front end on React + shadcn/ui + Tailwind CSS** (id `GUI-REACT-1`, owner ask
+  2026-11-22). EDR-GUI-02 (PROPOSED) + `openspec/changes/phase3-gui-react`. Vite SPA committed as
+  build output and embedded (no Node for `go build`), today's hash routes kept, three shades
+  (Enterprise default, Midnight, Ops night), new GUI at `/next/` screen by screen, then the
+  switch. Steps G1-G7, one PR each on the owner's go.
+
 - [ ] **Layered CVSS scoring** (id `KN-CVSS-LAYERS-1`, S3 severity: the shown score does not
   match the vendor's or CNA's for the component). EDR-SCORING-01 (ACCEPTED 2026-11-21; domain
   model accepted by the owner 2026-11-19) + `openspec/changes/phase3-cvss-scoring`. Steps S1-S8,
@@ -6422,7 +6428,8 @@ under the 2026-08-07 re-derivation standard.
   reader's own `source_context` (it already does — say so in INSTALLATION.md §8, done).
   Evidence: `docs/engineering/vm-test-2026-10-12.md` Test 2/3.
 
-- [ ] **Record the GUI's vanilla-JS-no-framework choice as an explicit decision (LOW, docs-only).**
+- [x] **Record the GUI's vanilla-JS-no-framework choice as an explicit decision (LOW, docs-only).**
+  ✅ **CLOSED 2026-11-22**: recorded, with alternatives, and reversed by the owner in EDR-GUI-02.
   Surfaced 2026-08-17: EDR-GUI-01 fixes D1 (a view, one static binary), D7 (a `node --check` JS
   syntax gate — meaningful only because there is no build step), and D8 (`go:embed` assets), and
   STACK.md rejects heavy frameworks on the Go side — but nowhere is "hand-written vanilla JS, no
