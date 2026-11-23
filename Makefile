@@ -32,7 +32,7 @@ COVERAGE_PKGS_GREENFIELD := ./internal/kernel/... ./internal/registry/... ./inte
 # cannot disagree about what "greenfield" means.
 GREENFIELD_DIRS := $(patsubst ./%/...,%,$(COVERAGE_PKGS_GREENFIELD))
 
-.PHONY: all build vet-tags clean tidy js-check test test-greenfield test-integration test-property test-property-greenfield property-run lint coverage coverage-greenfield coverage-pkg deadcode clean-arch arch-test check check-ci \
+.PHONY: all build vet-tags clean tidy js-check web-install web-build web-check web-verify web-dev test test-greenfield test-integration test-property test-property-greenfield property-run lint coverage coverage-greenfield coverage-pkg deadcode clean-arch arch-test check check-ci \
 	migrate-up migrate-down generate-api generate-api-evidence generate-api-registry generate-api-knowledge e2e-evidence e2e-pipeline e2e-llm e2e-embed verify-build
 
 # Greenfield context-first trees under internal/ (ring names domain/app/adapters).
@@ -134,6 +134,34 @@ lint:
 js-check:
 	@for f in cmd/dashboard/static/*.js; do node --check $$f || exit 1; done; echo "js-check: OK"
 
+# ---- The new dashboard front end (EDR-GUI-02, web/dashboard) ----
+# The built files are COMMITTED under cmd/dashboard/static/next (D3), so `go build` and the VM
+# build need no Node. These targets need Node 22 (web/dashboard/.nvmrc).
+WEB := web/dashboard
+
+web-install:
+	cd $(WEB) && npm ci
+
+# Rebuild the committed output after changing web/dashboard (then commit it).
+web-build: web-install
+	cd $(WEB) && npm run build
+
+# Lint, type check, API types current, tests with coverage (D10).
+web-check: web-install
+	cd $(WEB) && npm run check
+
+# The committed build matches the source: a clean build must leave no change (D3).
+web-verify: web-build
+	@if [ -n "$$(git status --porcelain -- cmd/dashboard/static/next $(WEB)/src/types/api)" ]; then \
+		git status --porcelain -- cmd/dashboard/static/next $(WEB)/src/types/api; \
+		echo "web-verify: the committed GUI build is stale: run 'make web-build' and commit cmd/dashboard/static/next"; exit 1; \
+	fi; echo "web-verify: OK"
+
+# Hot-reload dev server proxying /api, /whoami, /login, /logout to a running dashboard
+# (THEMIS_DASHBOARD_URL, default http://localhost:8090). Open http://localhost:5173/next/.
+web-dev: web-install
+	cd $(WEB) && npm run dev
+
 coverage:
 	$(GO) test $(GO_TEST_FLAGS) -tags=integration -p 1 -coverprofile=$(COVERAGE_OUT) -covermode=atomic $(COVERAGE_PKGS)
 	$(GO) tool cover -func=$(COVERAGE_OUT) | tee $(COVERAGE_TXT)
@@ -180,14 +208,14 @@ clean-arch:
 arch-test:
 	$(GO) test $(GO_TEST_FLAGS) ./tests/architecture/...
 
-check: build vet-tags test lint js-check clean-arch arch-test coverage deadcode
+check: build vet-tags test lint js-check web-check web-verify clean-arch arch-test coverage deadcode
 
 # CI gate — greenfield-scoped: same as `check`, but BOTH the unit tests and coverage cover only
 # the go-forward tree (the frozen v0.3.x legacy tests are green only on macOS's coarse clock,
 # are reference-only, and include a known-flaky property that cannot be fixed under the freeze —
 # CI-PROP-1). Run by .github/workflows/{pr,main}.yml; `make check` stays whole-repo
 # for local use.
-check-ci: build vet-tags test-greenfield lint js-check clean-arch arch-test coverage-greenfield deadcode
+check-ci: build vet-tags test-greenfield lint js-check web-check web-verify clean-arch arch-test coverage-greenfield deadcode
 
 # Type-check EVERY build tag, not just the untagged default.
 #

@@ -12,7 +12,9 @@
 // stored here, so "a view, never a context" is unchanged.
 //
 // The static assets are embedded (go:embed, D8) so the deliverable stays one static
-// binary, like every other node.
+// binary, like every other node. static/next/ is the new GUI's committed build output
+// (EDR-GUI-02 D3), built from web/dashboard; `all:` keeps a Vite chunk whose name starts
+// with "_" from being silently left out of the binary.
 package main
 
 import (
@@ -42,7 +44,7 @@ import (
 	"github.com/themis-project/themis/internal/platform/observability"
 )
 
-//go:embed static
+//go:embed all:static
 var staticFS embed.FS
 
 // config is read from the environment. Every option is documented here (the
@@ -357,15 +359,19 @@ func applyMigrations(dsn, path string) error {
 // assetHandler serves the embedded static assets, or a directory override for
 // design iteration (D8). Unknown paths fall back to index.html only at "/" — the
 // app routes with URL hashes, so no history-API fallback is needed.
+//
+// The new GUI (EDR-GUI-02) is the same tree's next/ directory, served at /next/ with its own
+// cache, compression and CSP rules (next.go).
 func assetHandler(override string) (http.Handler, error) {
 	if override != "" {
-		return http.FileServer(http.Dir(override)), nil
+		dir := os.DirFS(override)
+		return withNext(http.FileServer(http.FS(dir)), dir), nil
 	}
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		return nil, err
 	}
-	return http.FileServer(http.FS(sub)), nil
+	return withNext(http.FileServer(http.FS(sub)), sub), nil
 }
 
 func envDefault(key, def string) string {

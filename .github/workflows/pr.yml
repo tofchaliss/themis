@@ -27,6 +27,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # The dashboard front end (EDR-GUI-02 D10): `make check-ci` runs web-check and
+      # web-verify, which need Node. The version comes from web/dashboard/.nvmrc.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: web/dashboard/.nvmrc
+          cache: npm
+          cache-dependency-path: web/dashboard/package-lock.json
+
       # Installed as a plain binary (not golangci-lint-action) so it is not run
       # twice: `make check` -> `make lint` already runs `golangci-lint run ./...`.
       - name: Install golangci-lint
