@@ -32,7 +32,7 @@ What the mockups fix (named so each G-step can check it):
 6. **Shade picker** in the top bar with the three shades.
 7. **One CVE row, its releases in a dropdown** (Vulnerabilities list, D13): clicking the row
    opens the CVE details drawer; clicking the arrow lists the affected releases with who
-   decided each one (AUTO / MANUAL), stages, source and Themis score, dates, disposition,
+   decided each one (AUTO / MANUAL), source and Themis score, dates, disposition,
    rationale and ticket. The column mapping is in EDR-GUI-02 D13.
 
 Open points the mockups do not settle (each is decided in the step that builds the screen, and

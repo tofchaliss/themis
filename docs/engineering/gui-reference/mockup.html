@@ -163,9 +163,6 @@ tr.subwrap > td { padding:0 12px 12px 46px; background:var(--sel); }
 .sub { border:1px solid var(--line); border-radius:8px; background:var(--card); overflow:hidden; }
 .sub .subhead { display:flex; justify-content:space-between; align-items:center; padding:7px 10px; border-bottom:1px solid var(--line); color:var(--ink2); font-size:12px; }
 .sub th, .sub td { padding:6px 9px; font-size:12px; }
-.stages { display:flex; gap:3px; }
-.stages i { width:9px; height:9px; border-radius:50%; background:var(--line); display:block; }
-.stages i.on { background:var(--st-good); }
 .cnt { font-variant-numeric:tabular-nums; }
 .cnt em { font-style:normal; color:var(--muted); }
 
@@ -468,14 +465,13 @@ if (q.get("view") === "vulns") {
   ];
   const ic = '<span class="acts"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/></svg></span>';
   const sub = `<tr class="subwrap"><td colspan="10"><div class="sub">
-    <div class="subhead"><span><b style="color:var(--ink)">Affected releases</b> · 4 in scope</span><span>Stages: decided · remediated · published</span></div>
-    <table><thead><tr><th style="width:24px"><input type="checkbox"></th><th>Release</th><th>Decided by</th><th>Decision</th><th>Stages</th><th class="num">Source</th><th class="num">Themis</th><th>Decided</th><th>Published</th><th>Disposition</th><th>Rationale</th><th>Ticket</th><th></th></tr></thead><tbody>
+    <div class="subhead"><span><b style="color:var(--ink)">Affected releases</b> · 4 in scope</span><span>Click a release to open its posture</span></div>
+    <table><thead><tr><th style="width:24px"><input type="checkbox"></th><th>Release</th><th>Decided by</th><th>Decision</th><th class="num">Source</th><th class="num">Themis</th><th>Decided</th><th>Published</th><th>Disposition</th><th>Rationale</th><th>Ticket</th><th></th></tr></thead><tbody>
     ${R.map((r,i) => `<tr${r[2]==="undecided" ? ' style="background:var(--hover)"' : ""}>
       <td><input type="checkbox"${i>=2 ? " checked" : ""}></td><td><span class="chip">${r[0]}</span></td>
       <td>${r[1]==="auto" ? '<span class="dec auto">AUTO</span>' : r[1]==="man" ? '<span class="dec man">MANUAL</span>' : '<span class="pkg">—</span>'}</td>
       <td>${r[2]==="undecided" ? '<span class="badge">undecided</span>' : '<span class="badge acc">'+r[2]+'</span>'}</td>
-      <td><span class="stages">${r[3].map(x => `<i${x ? ' class="on"' : ""}></i>`).join("")}</span></td>
-      <td class="num">${r[4]}</td><td class="num"><b>${r[5]}</b></td><td class="pkg">${r[6]}</td><td class="pkg">${r[7]}</td>
+            <td class="num">${r[4]}</td><td class="num"><b>${r[5]}</b></td><td class="pkg">${r[6]}</td><td class="pkg">${r[7]}</td>
       <td>${r[8]}</td><td class="rationale">${r[9]}</td>
       <td>${r[10]==="—" ? '<span class="pkg">—</span>' : '<span class="ticket">'+r[10]+'</span>'}</td><td>${ic}</td></tr>`).join("")}
     </tbody></table></div></td></tr>`;

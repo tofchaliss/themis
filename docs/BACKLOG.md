@@ -355,6 +355,12 @@ three angles, and two of them proposed fixes that would not have worked.
   (Enterprise default, Midnight, Ops night), new GUI at `/next/` screen by screen, then the
   switch. Steps G1-G7, one PR each on the owner's go.
 
+- [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
+  feature). The owner's reference table shows per-release assessment-type markers (five status
+  dots next to the AUTO / MANUAL column). Deferred: the Vulnerabilities dropdown (EDR-GUI-02 D13)
+  ships without them. Needs a definition of each assessment type and where Themis records it
+  before any GUI work.
+
 - [ ] **Layered CVSS scoring** (id `KN-CVSS-LAYERS-1`, S3 severity: the shown score does not
   match the vendor's or CNA's for the component). EDR-SCORING-01 (ACCEPTED 2026-11-21; domain
   model accepted by the owner 2026-11-19) + `openspec/changes/phase3-cvss-scoring`. Steps S1-S8,

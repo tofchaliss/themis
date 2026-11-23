@@ -227,7 +227,7 @@ table) to Themis data:
 | Expand arrow, checkbox | arrow, checkbox | checkbox feeds "Decide for selected", which maps onto EDR-SYNC-01 scope |
 | Actions (copy, attach, delete, view) | open release posture, history | **no delete**: Themis never deletes a Finding or a Position |
 | AT (MA / AA) | **Decided by**: MANUAL / AUTO | the Position's `decided_by`: a named person, or a policy rule. An AI or vendor proposal is never AUTO; it waits for a person |
-| MI · RA · I · E · M (status dots) | **Stages**: decided · remediated · published | Finding stage times (EDR-REMEDIATION-01) and Communication publications. The reference's five letters are not mapped one to one; the owner confirms the meaning in G2 |
+| MI · RA · I · E · M (status dots) | **not shown** | these are assessment-type details; the owner deferred them to a later feature (2026-11-23, BACKLOG `GUI-ASSESS-TYPE-1`) |
 | Release, Product | Release (product and project in the scope picker) | Registry |
 | Overall score / severity | **Source** | the selected source rating (EDR-SCORING-01) |
 | Expert score / severity | **Themis** | the per-component Environmental score with this release's requirements (EDR-SCORING-01 S4; a person's governed vector change comes with S6) |
