@@ -1,0 +1,1 @@
+import{B as e,nt as t,tt as n}from"./index-Dw5l9I3-.js";t();var r=n();function i({className:t,...n}){return(0,r.jsx)(`select`,{className:e(`h-8 w-full rounded-lg border border-line bg-card px-2 text-[13px] text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50`,t),...n})}export{i as t};

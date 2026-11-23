@@ -45,7 +45,7 @@ export function TopBar({
         {defaultPassword && (
           // Plain and persistent, not a toast: it has to still be there next time somebody looks.
           <a
-            href="/old/#/admin"
+            href="#/admin"
             className="rounded-lg border border-warn/60 bg-warn/15 px-2.5 py-1 text-xs font-medium text-ink"
             title="The dashboard's admin account still uses the password it shipped with"
           >

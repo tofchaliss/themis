@@ -10,13 +10,13 @@ type Item = { id: string; label: string; hash: string; icon: ComponentType<{ cla
 export const RAIL: Item[] = [
   { id: "overview", label: "Overview", hash: "#/", icon: LayoutGrid, here: true },
   { id: "estate", label: "Estate", hash: "#/estate", icon: Network, here: true },
-  { id: "sbom", label: "SBOM manager", hash: "#/sbom", icon: Boxes, here: false },
-  { id: "compare", label: "Compare", hash: "#/compare", icon: GitCompareArrows, here: false },
-  { id: "new", label: "What's new", hash: "#/new", icon: Sparkles, here: false },
-  { id: "reports", label: "Reports", hash: "#/reports", icon: ChartColumn, here: false },
-  { id: "watches", label: "Watches", hash: "#/watches", icon: Eye, here: false },
-  { id: "feeds", label: "Feeds", hash: "#/feeds", icon: Rss, here: false },
-  { id: "admin", label: "Admin", hash: "#/admin", icon: ShieldCheck, here: false, adminOnly: true },
+  { id: "sbom", label: "SBOM manager", hash: "#/sbom", icon: Boxes, here: true },
+  { id: "compare", label: "Compare", hash: "#/compare", icon: GitCompareArrows, here: true },
+  { id: "new", label: "What's new", hash: "#/new", icon: Sparkles, here: true },
+  { id: "reports", label: "Reports", hash: "#/reports", icon: ChartColumn, here: true },
+  { id: "watches", label: "Watches", hash: "#/watches", icon: Eye, here: true },
+  { id: "feeds", label: "Feeds", hash: "#/feeds", icon: Rss, here: true },
+  { id: "admin", label: "Admin", hash: "#/admin", icon: ShieldCheck, here: true, adminOnly: true },
 ];
 
 export function Rail({ active, showAdmin }: { active: string; showAdmin: boolean }) {
