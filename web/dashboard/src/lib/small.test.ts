@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyTheme, isTheme, loadTheme } from "./theme";
-import { classicHref, parseHash } from "./router";
+import { classicHref, parseHash, releaseHash } from "./router";
 import { asArray, initials } from "./utils";
 import { bandSlices } from "@/components/bands";
 
@@ -45,7 +45,14 @@ describe("router", () => {
     expect(parseHash("")).toEqual({ view: "overview" });
     expect(parseHash("#/")).toEqual({ view: "overview" });
     expect(parseHash("#/estate")).toEqual({ view: "estate" });
-    expect(parseHash("#/release/r1?v=1.0")).toEqual({ view: "classic", hash: "#/release/r1?v=1.0" });
+    expect(parseHash("#/release/r1?v=1.0")).toEqual({ view: "release", id: "r1", version: "1.0" });
+    expect(parseHash("#/release/r%2F1")).toEqual({ view: "release", id: "r/1", version: "" });
+    expect(parseHash("#/watches")).toEqual({ view: "classic", hash: "#/watches" });
+  });
+
+  it("builds release links", () => {
+    expect(releaseHash("r1", "1.0 beta")).toBe("#/release/r1?v=1.0%20beta");
+    expect(releaseHash("r1")).toBe("#/release/r1");
   });
 
   it("builds classic GUI links", () => {

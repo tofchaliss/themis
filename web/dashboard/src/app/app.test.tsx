@@ -74,7 +74,7 @@ describe("App shell", () => {
     expect(await screen.findByText("Filter by tag")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Overview/Estate");
     act(() => {
-      window.location.hash = "#/release/r1";
+      window.location.hash = "#/watches";
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
     expect(await screen.findByText(/opening this screen in the old gui/i)).toBeInTheDocument();

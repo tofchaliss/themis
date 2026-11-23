@@ -2,18 +2,25 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Rail } from "./rail";
 import { TopBar, type Crumb } from "./topbar";
 import { applyTheme, loadTheme, type ThemeId } from "@/lib/theme";
-import { classicHref, useRoute } from "@/lib/router";
+import { classicHref, useRoute, type Route } from "@/lib/router";
 import { useAdminStatus, useWhoAmI } from "@/lib/queries";
 import { Loading } from "@/components/states";
 
 // EDR-GUI-02 D8: one lazy chunk per screen; the first load carries the shell and the screen opened.
 const Overview = lazy(() => import("@/routes/overview").then((m) => ({ default: m.Overview })));
 const Estate = lazy(() => import("@/routes/estate").then((m) => ({ default: m.Estate })));
+const Release = lazy(() => import("@/routes/release").then((m) => ({ default: m.Release })));
 
 const CRUMBS: Record<string, Crumb[]> = {
   overview: [{ label: "Overview" }],
   estate: [{ label: "Overview", href: "#/" }, { label: "Estate" }],
 };
+
+function crumbsFor(route: Route): Crumb[] {
+  if (route.view === "release")
+    return [{ label: "Overview", href: "#/" }, { label: "Estate", href: "#/estate" }, { label: route.version ? `Release v${route.version}` : "Release" }];
+  return CRUMBS[route.view] ?? [];
+}
 
 /** A screen not built here yet: hand the route to the classic GUI (EDR-GUI-02 D11). */
 function Classic({ hash }: { hash: string }) {
@@ -37,10 +44,10 @@ export function App() {
 
   return (
     <div className="grid h-full grid-cols-[60px_1fr]">
-      <Rail active={route.view} showAdmin={isAdmin || authOff} />
+      <Rail active={route.view === "release" ? "estate" : route.view} showAdmin={isAdmin || authOff} />
       <div className="flex min-w-0 flex-col">
         <TopBar
-          crumbs={CRUMBS[route.view] ?? []}
+          crumbs={crumbsFor(route)}
           who={who.data}
           theme={theme}
           onTheme={setTheme}
@@ -50,6 +57,7 @@ export function App() {
           <Suspense fallback={<Loading what="screen" />}>
             {route.view === "overview" && <Overview />}
             {route.view === "estate" && <Estate />}
+            {route.view === "release" && <Release key={route.id} id={route.id} version={route.version} />}
             {route.view === "classic" && <Classic hash={route.hash} />}
           </Suspense>
         </main>
