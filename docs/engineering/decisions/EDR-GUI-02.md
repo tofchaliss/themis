@@ -347,7 +347,9 @@ S6); SSO; translations; a mobile layout (EDR-GUI-01 non-goal); any change to the
   Scans card and "What the latest SBOM changed" came with it (they open the scan view and
   describe uploads). The intake reason table is typed against the spec's `RejectReason`, so a
   reason added there without a meaning here fails the type check instead of showing blank.
-- **G4** Compare, What's new, CVE page.
+- **G4** Compare, What's new, CVE page. Built 2026-11-23 with no API change. The AI pieces
+  (the reason table, the answer with its provenance and the TRUST-8 mark) are one shared
+  module now, so G5's remediation plan and the drawer's explanation reuse them.
 - **G5** Reports, Watches, Feeds, Admin.
 - **G6** Switch the default to the new GUI; old GUI at `/old/`. **Done early, 2026-11-23**, on the
   owner's ask (see the D11 amendment).

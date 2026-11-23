@@ -49,6 +49,13 @@ Every step waits for the owner's go and lands as its own PR.
 ## Group 4 — G4 Compare, What's new, CVE page
 
 - [ ] 4.1 The three screens at parity; VM check.
+  Done 2026-11-23: Compare at `#/compare` (Governance's buckets with Original and Expert
+  severity, the refusal shown with versions instead of ids, rows open the drawer, the
+  compare_releases narration on request); What's new at `#/new` (newest cards ten a page,
+  the tag filter, CVE search, NVD's latest published on request with Gather); the CVE card
+  at `#/cve/<id>` (summary, severity, signals, ranges, fixes, source ratings, releases by
+  name). Shared pieces: the AI reason table and answer view, a plain finding table, a
+  pager. No API change. Open: VM check.
 
 ## Group 5 — G5 Reports, Watches, Feeds, Admin
 

@@ -1,1 +1,0 @@
-import{J as e,N as t,q as n}from"./index-CJIJlea8.js";e();var r=n();function i({className:e,...n}){return(0,r.jsx)(`div`,{className:t(`animate-pulse rounded-md bg-mono-bg`,e),...n})}export{i as t};

@@ -4,6 +4,7 @@
 // fixed. It is filtered, not lost; the stored report keeps it as the tool said it.
 import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Count } from "@/components/count";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BandBadge, ExpertSeverity, StanceBadge } from "@/components/finding-bits";
@@ -11,15 +12,6 @@ import { FindingDrawer } from "@/components/finding-drawer";
 import { Empty, ErrorPanel } from "@/components/states";
 import { useEvidenceFacts, usePosture, useScanReport, type PostureEntry, type ScanClaim } from "@/lib/queries";
 import { releaseHash } from "@/lib/router";
-
-function Count({ value, label, note }: { value: number; label: string; note: string }) {
-  return (
-    <div title={note} className="min-w-[72px]">
-      <div className="text-xl leading-tight font-semibold tabular-nums">{value}</div>
-      <div className="text-xs text-ink-2">{label}</div>
-    </div>
-  );
-}
 
 const claimed = (f: ScanClaim) => `${(f.severity ?? "").toLowerCase() || "—"}${f.cvss_score ? ` ${f.cvss_score}` : ""}`;
 const comp = (f: ScanClaim) => `${f.component?.name ?? "?"}${f.component?.version ? `@${f.component.version}` : ""}`;

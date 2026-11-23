@@ -76,6 +76,9 @@ export type ProposalView = Governance["schemas"]["ProposalView"];
 export const useRelease = (id: string) =>
   useQuery({ queryKey: ["release", id], queryFn: () => apiGet<Release>("registry", `/releases/${enc(id)}`) });
 
+export const useProduct = (id: string | undefined) =>
+  useQuery({ queryKey: ["product", id], enabled: !!id, queryFn: () => apiGet<Product>("registry", `/products/${enc(id ?? "")}`) });
+
 export const useProject = (id: string | undefined) =>
   useQuery({ queryKey: ["project", id], enabled: !!id, queryFn: () => apiGet<Project>("registry", `/projects/${enc(id ?? "")}`) });
 
@@ -153,3 +156,41 @@ export const useScanReport = (id: string) => useQuery({ queryKey: ["scan-report"
 /** What the latest SBOM changed on a release; null before the first one (or on an older node). */
 export const useUploadOutcome = (releaseId: string) =>
   useQuery({ queryKey: ["upload-outcome", releaseId], queryFn: () => apiGet<UploadOutcome>("governance", `/releases/${enc(releaseId)}/upload-outcome`) });
+
+export type Faultline = Knowledge["schemas"]["FaultlineView"];
+export type RecentFaultline = Knowledge["schemas"]["RecentFaultline"];
+export type PublishedCVE = Knowledge["schemas"]["PublishedCVE"];
+export type SourceRatings = Knowledge["schemas"]["SourceRatings"];
+
+/** The newest cards that entered this estate's knowledge, newest first. */
+export const useRecentCards = () =>
+  useQuery({ queryKey: ["recent-cards"], queryFn: async () => asArray<RecentFaultline>(await apiGet("knowledge", "/faultlines/recent?limit=100")) });
+
+/** Narrow cards to those whose Findings sit on releases carrying `tag` (EDR-REMEDIATION-01 D7):
+ * one Registry read for the tagged releases, one blast-radius read per card. A card whose read
+ * fails is left out, never guessed in. */
+export async function cardsOnTag(rows: RecentFaultline[], tag: string): Promise<RecentFaultline[]> {
+  const tagged = new Set(asArray<Release>(await apiGet("registry", `/tagged-releases?tag=${enc(tag)}`)).map((r) => r.id));
+  if (!tagged.size) return [];
+  const keep = await Promise.all(
+    rows.map(async (r) => {
+      const id = r.card.id;
+      if (!id) return false;
+      try {
+        return asArray<string>(await apiGet("governance", `/faultlines/${enc(id)}/blast-radius`)).some((rel) => tagged.has(rel));
+      } catch {
+        return false;
+      }
+    }),
+  );
+  return rows.filter((_, i) => keep[i]);
+}
+
+export const useCard = (cve: string) =>
+  useQuery({ queryKey: ["card", cve], queryFn: () => apiGet<Faultline>("knowledge", `/faultlines?cve=${enc(cve)}`) });
+
+export const useCardReleases = (id: string | undefined) =>
+  useQuery({ queryKey: ["card-releases", id], enabled: !!id, queryFn: async () => asArray<string>(await apiGet("knowledge", `/faultlines/${enc(id ?? "")}/releases`)) });
+
+export const useCardRatings = (id: string | undefined) =>
+  useQuery({ queryKey: ["card-ratings", id], enabled: !!id, queryFn: () => apiGet<SourceRatings>("knowledge", `/faultlines/${enc(id ?? "")}/ratings`) });

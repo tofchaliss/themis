@@ -51,6 +51,9 @@ describe("router", () => {
     expect(parseHash("#/decide/f1?rel=r1&v=1.0")).toEqual({ view: "decide", findingId: "f1", releaseId: "r1", version: "1.0" });
     expect(parseHash("#/decide/f1")).toEqual({ view: "decide", findingId: "f1", releaseId: "", version: "" });
     expect(parseHash("#/sbom")).toEqual({ view: "sbom" });
+    expect(parseHash("#/compare")).toEqual({ view: "compare" });
+    expect(parseHash("#/new")).toEqual({ view: "new" });
+    expect(parseHash("#/cve/CVE-2026-1")).toEqual({ view: "cve", cve: "CVE-2026-1" });
     expect(parseHash("#/scan/e1?rel=r1&v=1.0")).toEqual({ view: "scan", evidenceId: "e1", releaseId: "r1", version: "1.0" });
     expect(parseHash("#/scan/e1")).toEqual({ view: "scan", evidenceId: "e1", releaseId: "", version: "" });
     expect(scanHash("e1", "r1", "1.0")).toBe("#/scan/e1?rel=r1&v=1.0");

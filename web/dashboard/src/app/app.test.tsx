@@ -61,7 +61,8 @@ describe("App shell", () => {
     renderWithQuery(<App />);
     expect(screen.getByRole("link", { name: "Estate" })).toHaveAttribute("href", "#/estate");
     expect(screen.getByRole("link", { name: "SBOM manager" })).toHaveAttribute("href", "#/sbom");
-    expect(screen.getByRole("link", { name: /compare \(opens the old gui\)/i })).toHaveAttribute("href", "/old/#/compare");
+    expect(screen.getByRole("link", { name: "Compare" })).toHaveAttribute("href", "#/compare");
+    expect(screen.getByRole("link", { name: /reports \(opens the old gui\)/i })).toHaveAttribute("href", "/old/#/reports");
   });
 
   it("routes by hash and hands unbuilt screens to the classic GUI", async () => {
@@ -85,6 +86,17 @@ describe("App shell", () => {
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
     expect(await screen.findByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Overview/Estate/Release v1.0/Scan report");
+    for (const [hash, crumbs] of [
+      ["#/compare", "Overview/Compare releases"],
+      ["#/new", "Overview/What's new"],
+      ["#/cve/CVE-2026-0001", "Overview/What's new/CVE-2026-0001"],
+    ]) {
+      act(() => {
+        window.location.hash = hash as string;
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
+      });
+      expect(await screen.findByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent(crumbs as string);
+    }
     act(() => {
       window.location.hash = "#/watches";
       window.dispatchEvent(new HashChangeEvent("hashchange"));

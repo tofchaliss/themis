@@ -27,6 +27,12 @@ const SEVERITY_TONE: Record<string, Tone> = {
   none: "good",
 };
 
+/** A severity word as a badge (Knowledge's reconciled severity, a scanner's claim). */
+export function SeverityBadge({ severity }: { severity?: string }) {
+  const k = (severity ?? "").toLowerCase();
+  return <Badge tone={SEVERITY_TONE[k] ?? "neutral"}>{k || "unknown"}</Badge>;
+}
+
 /** Why a Finding has no expert severity: the roll-up state in words (EDR-SCORING-01). */
 const UNSCORED: Record<string, string> = {
   no_carrier: "no carrier",

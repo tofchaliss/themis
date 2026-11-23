@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Empty, ErrorPanel } from "@/components/states";
 import {
@@ -29,9 +30,6 @@ import { releaseHash } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 const NEW = "__new__";
-
-const selectClass =
-  "h-8 w-full rounded-lg border border-line bg-card px-2 text-[13px] text-ink disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent";
 
 function Field({ label, htmlFor, children, note }: { label: string; htmlFor: string; children: ReactNode; note?: ReactNode }) {
   return (
@@ -246,7 +244,7 @@ export function Sbom() {
         <CardContent>
           <div className="grid gap-3 md:grid-cols-3">
             <Field label="Product" htmlFor="sb-product">
-              <select id="sb-product" className={selectClass} value={product} onChange={(e) => pickProduct(e.target.value)} disabled={products.isPending}>
+              <Select id="sb-product" value={product} onChange={(e) => pickProduct(e.target.value)} disabled={products.isPending}>
                 <option value="">— pick a product —</option>
                 {(products.data ?? []).map((p) => (
                   <option key={p.id} value={p.id}>
@@ -254,13 +252,13 @@ export function Sbom() {
                   </option>
                 ))}
                 <option value={NEW}>+ New product…</option>
-              </select>
+              </Select>
               {product === NEW && (
                 <Input aria-label="New product name" placeholder="new product name" value={names.product} onChange={(e) => setNames({ ...names, product: e.target.value })} />
               )}
             </Field>
             <Field label="Project" htmlFor="sb-project">
-              <select id="sb-project" className={selectClass} value={project} onChange={(e) => pickProject(e.target.value)} disabled={!product || product === NEW}>
+              <Select id="sb-project" value={project} onChange={(e) => pickProject(e.target.value)} disabled={!product || product === NEW}>
                 {product === NEW ? (
                   <option value={NEW}>+ New project…</option>
                 ) : (
@@ -274,13 +272,13 @@ export function Sbom() {
                     <option value={NEW}>+ New project…</option>
                   </>
                 )}
-              </select>
+              </Select>
               {project === NEW && (
                 <Input aria-label="New project name" placeholder="new project name" value={names.project} onChange={(e) => setNames({ ...names, project: e.target.value })} />
               )}
             </Field>
             <Field label="Release" htmlFor="sb-release">
-              <select id="sb-release" className={selectClass} value={release} onChange={(e) => setRelease(e.target.value)} disabled={!project || project === NEW}>
+              <Select id="sb-release" value={release} onChange={(e) => setRelease(e.target.value)} disabled={!project || project === NEW}>
                 {project === NEW ? (
                   <option value={NEW}>+ New release…</option>
                 ) : (
@@ -294,16 +292,16 @@ export function Sbom() {
                     <option value={NEW}>+ New release…</option>
                   </>
                 )}
-              </select>
+              </Select>
               {release === NEW && (
                 <Input aria-label="New release version" placeholder="version, e.g. 1.4.0" value={names.release} onChange={(e) => setNames({ ...names, release: e.target.value })} />
               )}
             </Field>
             <Field label="Kind" htmlFor="sb-kind">
-              <select id="sb-kind" className={selectClass} value={kind} onChange={(e) => setKind(e.target.value as "sbom" | "vex")}>
+              <Select id="sb-kind" value={kind} onChange={(e) => setKind(e.target.value as "sbom" | "vex")}>
                 <option value="sbom">SBOM or scanner report</option>
                 <option value="vex">VEX</option>
-              </select>
+              </Select>
             </Field>
             <Field
               label="Document"

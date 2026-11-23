@@ -7,6 +7,7 @@
 import { Fragment, useMemo, useState, type KeyboardEvent } from "react";
 import { ArrowUpRight, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Count } from "@/components/count";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -31,15 +32,6 @@ import { Empty, ErrorPanel } from "@/components/states";
 import { useCveReleases, useEvidence, usePosture, useProject, useRelease, useScanReport, useUploadOutcome, type PostureEntry, type UploadOutcome } from "@/lib/queries";
 import { classicHref, releaseHash, scanHash } from "@/lib/router";
 import { cn } from "@/lib/utils";
-
-function Count({ value, label, note, tone }: { value: number; label: string; note: string; tone?: string }) {
-  return (
-    <div title={note} className="min-w-[72px]">
-      <div className={cn("text-xl leading-tight font-semibold tabular-nums", tone)}>{value}</div>
-      <div className="text-xs text-ink-2">{label}</div>
-    </div>
-  );
-}
 
 /** The release in one small card: the counts in a row, then two small donuts — the
  * exploitability band and the expert severity (D13 amendment: the tiles and the bar were
