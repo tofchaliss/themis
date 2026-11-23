@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en" data-theme="enterprise">
+<head>
+<meta charset="utf-8">
+<title>Themis GUI mockup</title>
+<style>
+:root {
+  --st-crit:#d03b3b; --st-serious:#ec835a; --st-warn:#fab219; --st-good:#0ca30c; --st-info:#898781;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 10px;
+}
+:root[data-theme="enterprise"] {
+  --page:#f4f6fa; --card:#fff; --rail:#fff; --ink:#101828; --ink2:#475467; --muted:#98a2b3;
+  --line:rgba(16,24,40,.10); --accent:#1b6ef3; --on-accent:#fff; --accent-soft:#eff5ff;
+  --mono-bg:#f2f4f7; --hover:#f9fafb; --sel:#eff5ff; --shadow:0 1px 2px rgba(16,24,40,.05),0 1px 3px rgba(16,24,40,.06);
+  --scrim:rgba(16,24,40,.35); --ai-bg:#f6f2fe; --ai-ink:#5b3fd6;
+}
+:root[data-theme="midnight"] {
+  --page:#0c111c; --card:#131a29; --rail:#101725; --ink:#e8edf6; --ink2:#97a3b8; --muted:#64748b;
+  --line:rgba(255,255,255,.09); --accent:#4d8df7; --on-accent:#06101f; --accent-soft:rgba(77,141,247,.14);
+  --mono-bg:rgba(255,255,255,.06); --hover:rgba(255,255,255,.04); --sel:rgba(77,141,247,.12); --shadow:none;
+  --scrim:rgba(0,0,0,.55); --ai-bg:rgba(157,140,255,.10); --ai-ink:#b3a6ff;
+}
+:root[data-theme="ops-night"] {
+  --page:#101412; --card:#161b18; --rail:#121714; --ink:#c9d3cc; --ink2:#7f8c84; --muted:#5c665f;
+  --line:rgba(201,211,204,.08); --accent:#3fa37a; --on-accent:#06130d; --accent-soft:rgba(63,163,122,.14);
+  --mono-bg:#1d2420; --hover:rgba(201,211,204,.03); --sel:rgba(63,163,122,.10); --shadow:none;
+  --scrim:rgba(0,0,0,.6); --ai-bg:rgba(63,163,122,.08); --ai-ink:#7cc9a6;
+}
+* { box-sizing:border-box; }
+[hidden] { display:none !important; }
+html,body { margin:0; height:100%; }
+body { background:var(--page); color:var(--ink); font:13px/1.45 var(--sans); display:grid; grid-template-columns:60px 1fr; overflow:hidden; }
+svg { width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+
+/* rail */
+.rail { background:var(--rail); border-right:1px solid var(--line); display:flex; flex-direction:column; align-items:center; gap:4px; padding-top:12px; }
+.mark { font:700 20px/1 var(--sans); color:var(--accent); margin-bottom:14px; }
+.rl { width:40px; height:40px; display:grid; place-items:center; border-radius:9px; color:var(--ink2); }
+.rl.on { background:var(--accent-soft); color:var(--accent); }
+
+/* frame */
+.frame { display:flex; flex-direction:column; min-width:0; height:100vh; }
+.top { height:52px; display:flex; align-items:center; justify-content:space-between; padding:0 22px; border-bottom:1px solid var(--line); background:var(--card); }
+.crumbs { color:var(--ink2); display:flex; gap:8px; align-items:center; }
+.crumbs b { color:var(--ink); font-weight:600; }
+.crumbs i { color:var(--muted); font-style:normal; }
+.tr { display:flex; gap:10px; align-items:center; }
+.kbd { white-space:nowrap; display:flex; align-items:center; gap:8px; border:1px solid var(--line); border-radius:8px; padding:6px 10px; color:var(--muted); width:280px; background:var(--page); }
+.kbd span:last-child { margin-left:auto; font:11px var(--mono); border:1px solid var(--line); border-radius:4px; padding:0 4px; }
+.picker { display:flex; border:1px solid var(--line); border-radius:8px; padding:2px; gap:2px; }
+.picker span { padding:4px 9px; border-radius:6px; color:var(--ink2); font-weight:500; font-size:12px; display:flex; gap:5px; align-items:center; }
+.picker span.on { background:var(--accent); color:var(--on-accent); }
+.picker svg { width:13px; height:13px; }
+.user { display:flex; gap:8px; align-items:center; color:var(--ink2); }
+.user i { width:28px; height:28px; border-radius:50%; background:var(--accent-soft); color:var(--accent); display:grid; place-items:center; font:600 11px var(--sans); font-style:normal; }
+
+.main { padding:20px 22px; display:flex; flex-direction:column; gap:16px; overflow:hidden; }
+.h { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; }
+.h h1 { margin:0; font-size:20px; font-weight:650; letter-spacing:-.01em; }
+.h p { margin:3px 0 0; color:var(--ink2); }
+.btn { white-space:nowrap; display:inline-flex; gap:6px; align-items:center; height:32px; padding:0 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); font-weight:500; font-size:12.5px; }
+.btn.p { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+.btn svg { width:15px; height:15px; }
+
+.tiles { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+.tile { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); padding:12px 14px; box-shadow:var(--shadow); }
+.tile small { color:var(--ink2); font-weight:500; display:flex; gap:6px; align-items:center; }
+.tile b { display:block; font-size:24px; font-weight:650; margin-top:4px; font-variant-numeric:tabular-nums; }
+.tile em { font-style:normal; color:var(--muted); font-size:12px; }
+.bar { display:flex; height:6px; border-radius:3px; overflow:hidden; margin-top:8px; gap:2px; }
+.dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+
+.card { background:var(--card); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); min-height:0; display:flex; flex-direction:column; }
+.toolbar { display:flex; gap:8px; align-items:center; padding:10px 12px; border-bottom:1px solid var(--line); }
+.input { display:flex; align-items:center; gap:7px; border:1px solid var(--line); border-radius:8px; height:32px; padding:0 10px; color:var(--muted); width:260px; }
+.input svg { width:15px; height:15px; }
+.seg { display:flex; background:var(--page); border-radius:8px; padding:3px; gap:2px; }
+.seg span { padding:4px 10px; border-radius:6px; color:var(--ink2); font-weight:500; font-size:12px; }
+.seg span.on { background:var(--card); color:var(--ink); box-shadow:var(--shadow); border:1px solid var(--line); }
+.sel { display:flex; align-items:center; gap:6px; border:1px dashed var(--line); border-radius:8px; height:32px; padding:0 10px; color:var(--ink2); font-weight:500; font-size:12px; }
+.sel svg { width:14px; height:14px; }
+.sp { flex:1; }
+
+table { width:100%; border-collapse:collapse; }
+th { text-align:left; font-weight:500; color:var(--muted); font-size:12px; padding:9px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
+td { padding:9px 12px; border-bottom:1px solid var(--line); white-space:nowrap; vertical-align:middle; }
+tr.selrow td { background:var(--sel); }
+.num { text-align:right; font-variant-numeric:tabular-nums; }
+.chip { font:500 12px var(--mono); background:var(--mono-bg); padding:2px 6px; border-radius:5px; color:var(--ink); }
+.pkg { color:var(--ink2); }
+.pkg b { color:var(--ink); font-weight:500; }
+.sev { display:inline-flex; gap:5px; align-items:center; font-weight:600; font-size:11.5px; padding:2px 8px 2px 6px; border-radius:99px; }
+.sev::before { content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }
+.sev.c { color:var(--st-crit); background:color-mix(in srgb, var(--st-crit) 13%, transparent); }
+.sev.h { color:var(--st-serious); background:color-mix(in srgb, var(--st-serious) 14%, transparent); }
+.sev.m { color:#c48600; background:color-mix(in srgb, var(--st-warn) 16%, transparent); }
+:root[data-theme="midnight"] .sev.m, :root[data-theme="ops-night"] .sev.m { color:var(--st-warn); }
+.sev.l { color:var(--st-good); background:color-mix(in srgb, var(--st-good) 13%, transparent); }
+.sev.i { color:var(--st-info); background:color-mix(in srgb, var(--st-info) 14%, transparent); }
+.badge { display:inline-flex; align-items:center; gap:4px; font-weight:500; font-size:11.5px; padding:1px 7px; border-radius:99px; border:1px solid var(--line); color:var(--ink2); }
+.badge.kev { color:var(--st-crit); border-color:color-mix(in srgb, var(--st-crit) 40%, transparent); }
+.badge.fix { color:var(--st-good); border-color:color-mix(in srgb, var(--st-good) 40%, transparent); }
+.badge.acc { color:var(--accent); border-color:color-mix(in srgb, var(--accent) 40%, transparent); }
+.badge.ai { color:var(--ai-ink); background:var(--ai-bg); border-color:transparent; }
+.prio { display:flex; align-items:center; gap:8px; justify-content:flex-end; }
+.prio i { width:46px; height:5px; border-radius:3px; background:var(--line); position:relative; overflow:hidden; display:block; }
+.prio i::after { content:""; position:absolute; inset:0 auto 0 0; width:var(--w); background:var(--accent); border-radius:3px; }
+.sla-bad { color:var(--st-crit); font-weight:500; }
+.foot { display:flex; justify-content:space-between; padding:9px 12px; color:var(--muted); font-size:12px; }
+
+/* drawer (sheet) */
+.scrim { position:fixed; inset:0; background:var(--scrim); }
+.sheet { position:fixed; top:0; right:0; bottom:0; width:600px; background:var(--card); border-left:1px solid var(--line); display:flex; flex-direction:column; box-shadow:-10px 0 30px rgba(0,0,0,.15); }
+.sh-head { padding:16px 20px 0; display:flex; flex-direction:column; gap:10px; }
+.sh-row { display:flex; gap:8px; align-items:center; }
+.sh-row h2 { margin:0; font:650 17px var(--mono); }
+.x { margin-left:auto; color:var(--ink2); }
+.sh-sub { color:var(--ink2); }
+.tabs { display:flex; gap:18px; border-bottom:1px solid var(--line); margin-top:4px; }
+.tabs span { padding:8px 0; color:var(--ink2); font-weight:500; border-bottom:2px solid transparent; }
+.tabs span.on { color:var(--ink); border-color:var(--accent); }
+.tabs span em { font-style:normal; color:var(--muted); margin-left:4px; }
+.sh-body { padding:16px 20px; display:flex; flex-direction:column; gap:14px; overflow:hidden; flex:1; }
+.box { border:1px solid var(--line); border-radius:var(--radius); padding:12px 14px; }
+.box h3 { margin:0 0 8px; font-size:12px; font-weight:600; color:var(--ink2); text-transform:uppercase; letter-spacing:.05em; display:flex; gap:8px; align-items:center; }
+.ai-box { background:var(--ai-bg); border-color:transparent; }
+.ai-box p { margin:0; color:var(--ink); line-height:1.55; }
+.ai-box .meta { margin-top:8px; color:var(--ink2); font-size:12px; }
+.score { display:grid; grid-template-columns:auto 1fr; gap:16px; align-items:center; }
+.big { font-size:34px; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; }
+.big small { display:block; font-size:12px; font-weight:500; color:var(--ink2); margin-top:4px; }
+.kv { display:grid; grid-template-columns:130px 1fr; gap:6px 10px; font-size:12.5px; }
+.kv span:nth-child(odd) { color:var(--ink2); }
+.mini th, .mini td { padding:7px 8px; font-size:12px; }
+.mini td .chip { font-size:11.5px; }
+.decide { border-top:1px solid var(--line); padding:12px 20px; display:flex; gap:8px; align-items:center; background:var(--card); }
+.decide .scope { white-space:nowrap; display:flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:8px; height:32px; padding:0 10px; color:var(--ink2); font-size:12px; }
+
+/* CVE page: affected releases */
+.cvehead { display:flex; gap:10px; align-items:center; }
+.cvehead h1 { font-family:var(--mono); }
+.dec { display:inline-flex; align-items:center; gap:5px; font-weight:600; font-size:11px; padding:1px 7px; border-radius:5px; font-family:var(--mono); }
+.dec.auto { background:var(--accent-soft); color:var(--accent); }
+.dec.man { background:var(--mono-bg); color:var(--ink); border:1px solid var(--line); }
+.hl { outline:2px dashed var(--st-warn); outline-offset:2px; border-radius:6px; }
+.acts { display:flex; gap:6px; color:var(--ink2); }
+.acts svg { width:15px; height:15px; }
+.ticket { color:var(--accent); font-family:var(--mono); font-size:12px; }
+.scorepair b { font-variant-numeric:tabular-nums; }
+.scorepair span { color:var(--muted); }
+.rationale { max-width:220px; overflow:hidden; text-overflow:ellipsis; color:var(--ink2); }
+.legend { display:flex; gap:18px; color:var(--ink2); font-size:12px; padding:10px 12px; border-top:1px solid var(--line); flex-wrap:wrap; }
+
+/* vulnerability list with release dropdown */
+.chev { width:22px; height:22px; display:grid; place-items:center; border-radius:6px; color:var(--ink2); }
+.chev.open { background:var(--accent-soft); color:var(--accent); }
+.chev svg { width:14px; height:14px; }
+tr.cverow td { cursor:pointer; }
+tr.cverow.expanded td { background:var(--sel); border-bottom-color:transparent; }
+tr.subwrap > td { padding:0 12px 12px 46px; background:var(--sel); }
+.sub { border:1px solid var(--line); border-radius:8px; background:var(--card); overflow:hidden; }
+.sub .subhead { display:flex; justify-content:space-between; align-items:center; padding:7px 10px; border-bottom:1px solid var(--line); color:var(--ink2); font-size:12px; }
+.sub th, .sub td { padding:6px 9px; font-size:12px; }
+.cnt { font-variant-numeric:tabular-nums; }
+.cnt em { font-style:normal; color:var(--muted); }
+
+/* full decision page + severity warning */
+.dgrid { display:grid; grid-template-columns:1fr 380px; gap:16px; align-items:start; }
+.fpad { padding:16px 18px; gap:12px; }
+.ftitle { margin:6px 0 0; font-size:13px; font-weight:650; display:flex; gap:8px; align-items:center; }
+.field { display:flex; flex-direction:column; gap:5px; }
+.field label { font-size:12px; font-weight:500; color:var(--ink2); }
+.req { font-style:normal; color:var(--st-crit); font-weight:500; margin-left:4px; }
+.fake { border:1px solid var(--line); border-radius:8px; padding:7px 10px; display:flex; justify-content:space-between; align-items:center; background:var(--card); }
+.fake svg { width:14px; height:14px; color:var(--muted); }
+.fake.area { min-height:68px; align-items:flex-start; line-height:1.5; }
+.frow { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+.pill-row { display:flex; gap:6px; align-items:center; }
+.radios { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.radio { border:1px solid var(--line); border-radius:9px; padding:9px 10px; display:flex; gap:8px; align-items:flex-start; }
+.radio i { width:14px; height:14px; border-radius:50%; border:1.5px solid var(--muted); margin-top:2px; flex:none; }
+.radio.on { border-color:var(--accent); background:var(--accent-soft); }
+.radio.on i { border:4px solid var(--accent); }
+.radio b { display:block; font-size:12.5px; }
+.radio em { font-style:normal; color:var(--ink2); font-size:11.5px; }
+.sevbox { display:flex; justify-content:space-between; align-items:center; gap:12px; border:1px dashed var(--line); border-radius:9px; padding:10px 12px; }
+.side .kv { grid-template-columns:120px 1fr; }
+.dialog { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:540px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; display:flex; flex-direction:column; gap:12px; box-shadow:0 20px 50px rgba(0,0,0,.3); }
+.dlg-head { display:flex; gap:12px; }
+.dlg-head h2 { margin:0; font-size:16px; }
+.dlg-head p { margin:3px 0 0; color:var(--ink2); }
+.warnicon { width:36px; height:36px; border-radius:50%; flex:none; display:grid; place-items:center; color:#a86a00; background:color-mix(in srgb, var(--st-warn) 22%, transparent); }
+:root[data-theme="midnight"] .warnicon, :root[data-theme="ops-night"] .warnicon { color:var(--st-warn); }
+.warnlist { margin:0; padding:10px 12px 10px 28px; border-radius:9px; background:color-mix(in srgb, var(--st-warn) 10%, transparent); display:flex; flex-direction:column; gap:4px; }
+.confirm { display:flex; gap:8px; align-items:center; font-weight:500; }
+.confirm i { width:15px; height:15px; border-radius:4px; background:var(--accent); display:block; }
+.dlg-foot { display:flex; justify-content:flex-end; gap:8px; }
+.btn.danger { background:var(--st-crit); border-color:var(--st-crit); color:#fff; }
+</style>
+</head>
+<body>
+<nav class="rail">
+  <div class="mark">Θ</div>
+  <span class="rl"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
+  <span class="rl on"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M10.5 11 6.5 16.5M13.5 11l4 5.5"/></svg></span>
+  <span class="rl"><svg viewBox="0 0 24 24"><path d="M12 2 3 6.5v11L12 22l9-4.5v-11L12 2Z"/><path d="M3 6.5 12 11l9-4.5M12 11v11"/></svg></span>
+  <span class="rl"><svg viewBox="0 0 24 24"><path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M15 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M12 2v20"/></svg></span>
+  <span class="rl"><svg viewBox="0 0 24 24"><path d="m12 3 2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7L12 3Z"/></svg></span>
+  <span class="rl"><svg viewBox="0 0 24 24"><path d="M4 20V4m0 16h16M8 16v-5m4 5V8m4 8v-3"/></svg></span>
+  <span class="rl"><svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></span>
+  <span class="rl"><svg viewBox="0 0 24 24"><path d="M4 19a1 1 0 1 1 .01 0M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/></svg></span>
+</nav>
+
+<div class="frame">
+  <header class="top">
+    <nav class="crumbs"><span>Estate</span><i>/</i><span>example-product</span><i>/</i><span>project-a</span><i>/</i><b>1.4.0</b></nav>
+    <div class="tr">
+      <div class="kbd"><svg viewBox="0 0 24 24" style="width:14px;height:14px"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search CVE, package, release…</span><span>⌘K</span></div>
+      <div class="picker" id="picker">
+        <span data-t="enterprise"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>Enterprise</span>
+        <span data-t="midnight"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z"/></svg>Midnight</span>
+        <span data-t="ops-night"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Ops night</span>
+      </div>
+      <div class="user"><i>OP</i><span>operator</span></div>
+    </div>
+  </header>
+
+  <main class="main" id="posture-view">
+    <div class="h">
+      <div><h1>project-a 1.4.0</h1><p>Release posture · SBOM uploaded 2 h ago · 1,284 components · last correlated 14 min ago</p></div>
+      <div style="display:flex;gap:8px">
+        <span class="btn"><svg viewBox="0 0 24 24"><path d="M9 4H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4M15 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M12 2v20"/></svg>Compare</span>
+        <span class="btn"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Export CSV</span>
+        <span class="btn p"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg>Publish VEX</span>
+      </div>
+    </div>
+
+    <div class="tiles">
+      <div class="tile"><small>Open findings</small><b>231</b>
+        <div class="bar"><span style="flex:12;background:var(--st-crit)"></span><span style="flex:41;background:var(--st-serious)"></span><span style="flex:118;background:var(--st-warn)"></span><span style="flex:60;background:var(--st-good)"></span></div></div>
+      <div class="tile"><small><span class="dot" style="background:var(--st-crit)"></span>Critical + High</small><b>53</b><em>12 critical · 41 high</em></div>
+      <div class="tile"><small>Known exploited (KEV)</small><b>4</b><em>2 past CISA due date</em></div>
+      <div class="tile"><small>Decided</small><b>87%</b><em>198 of 229 have a position</em></div>
+      <div class="tile"><small>SLA breached</small><b style="color:var(--st-crit)">3</b><em>oldest 9 days over</em></div>
+    </div>
+
+    <section class="card">
+      <div class="toolbar">
+        <div class="input"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Filter findings…</div>
+        <div class="seg"><span class="on">Open 231</span><span>Undecided 31</span><span>Decided 198</span><span>All 412</span></div>
+        <span class="sel"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Severity</span>
+        <span class="sel"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Fix available</span>
+        <span class="sel"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>KEV</span>
+        <span class="sp"></span>
+        <span class="btn"><svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Columns</span>
+      </div>
+      <table>
+        <thead><tr><th>CVE</th><th>Severity</th><th>Component</th><th class="num">Residual priority ↓</th><th class="num">EPSS</th><th>Signals</th><th>Status</th><th>SLA</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="foot"><span>Showing 1–11 of 231 · rows are virtualized, scroll for more</span><span>Sorted by residual priority</span></div>
+    </section>
+  </main>
+  <main class="main" id="vulns-view" hidden>
+    <div class="h">
+      <div><h1>Vulnerabilities · project-a</h1><p>One row per CVE across all releases of project-a · 4 releases · last correlated 14 min ago</p></div>
+      <div style="display:flex;gap:8px">
+        <span class="btn"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg>Re-evaluate</span>
+        <span class="btn"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Export CSV</span>
+        <span class="btn p">Decide for selected (2)</span>
+      </div>
+    </div>
+    <section class="card">
+      <div class="toolbar">
+        <span class="sel" style="border-style:solid">Scope: project-a, all releases <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>
+        <div class="input"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Filter CVE or package…</div>
+        <div class="seg"><span class="on">Open 58</span><span>Undecided 21</span><span>All 140</span></div>
+        <span class="sel"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Severity</span>
+        <span class="sel"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Decided by</span>
+        <span class="sp"></span>
+        <span class="btn"><svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Columns</span>
+      </div>
+      <table>
+        <thead><tr><th style="width:34px"></th><th>CVE</th><th>Severity</th><th class="num">Score</th><th>Package</th><th>Releases</th><th>Decisions</th><th>Signals</th><th>Fix</th><th>Next SLA</th></tr></thead>
+        <tbody id="vrows"></tbody>
+      </table>
+      <div class="foot"><span>Click a CVE row to open its details. Click the arrow to list its releases.</span><span>Sorted by priority</span></div>
+    </section>
+  </main>
+  <main class="main" id="decide-view" hidden style="overflow:auto">
+    <div class="h">
+      <div><div class="cvehead"><h1>Decide CVE-2023-47038</h1><span class="sev m">Medium</span><span class="badge fix">fix available</span></div>
+      <p>Perl: a crafted regular expression can overflow a heap buffer · project-a · the decision is recorded against you and cannot be deleted, only replaced by a later one</p></div>
+      <div style="display:flex;gap:8px"><span class="btn">Cancel</span><span class="btn p">Record decision</span></div>
+    </div>
+    <div class="dgrid">
+      <section class="card fpad">
+        <h3 class="ftitle">1 · Releases</h3>
+        <div class="field"><label>Apply to</label>
+          <div class="seg"><span>This release</span><span class="on">Selected releases (2)</span><span>All of project-a</span><span>All of example-product</span></div></div>
+        <div class="pill-row"><span class="chip">1.3.1</span><span class="chip">1.3.0</span><span class="pkg">· a release that already has its own decision is never overwritten</span></div>
+
+        <h3 class="ftitle">2 · Decision</h3>
+        <div class="radios">
+          <label class="radio"><i></i><span><b>Not affected</b><em>the flaw cannot be reached in these releases</em></span></label>
+          <label class="radio"><i></i><span><b>Affected</b><em>the flaw is present; remediation follows</em></span></label>
+          <label class="radio on"><i></i><span><b>Accept risk</b><em>present, and accepted until a review date</em></span></label>
+          <label class="radio"><i></i><span><b>Fixed</b><em>the release already ships the fix</em></span></label>
+        </div>
+        <div class="frow">
+          <div class="field"><label>Disposition</label><div class="fake">Accept risk <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div>
+          <div class="field"><label>Review by</label><div class="fake">2027-02-15 <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></div></div>
+          <div class="field"><label>Ticket</label><div class="fake mono">TICKET-087</div></div>
+        </div>
+        <div class="field"><label>Rationale <em class="req">required</em></label>
+          <div class="fake area">Release 1.3.x is out of support and has no customer deployment. Perl runs only build-time scripts with fixed inputs; no user-supplied regular expression reaches it. Re-check if a customer is added.</div></div>
+
+        <h3 class="ftitle">3 · Severity <span class="badge">optional</span></h3>
+        <div class="sevbox">
+          <div><b>Medium · 6.7</b> <span class="pkg">Themis Environmental score, from the Red Hat vector with project-a's requirements</span></div>
+          <span class="btn"><svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 17.6A2 2 0 0 0 4.1 20.6h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>Change severity…</span>
+        </div>
+      </section>
+      <aside class="card fpad side">
+        <h3 class="ftitle">What you are deciding on</h3>
+        <div class="kv">
+          <span>Packages</span><span>perl-interpreter + 6 perl packages in the rebuild set</span>
+          <span>Exploit signals</span><span>EPSS 0.02 · not in KEV · no public exploit</span>
+          <span>Vendor fix</span><span class="mono">perl 5.32.1-473.module+el8.10.0</span>
+          <span>Vendor statement</span><span>Red Hat: affected, fixed in RHSA (applies here)</span>
+          <span>Same CVE elsewhere</span><span>1.3.2 Affected · 1.4.0 Not affected (AUTO)</span>
+        </div>
+        <div class="box ai-box" style="margin-top:12px">
+          <h3><span class="badge ai">AI · proposal</span>Suggested: accept risk</h3>
+          <p style="font-size:12.5px">Out-of-support release, low EPSS, flaw needs attacker-controlled regex. A person decides; policy cannot accept this for you.</p>
+        </div>
+      </aside>
+    </div>
+  </main>
+  <div id="sevwarn" hidden>
+    <div class="scrim"></div>
+    <div class="dialog" role="alertdialog">
+      <div class="dlg-head"><span class="warnicon"><svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 17.6A2 2 0 0 0 4.1 20.6h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg></span>
+        <div><h2>Change severity from Medium to High?</h2><p>Severity comes from the CVSS vector. You change it by changing the vector, never by typing a number.</p></div></div>
+      <div class="field"><label>Changed metric</label><div class="fake mono">Attack Complexity: High → Low &nbsp;·&nbsp; score 6.7 → 7.8</div></div>
+      <ul class="warnlist">
+        <li><b>2 releases</b> change: 1.3.1 and 1.3.0 of project-a.</li>
+        <li><b>Priority and SLA</b> move: the due date shortens from 90 to 30 days.</li>
+        <li><b>Jira, mail and Teams</b> receive the new severity.</li>
+        <li>The vendor's and CNA's published scores are <b>not changed</b>; both stay visible.</li>
+        <li>The change is recorded against you with its reason and cannot be deleted.</li>
+      </ul>
+      <div class="field"><label>Reason <em class="req">required</em></label><div class="fake area" style="min-height:44px">Exposed parser path in 1.3.x accepts a regex from the admin API.</div></div>
+      <label class="confirm"><i></i>I understand this changes priority and SLA for 2 releases</label>
+      <div class="dlg-foot"><span class="btn">Keep Medium</span><span class="btn danger">Change to High</span></div>
+    </div>
+  </div>
+</div>
+
+<div id="drawer" hidden>
+  <div class="scrim"></div>
+  <aside class="sheet">
+    <div class="sh-head">
+      <div class="sh-row"><h2>CVE-2023-47038</h2><span class="sev m">Medium</span><span class="badge">undecided</span><span class="badge fix">fix available</span>
+        <span class="x"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></span></div>
+      <div class="sh-sub">Perl: a crafted regular expression can overflow a heap buffer · 6 components in this release</div>
+      <div class="tabs"><span class="on">Overview</span><span>Score</span><span>Components<em>6</em></span><span>Vendor statements<em>2</em></span><span>History</span></div>
+    </div>
+    <div class="sh-body">
+      <div class="box ai-box">
+        <h3><span class="badge ai">AI · information</span>What this means here</h3>
+        <p>Perl 5.30.0 through 5.38.0 can overflow a heap buffer on a crafted regular expression, which may allow code execution. In this release the flaw is carried by the Perl interpreter; the six Rocky Linux perl packages listed are in its rebuild set. No public exploit, not in KEV. The vendor fix is perl 5.32.1-473.module+el8.10.0.</p>
+        <div class="meta">Explanation only. It proposes no position and stores nothing. · grounded on the stored CVE summary</div>
+      </div>
+      <div class="box">
+        <h3>How Themis got this score <span class="badge">shadow</span></h3>
+        <div class="score">
+          <div class="big">6.7<small>Environmental</small></div>
+          <div class="kv">
+            <span>Severity</span><span><span class="sev m">Medium</span> &nbsp;<span class="badge fix">final</span></span>
+            <span>Scoring coverage</span><span>6 of 6 open carrier components scored · complete</span>
+            <span>Assessment finality</span><span>6 of 6 scored components final · complete</span>
+          </div>
+        </div>
+      </div>
+      <div class="box" style="padding:0;overflow:hidden">
+        <table class="mini">
+          <thead><tr><th>Package</th><th>Version</th><th>Distro</th><th class="num">Score</th><th>Claim</th></tr></thead>
+          <tbody>
+            <tr><td><span class="chip">perl-Carp</span></td><td class="pkg">1.42-396.el8</td><td class="pkg">rocky 8.10</td><td class="num">6.7</td><td><span class="badge">scope</span></td></tr>
+            <tr><td><span class="chip">perl-Data-Dumper</span></td><td class="pkg">2.167-399.el8</td><td class="pkg">rocky 8.10</td><td class="num">6.7</td><td><span class="badge">scope</span></td></tr>
+            <tr><td><span class="chip">perl-Digest-MD5</span></td><td class="pkg">2.55-396.el8</td><td class="pkg">rocky 8.10</td><td class="num">6.7</td><td><span class="badge">scope</span></td></tr>
+            <tr><td><span class="chip">perl-Digest</span></td><td class="pkg">1.17-395.el8</td><td class="pkg">rocky 8.10</td><td class="num">6.7</td><td><span class="badge">scope</span></td></tr>
+            <tr><td><span class="chip">perl-Encode</span></td><td class="pkg">2.97-3.el8</td><td class="pkg">rocky 8.10</td><td class="num">6.7</td><td><span class="badge">scope</span></td></tr>
+            <tr><td><span class="chip">perl-Errno</span></td><td class="pkg">1.28-423.el8_10.1</td><td class="pkg">rocky 8.10</td><td class="num">6.7</td><td><span class="badge">scope</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="color:var(--ink2);font-size:12px">Full purl on hover, one click copies it. Per-component provenance opens in the Score tab.</div>
+    </div>
+    <div class="decide">
+      <span class="pkg">The drawer only reads. Decisions are made on their own page.</span>
+      <span class="sp"></span>
+      <span class="btn"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4L12 3Z"/></svg>Ask AI</span>
+      <span class="btn p">Decide… <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+    </div>
+  </aside>
+</div>
+
+<script>
+const q = new URLSearchParams(location.search);
+const theme = q.get("theme") || "enterprise";
+document.documentElement.dataset.theme = theme;
+document.querySelectorAll("#picker span").forEach(s => s.classList.toggle("on", s.dataset.t === theme));
+if (q.get("drawer")) document.getElementById("drawer").hidden = false;
+const rows = [
+  ["CVE-2024-6387","c","Critical","openssh-server","8.0p1-24.el8",92,"0.94",["kev","fix"],"undecided","2 d left"],
+  ["CVE-2023-38545","c","Critical","curl","7.61.1-34.el8",88,"0.71",["fix"],"undecided","9 d over"],
+  ["CVE-2023-47038","m","Medium","perl-interpreter","5.26.3-422.el8",71,"0.02",["fix"],"undecided","12 d left"],
+  ["CVE-2024-2961","h","High","glibc","2.28-251.el8",68,"0.44",["kev","fix"],"affected","5 d left"],
+  ["CVE-2023-4911","h","High","glibc","2.28-251.el8",66,"0.89",["kev","fix"],"affected","4 d over"],
+  ["CVE-2024-0727","m","Medium","openssl-libs","1.1.1k-12.el8",44,"0.05",["fix"],"undecided","21 d left"],
+  ["CVE-2023-5678","m","Medium","openssl-libs","1.1.1k-12.el8",41,"0.03",[],"proposed","28 d left"],
+  ["CVE-2024-28182","m","Medium","nghttp2","1.33.0-5.el8",37,"0.11",["fix"],"undecided","30 d left"],
+  ["CVE-2023-52425","m","Medium","expat","2.2.5-15.el8",33,"0.01",["fix"],"accepted risk","—"],
+  ["CVE-2024-22365","l","Low","pam","1.3.1-34.el8",12,"0.00",[],"not affected","—"],
+  ["CVE-2023-7008","l","Low","systemd","239-82.el8",9,"0.00",[],"undecided","80 d left"],
+];
+const status = s => s === "undecided" ? `<span class="badge">undecided</span>` :
+  s === "proposed" ? `<span class="badge ai">AI proposed</span>` : `<span class="badge acc">${s}</span>`;
+document.getElementById("rows").innerHTML = rows.map(r => `
+  <tr class="${r[0]==="CVE-2023-47038" && q.get("drawer") ? "selrow" : ""}">
+    <td><span class="chip">${r[0]}</span></td>
+    <td><span class="sev ${r[1]}">${r[2]}</span></td>
+    <td class="pkg"><b>${r[3]}</b> ${r[4]}</td>
+    <td class="num"><span class="prio"><i style="--w:${r[5]}%"></i>${r[5]}</span></td>
+    <td class="num">${r[6]}</td>
+    <td>${r[7].map(b => b==="kev" ? `<span class="badge kev">KEV</span> ` : `<span class="badge fix">fix</span> `).join("")}</td>
+    <td>${status(r[8])}</td>
+    <td class="${r[9].includes("over") ? "sla-bad" : "pkg"}">${r[9]}</td>
+  </tr>`).join("");
+
+
+if (q.get("view") === "vulns") {
+  document.getElementById("posture-view").hidden = true;
+  document.getElementById("vulns-view").hidden = false;
+  document.querySelector(".crumbs").innerHTML = '<span>Estate</span><i>/</i><span>example-product</span><i>/</i><b>project-a</b>';
+  const chev = (o) => `<span class="chev${o ? " open" : ""}"><svg viewBox="0 0 24 24"><path d="${o ? "m6 9 6 6 6-6" : "m9 6 6 6-6 6"}"/></svg></span>`;
+  const sig = (a) => a.map(b => b==="kev" ? '<span class="badge kev">KEV</span> ' : '<span class="badge">EPSS '+b+'</span> ').join("");
+  const V = [
+    ["CVE-2024-6387","c","Critical","9.8","openssh-server","4","4 open","",["kev","0.94"],"8.0p1-25.el8","2 d left"],
+    ["CVE-2023-47038","m","Medium","6.7","perl-interpreter","4","3 decided · 1 open","1 auto · 2 manual",["0.02"],"5.32.1-473","12 d left", true],
+    ["CVE-2023-38545","c","Critical","9.1","curl","3","1 decided · 2 open","1 manual",["0.71"],"7.61.1-34.el8_9","9 d over"],
+    ["CVE-2024-2961","h","High","7.3","glibc","4","4 decided","4 manual",["kev","0.44"],"2.28-251.el8_10.2","—"],
+    ["CVE-2024-0727","m","Medium","5.5","openssl-libs","2","2 open","",["0.05"],"1.1.1k-14.el8","21 d left"],
+    ["CVE-2023-52425","m","Medium","5.3","expat","4","4 decided","4 auto",["0.01"],"2.2.5-16.el8","—"],
+  ];
+  const R = [
+    ["1.4.0","auto","not affected",[1,0,1],"6.7","5.1","2026-11-20","2026-11-21","Not affected","Range rule: this build carries the fix","—"],
+    ["1.3.2","man","affected",[1,1,1],"6.7","6.7","2026-11-18","2026-11-19","Mitigate","Patch to mitigate the vulnerability","TICKET-101"],
+    ["1.3.1","man","accepted risk",[1,0,1],"6.7","6.7","2026-11-12","2026-11-13","Accept risk","Out of support, no customer","TICKET-087"],
+    ["1.3.0","","undecided",[0,0,0],"6.7","6.7","—","—","—","Undecided · SLA 12 d left","—"],
+  ];
+  const ic = '<span class="acts"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/></svg></span>';
+  const sub = `<tr class="subwrap"><td colspan="10"><div class="sub">
+    <div class="subhead"><span><b style="color:var(--ink)">Affected releases</b> · 4 in scope</span><span>Click a release to open its posture</span></div>
+    <table><thead><tr><th style="width:24px"><input type="checkbox"></th><th>Release</th><th>Decided by</th><th>Decision</th><th class="num">Source</th><th class="num">Themis</th><th>Decided</th><th>Published</th><th>Disposition</th><th>Rationale</th><th>Ticket</th><th></th></tr></thead><tbody>
+    ${R.map((r,i) => `<tr${r[2]==="undecided" ? ' style="background:var(--hover)"' : ""}>
+      <td><input type="checkbox"${i>=2 ? " checked" : ""}></td><td><span class="chip">${r[0]}</span></td>
+      <td>${r[1]==="auto" ? '<span class="dec auto">AUTO</span>' : r[1]==="man" ? '<span class="dec man">MANUAL</span>' : '<span class="pkg">—</span>'}</td>
+      <td>${r[2]==="undecided" ? '<span class="badge">undecided</span>' : '<span class="badge acc">'+r[2]+'</span>'}</td>
+            <td class="num">${r[4]}</td><td class="num"><b>${r[5]}</b></td><td class="pkg">${r[6]}</td><td class="pkg">${r[7]}</td>
+      <td>${r[8]}</td><td class="rationale">${r[9]}</td>
+      <td>${r[10]==="—" ? '<span class="pkg">—</span>' : '<span class="ticket">'+r[10]+'</span>'}</td><td>${ic}</td></tr>`).join("")}
+    </tbody></table></div></td></tr>`;
+  document.getElementById("vrows").innerHTML = V.map(v => `
+    <tr class="cverow${v[11] ? " expanded" : ""}">
+      <td>${chev(v[11])}</td><td><span class="chip">${v[0]}</span></td><td><span class="sev ${v[1]}">${v[2]}</span></td>
+      <td class="num"><b>${v[3]}</b></td><td class="pkg"><b>${v[4]}</b></td>
+      <td class="cnt">${v[5]} <em>releases</em></td>
+      <td class="pkg">${v[6]}${v[7] ? ' <em style="font-style:normal;color:var(--muted)">· '+v[7]+'</em>' : ""}</td>
+      <td>${sig(v[8])}</td><td class="pkg"><span class="badge fix">fix</span> ${v[9]}</td>
+      <td class="${v[10].includes("over") ? "sla-bad" : "pkg"}">${v[10]}</td></tr>${v[11] ? sub : ""}`).join("");
+}
+
+if (q.get("view") === "decide") {
+  document.getElementById("posture-view").hidden = true;
+  document.getElementById("decide-view").hidden = false;
+  document.querySelector(".crumbs").innerHTML = '<span>project-a</span><i>/</i><span>Vulnerabilities</span><i>/</i><span>CVE-2023-47038</span><i>/</i><b>Decide</b>';
+  if (q.get("warn")) document.getElementById("sevwarn").hidden = false;
+}
+</script>
+</body>
+</html>

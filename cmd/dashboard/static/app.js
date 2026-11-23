@@ -99,6 +99,14 @@ async function problemDetail(r) {
 const THEMES = ["enterprise", "midnight"];
 
 function applyTheme(name) {
+  // "ops-night" is a shade of the new GUI (EDR-GUI-02 D7) this page does not have: show it as
+  // Midnight here WITHOUT saving, so visiting this page does not reset the choice made there.
+  if (name === "ops-night") {
+    document.documentElement.dataset.theme = "midnight";
+    $("#theme-toggle .tt-icon", document).textContent = "☾";
+    $("#theme-toggle .tt-name", document).textContent = "Midnight";
+    return;
+  }
   if (!THEMES.includes(name)) name = "enterprise"; // migrates retired theme names
   document.documentElement.dataset.theme = name;
   localStorage.setItem("themis-theme", name);

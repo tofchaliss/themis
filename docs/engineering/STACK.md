@@ -59,6 +59,23 @@ this document so choices are consistent and defensible — not decided ad-hoc pe
 | Embedding model (Intelligence, Δ3) | **`nomic-embed-text`** (768) via the local Ollama runtime — **confirmed by the R5 eval, 2026-08-05** | Local/private (D10), reuses the deployed runtime, PoC precedent. `make e2e-embed` on the VM Ollama measured recall@1 = 1.00 / MRR = 1.00 / ~46 ms with the `components+severity` composition (`+cve` neutral, `+description` **hurts** at 0.83); bge/e5 (384) only if memory/latency demand | D10 · EDR-INTELLIGENCE-01 Rev 4 (R5) · `RAG-SESSION-2-SPIKE.md` §4 |
 | Inbound-edge auth (F1) | **`golang.org/x/crypto/bcrypt`** for the API-key hash | The `auth` store keeps only a bcrypt hash of each token, never the token (EDR-SECURITY-01 D1). bcrypt over SHA-2 because an API key is a credential, not a content digest: the deliberate work factor is the point. Carried forward, not new: `go.mod` has held it since Phase 1 for the PoC's own key store — `internal/platform/auth` is the greenfield consumer | EDR-SECURITY-01 D1 |
 
+## Dashboard front end (EDR-GUI-02, PROPOSED 2026-11-22)
+
+The browser half of `cmd/dashboard` is a Vite-built single-page app in `web/dashboard/`, committed
+as build output under `cmd/dashboard/static/` so `go build` needs no Node. Exact versions live in
+`web/dashboard/package-lock.json`; a new npm dependency needs the owner's approval, the same as a
+Go module.
+
+| Concern | Choice | Why |
+| --- | --- | --- |
+| UI library | **React** + **TypeScript** (strict) | owner choice 2026-11-22; components and types instead of one hand-written file |
+| Styling | **Tailwind CSS** | one token set, three shades as CSS variables, unused CSS removed at build |
+| Components | **shadcn/ui** (copied source on Radix) + **lucide-react** | accessible parts we own and review; no opaque runtime package |
+| Build | **Vite** | static output for `go:embed`; Next.js rejected (needs a Node server, no gain behind a login) |
+| API state / tables | **TanStack Query**, **Table**, **Virtual** | cached answers, one data table, smooth long lists |
+| API types | **openapi-typescript** (types only) | generated from `api/*.openapi.yaml`; a renamed field breaks the build |
+| Tests | **Vitest** + Testing Library, **Playwright** | component tests and main flows in a browser |
+
 ## Per-context notes
 
 - **Shared Kernel** — pure Go value objects (no deps beyond `uuid`); registry uses pgx + migrate.

@@ -5,6 +5,10 @@ spike evaluation; decisions D1–D13 below — D11–D13 and the D3/Phase amendm
 outcomes; the 2026-10-12 D3 amendment adds username/password sign-in and the Admin tab at
 owner request)
 Date: 2026-08-12 (grilled 2026-08-13; amended 2026-10-12)
+
+> **2026-11-22:** the browser half moves to React + shadcn/ui + Tailwind CSS in
+> [EDR-GUI-02](EDR-GUI-02.md) (PROPOSED). It supersedes D7's JS syntax gate and narrows D8 (assets
+> become a committed build output, still embedded). Every other decision here stands.
 Author: GUI-productization session
 
 ## Purpose
@@ -147,12 +151,16 @@ can" label.
 
 ### D7 — Tests and coverage, spike debt paid
 
+*2026-11-22: the JS syntax gate is superseded by EDR-GUI-02 D10 once the old `app.js` is removed.*
+
 The rebuild registers in `scripts/check-coverage.sh` (adapter tier, 90%): handler/proxy tests
 (auth on the edge, key injection, reason-header pass-through, document read), plus a
 `node --check`-equivalent JS syntax gate in CI. The capability-id 404 the spike hit on first VM
 contact is exactly the class a proxy test kills.
 
 ### D8 — Assets embedded, dev override kept
+
+*2026-11-22: narrowed by EDR-GUI-02 D3 (the embedded assets are a committed Vite build output).*
 
 `go:embed` static assets (one binary, like every node); `THEMIS_DASHBOARD_ASSETS` keeps the
 edit-and-refresh loop for development.

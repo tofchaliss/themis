@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+/* EDR-GUI-02 D7 — three shades over one token contract. Every component reads these
+   variables (through the Tailwind theme below); none names a colour value.
+   Status colours are FIXED across shades (EDR-GUI-01): severity is never themed, and it
+   always carries a text label beside the colour. */
+
+:root {
+  --st-crit: #d03b3b;
+  --st-serious: #ec835a;
+  --st-warn: #fab219;
+  --st-good: #0ca30c;
+  --st-elevated: #2a78d6;
+  --st-info: #898781;
+  --radius: 10px;
+}
+
+/* Enterprise — light, default. Today's light theme, same values. */
+:root,
+:root[data-theme="enterprise"] {
+  color-scheme: light;
+  --page: #f4f6fa;
+  --card: #ffffff;
+  --rail: #ffffff;
+  --ink: #101828;
+  --ink-2: #475467;
+  --muted: #98a2b3;
+  --line: rgba(16, 24, 40, 0.1);
+  --accent: #1b6ef3;
+  --on-accent: #ffffff;
+  --accent-soft: #eff5ff;
+  --mono-bg: #f2f4f7;
+  --hover: #f9fafb;
+  --ai-bg: #f6f2fe;
+  --ai-ink: #5b3fd6;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 3px rgba(16, 24, 40, 0.06);
+}
+
+/* Midnight — dark. Today's dark theme, same values. */
+:root[data-theme="midnight"] {
+  color-scheme: dark;
+  --page: #0c111c;
+  --card: #131a29;
+  --rail: #101725;
+  --ink: #e8edf6;
+  --ink-2: #97a3b8;
+  --muted: #64748b;
+  --line: rgba(255, 255, 255, 0.09);
+  --accent: #4d8df7;
+  --on-accent: #06101f;
+  --accent-soft: rgba(77, 141, 247, 0.14);
+  --mono-bg: rgba(255, 255, 255, 0.06);
+  --hover: rgba(255, 255, 255, 0.04);
+  --ai-bg: rgba(157, 140, 255, 0.1);
+  --ai-ink: #b3a6ff;
+  --shadow: none;
+  --st-elevated: #3987e5;
+}
+
+/* Ops night — darker, dim green-grey for long sessions and dark rooms. */
+:root[data-theme="ops-night"] {
+  color-scheme: dark;
+  --page: #101412;
+  --card: #161b18;
+  --rail: #121714;
+  --ink: #c9d3cc;
+  --ink-2: #7f8c84;
+  --muted: #5c665f;
+  --line: rgba(201, 211, 204, 0.08);
+  --accent: #3fa37a;
+  --on-accent: #06130d;
+  --accent-soft: rgba(63, 163, 122, 0.14);
+  --mono-bg: #1d2420;
+  --hover: rgba(201, 211, 204, 0.03);
+  --ai-bg: rgba(63, 163, 122, 0.08);
+  --ai-ink: #7cc9a6;
+  --shadow: none;
+  --st-elevated: #3987e5;
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-card: var(--card);
+  --color-rail: var(--rail);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-mono-bg: var(--mono-bg);
+  --color-hover: var(--hover);
+  --color-ai-bg: var(--ai-bg);
+  --color-ai-ink: var(--ai-ink);
+  --color-crit: var(--st-crit);
+  --color-serious: var(--st-serious);
+  --color-warn: var(--st-warn);
+  --color-good: var(--st-good);
+  --color-elevated: var(--st-elevated);
+  --color-info: var(--st-info);
+  --radius-card: var(--radius);
+  --shadow-card: var(--shadow);
+  --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
