@@ -20,7 +20,7 @@ function Classic({ hash }: { hash: string }) {
   useEffect(() => {
     window.location.replace(classicHref(hash));
   }, [hash]);
-  return <p className="p-4 text-ink-2">Opening this screen in the classic GUI…</p>;
+  return <p className="p-4 text-ink-2">Opening this screen in the old GUI…</p>;
 }
 
 export function App() {

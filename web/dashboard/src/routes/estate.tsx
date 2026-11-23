@@ -260,7 +260,7 @@ export function Estate() {
                 <a
                   className="flex items-center gap-1 font-medium text-ink hover:text-accent"
                   href={classicHref(`#/release/${r.id}?v=${encodeURIComponent(r.version ?? "")}`)}
-                  title="Open this release's posture (classic GUI until step G2)"
+                  title="Open this release's posture (old GUI until step G2)"
                 >
                   v{r.version}
                   <ArrowUpRight className="size-3.5 text-muted" aria-hidden />

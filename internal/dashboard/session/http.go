@@ -57,17 +57,17 @@ func (h Handler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 // ReturnCookieName remembers which page a signed-out operator asked for, so sign-in lands
-// there instead of always on "/" (EDR-GUI-02 D11: during the move-over a sign-in from
-// /next/ must return to /next/, not to the classic GUI). A cookie rather than a ?next=
+// there instead of always on "/" (EDR-GUI-02 D11: "/" is the new GUI, so a sign-in from
+// the old GUI at /old/ must return to /old/). A cookie rather than a ?next=
 // query parameter so no link can carry a redirect target, and the value is re-checked on
 // the way out anyway.
 const ReturnCookieName = "themis_return"
 
 // returnable reports whether a requested path may be returned to after sign-in. Only the
-// new GUI's own pages qualify: a local absolute path under /next/, never "//host" or a
-// back-slash form a browser could read as another origin.
+// two GUIs' own pages qualify ("/" needs no remembering): a local absolute path under /old/
+// or /next/, never "//host" or a back-slash form a browser could read as another origin.
 func returnable(p string) bool {
-	return strings.HasPrefix(p, "/next/") && !strings.Contains(p, "//") && !strings.Contains(p, `\`)
+	return (strings.HasPrefix(p, "/old/") || strings.HasPrefix(p, "/next/")) && !strings.Contains(p, "//") && !strings.Contains(p, `\`)
 }
 
 // returnTarget reads and clears the remembered page; anything missing or not returnable

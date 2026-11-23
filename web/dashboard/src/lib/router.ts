@@ -18,7 +18,7 @@ export function parseHash(hash: string): Route {
 
 /** The classic GUI's URL for a hash route that is not built here yet. */
 export function classicHref(hash: string): string {
-  return `/${hash.startsWith("#") ? hash : `#${hash}`}`;
+  return `/old/${hash.startsWith("#") ? hash : `#${hash}`}`;
 }
 
 function subscribe(cb: () => void) {

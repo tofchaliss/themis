@@ -39,16 +39,20 @@ func newNext(fsys fs.FS) http.Handler {
 	return withNext(classic, fsys)
 }
 
-func TestNextRedirectsBarePath(t *testing.T) {
-	rec := serve(t, newNext(nextFS()), http.MethodGet, "/next", "")
-	if rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "/next/" {
-		t.Fatalf("got %d %q, want 301 to /next/", rec.Code, rec.Header().Get("Location"))
+// The old /next/ address (and /index.html) now point at the default page; the browser
+// keeps the #fragment across the redirect.
+func TestNextAddressesRedirectToRoot(t *testing.T) {
+	for _, p := range []string{"/next", "/next/", "/next/index.html", "/index.html"} {
+		rec := serve(t, newNext(nextFS()), http.MethodGet, p, "")
+		if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/" {
+			t.Errorf("%s: got %d %q, want 302 to /", p, rec.Code, rec.Header().Get("Location"))
+		}
 	}
 }
 
 func TestNextIndexIsRevalidatedAndCarriesCSP(t *testing.T) {
-	rec := serve(t, newNext(nextFS()), http.MethodGet, "/next/", "br, gzip")
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "next") {
+	rec := serve(t, newNext(nextFS()), http.MethodGet, "/", "br, gzip")
+	if rec.Code != http.StatusOK || rec.Body.String() != "<!doctype html>next" {
 		t.Fatalf("index: %d %q", rec.Code, rec.Body.String())
 	}
 	if got := rec.Header().Get("Cache-Control"); got != cacheRevalidate {
@@ -62,6 +66,21 @@ func TestNextIndexIsRevalidatedAndCarriesCSP(t *testing.T) {
 	}
 	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
 		t.Error("nosniff missing")
+	}
+	if !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") {
+		t.Errorf("Content-Type = %q", rec.Header().Get("Content-Type"))
+	}
+	head := serve(t, newNext(nextFS()), http.MethodHead, "/", "")
+	if head.Code != http.StatusOK || head.Body.Len() != 0 {
+		t.Errorf("HEAD /: %d with %d bytes", head.Code, head.Body.Len())
+	}
+}
+
+// A build without the new GUI's page answers plainly instead of a blank screen.
+func TestRootWithoutBuildSaysSo(t *testing.T) {
+	rec := serve(t, newNext(fstest.MapFS{"index.html": {Data: []byte("classic")}}), http.MethodGet, "/", "")
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "make web-build") {
+		t.Fatalf("missing build: %d %q", rec.Code, rec.Body.String())
 	}
 }
 
@@ -121,13 +140,30 @@ func TestNextThemeInitIsRevalidated(t *testing.T) {
 	}
 }
 
-func TestClassicPathsAreUntouched(t *testing.T) {
-	rec := serve(t, newNext(nextFS()), http.MethodGet, "/", "br")
-	if rec.Body.String() != "classic-handler" {
-		t.Fatalf("classic: %q", rec.Body.String())
+// The old GUI lives at /old/ with the prefix stripped, and never gets the new GUI's CSP:
+// its inline styles would break.
+func TestOldGUIIsServedUnderOld(t *testing.T) {
+	var gotPath string
+	classic := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte("classic-handler"))
+	})
+	h := withNext(classic, nextFS())
+
+	for in, want := range map[string]string{"/old/": "/", "/old/app.js": "/app.js", "/style.css": "/style.css"} {
+		rec := serve(t, h, http.MethodGet, in, "br")
+		if rec.Body.String() != "classic-handler" || gotPath != want {
+			t.Errorf("%s: body %q path %q, want classic at %q", in, rec.Body.String(), gotPath, want)
+		}
+		if rec.Header().Get("Content-Security-Policy") != "" {
+			t.Errorf("%s: the old GUI got the new GUI's CSP", in)
+		}
 	}
-	if rec.Header().Get("Content-Security-Policy") != "" {
-		t.Error("the classic GUI must not get the new GUI's CSP: its inline styles would break")
+	if rec := serve(t, h, http.MethodGet, "/old", ""); rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "/old/" {
+		t.Errorf("/old: %d %q, want 301 to /old/", rec.Code, rec.Header().Get("Location"))
+	}
+	if rec := serve(t, h, http.MethodGet, "/old/next/index.html", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("/old/next/ served the new GUI without its headers: %d", rec.Code)
 	}
 }
 
@@ -145,12 +181,16 @@ func TestEmbeddedNextBuildIsPresent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := serve(t, h, http.MethodGet, "/next/", "")
+	rec := serve(t, h, http.MethodGet, "/", "")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `<div id="root">`) {
-		t.Fatalf("embedded /next/: %d", rec.Code)
+		t.Fatalf("embedded /: %d", rec.Code)
 	}
 	if rec.Header().Get("Content-Security-Policy") != nextCSP {
-		t.Fatal("embedded /next/ served without the CSP")
+		t.Fatal("embedded / served without the CSP")
+	}
+	// The old GUI is still inside the binary, at /old/.
+	if rec := serve(t, h, http.MethodGet, "/old/", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "app.js") {
+		t.Fatalf("embedded /old/: %d", rec.Code)
 	}
 }
 
@@ -185,7 +225,7 @@ func TestOverrideDirServesNext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := serve(t, h, http.MethodGet, "/next/", "")
+	rec := serve(t, h, http.MethodGet, "/", "")
 	if rec.Body.String() != "override-next" || rec.Header().Get("Content-Security-Policy") != nextCSP {
 		t.Fatalf("override /next/: %q", rec.Body.String())
 	}
