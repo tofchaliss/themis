@@ -47,7 +47,12 @@ describe("router", () => {
     expect(parseHash("#/estate")).toEqual({ view: "estate" });
     expect(parseHash("#/release/r1?v=1.0")).toEqual({ view: "release", id: "r1", version: "1.0" });
     expect(parseHash("#/release/r%2F1")).toEqual({ view: "release", id: "r/1", version: "" });
-    expect(parseHash("#/watches")).toEqual({ view: "classic", hash: "#/watches" });
+    expect(parseHash("#/watches")).toEqual({ view: "watches" });
+    expect(parseHash("#/watches/w%201")).toEqual({ view: "watch", id: "w 1" });
+    expect(parseHash("#/reports")).toEqual({ view: "reports" });
+    expect(parseHash("#/feeds")).toEqual({ view: "feeds" });
+    expect(parseHash("#/admin")).toEqual({ view: "admin" });
+    expect(parseHash("#/elsewhere")).toEqual({ view: "classic", hash: "#/elsewhere" });
     expect(parseHash("#/decide/f1?rel=r1&v=1.0")).toEqual({ view: "decide", findingId: "f1", releaseId: "r1", version: "1.0" });
     expect(parseHash("#/decide/f1")).toEqual({ view: "decide", findingId: "f1", releaseId: "", version: "" });
     expect(parseHash("#/sbom")).toEqual({ view: "sbom" });

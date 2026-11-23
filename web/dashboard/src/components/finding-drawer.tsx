@@ -1,5 +1,5 @@
-// The Finding drawer (EDR-GUI-02 G2): READ ONLY. Deciding happens on the full decision page
-// (D14), which "Decide…" opens.
+// The Finding drawer (EDR-GUI-02 G2, G5): READ ONLY. Deciding happens on the full decision page
+// (D14), which "Decide…" opens. G5 added the AI explanation, the score and similar decisions.
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,8 +7,9 @@ import { Sheet } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BandBadge, ExpertSeverity, OriginalSeverity, SlaCell, StanceBadge, isCleared } from "@/components/finding-bits";
 import { ErrorPanel } from "@/components/states";
-import { useAssessment, type Component, type PostureEntry } from "@/lib/queries";
-import { classicHref, decideHash, releaseHash } from "@/lib/router";
+import { useAssessment, type Assessment, type Component, type PostureEntry } from "@/lib/queries";
+import { decideHash } from "@/lib/router";
+import { Explanation, ScoreSection, SimilarDecisions } from "@/components/drawer-extras";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -49,6 +50,35 @@ function ComponentRow({ c }: { c: Component }) {
   );
 }
 
+/** EDR-ATTRIBUTION-01: the card's carrier could not be related to anything installed here. An
+ * observation about the evidence, never a verdict that this release is unaffected. */
+function AttributionSection({ at }: { at: NonNullable<Assessment["attribution"]> }) {
+  return (
+    <Section title="Attribution">
+      <Badge tone="warn" title="an observation about the evidence, never a verdict">
+        unresolved
+      </Badge>
+      <dl className="mt-2">
+        <Row k="Vulnerability carrier">
+          {at.carriers?.length ? <span className="font-mono text-xs">{at.carriers.join(" ")}</span> : <Badge tone="info">none named by any source</Badge>}
+        </Row>
+        <Row k="Installed here">{at.components?.length ? <span className="font-mono text-xs">{at.components.join(" ")}</span> : "—"}</Row>
+      </dl>
+      {!!at.unresolved_because?.length && (
+        <ul className="mt-1 list-disc pl-5 text-xs text-ink-2">
+          {at.unresolved_because.map((w) => (
+            <li key={w}>{w}</li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 text-xs text-ink-2">
+        This says nothing about whether these components are affected, only that Themis has no deterministic way to relate the two names. Nothing
+        is guessed here.
+      </p>
+    </Section>
+  );
+}
+
 export function FindingDrawer({
   entry,
   releaseId,
@@ -67,7 +97,6 @@ export function FindingDrawer({
   const comps = f?.components ?? entry?.components ?? [];
   const open = comps.filter((c) => !isCleared(c));
   const cleared = comps.filter(isCleared);
-  const oldRelease = classicHref(releaseHash(releaseId, version));
 
   return (
     <Sheet open={!!entry} onClose={onClose} labelledBy="drawer-title">
@@ -124,6 +153,8 @@ export function FindingDrawer({
                   </dl>
                 </Section>
 
+                {entry.finding_id && <Explanation findingId={entry.finding_id} />}
+
                 <Section title="Decision">
                   <dl>
                     <Row k="Decision">
@@ -163,6 +194,10 @@ export function FindingDrawer({
                     <a href={decideHash(entry.finding_id ?? "", releaseId, version)}>Decide…</a>
                   </Button>
                 </Section>
+
+                {entry.finding_id && <ScoreSection findingId={entry.finding_id} />}
+
+                {a.data?.attribution?.status === "unresolved" && <AttributionSection at={a.data.attribution} />}
 
                 <Section title={`Matched components (${comps.length})`}>
                   {comps.length === 0 ? (
@@ -226,13 +261,7 @@ export function FindingDrawer({
                   )}
                 </Section>
 
-                <p className="px-5 py-4 text-xs text-ink-2">
-                  The AI explanation, similar past decisions and publishing are still in the{" "}
-                  <a className="text-accent" href={oldRelease}>
-                    old GUI
-                  </a>{" "}
-                  until the next step.
-                </p>
+                {entry.finding_id && <SimilarDecisions findingId={entry.finding_id} />}
               </>
             )}
           </div>

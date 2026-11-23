@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { ArrowUpRight, Network, Rss, Search } from "lucide-react";
+import { Network, Rss, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,6 @@ import { Donut } from "@/components/donut";
 import { bandSlices } from "@/components/bands";
 import { Empty, ErrorPanel } from "@/components/states";
 import { useEstateSweep, useFeeds, useProducts } from "@/lib/queries";
-import { classicHref } from "@/lib/router";
 import { asArray } from "@/lib/utils";
 
 const CVE_RE = /^CVE-\d{4}-\d{4,}$/;
@@ -33,8 +32,7 @@ function CveSearch() {
       setBad(true);
       return;
     }
-    // The CVE page is not built in this GUI yet (EDR-GUI-02 G4): it opens in the classic one.
-    window.location.href = classicHref(`#/cve/${encodeURIComponent(id)}`);
+    window.location.hash = `#/cve/${encodeURIComponent(id)}`;
   };
   return (
     <form onSubmit={submit} className="flex flex-wrap items-center gap-2" autoComplete="off">
@@ -86,10 +84,7 @@ export function Overview() {
                 <a href="#/estate">Browse the estate</a>
               </Button>
               <Button asChild variant="outline">
-                <a href={classicHref("#/sbom")}>
-                  Upload an SBOM
-                  <ArrowUpRight />
-                </a>
+                <a href="#/sbom">Upload an SBOM</a>
               </Button>
             </div>
             <CveSearch />
@@ -145,7 +140,7 @@ export function Overview() {
               <span className="text-ink-2">Products, projects and releases, down to a posture</span>
             </span>
           </a>
-          <a href={classicHref("#/feeds")} className="flex items-start gap-3 rounded-lg border border-line p-3 hover:bg-hover">
+          <a href="#/feeds" className="flex items-start gap-3 rounded-lg border border-line p-3 hover:bg-hover">
             <Rss className="mt-0.5 size-5 text-accent" aria-hidden />
             <span>
               <b className="block">Feed health</b>

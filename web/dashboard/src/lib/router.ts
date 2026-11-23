@@ -11,6 +11,11 @@ export type Route =
   | { view: "compare" }
   | { view: "new" }
   | { view: "cve"; cve: string }
+  | { view: "reports" }
+  | { view: "feeds" }
+  | { view: "admin" }
+  | { view: "watches" }
+  | { view: "watch"; id: string }
   | { view: "scan"; evidenceId: string; releaseId: string; version: string }
   | { view: "classic"; hash: string };
 
@@ -23,6 +28,12 @@ export function parseHash(hash: string): Route {
   if (path === "/sbom") return { view: "sbom" };
   if (path === "/compare") return { view: "compare" };
   if (path === "/new") return { view: "new" };
+  if (path === "/reports") return { view: "reports" };
+  if (path === "/feeds") return { view: "feeds" };
+  if (path === "/admin") return { view: "admin" };
+  if (path === "/watches") return { view: "watches" };
+  const watch = /^\/watches\/([^/]+)$/.exec(path);
+  if (watch?.[1]) return { view: "watch", id: decodeURIComponent(watch[1]) };
   const cve = /^\/cve\/([^/]+)$/.exec(path);
   if (cve?.[1]) return { view: "cve", cve: decodeURIComponent(cve[1]) };
   const scan = /^\/scan\/([^/]+)$/.exec(path);

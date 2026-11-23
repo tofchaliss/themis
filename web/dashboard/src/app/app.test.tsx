@@ -20,7 +20,7 @@ describe("App shell", () => {
     expect(screen.getByText("JD")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
     expect(await screen.findByText(/default password in use/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /admin/i })).toHaveAttribute("href", "/old/#/admin");
+    expect(screen.getByRole("link", { name: /admin/i })).toHaveAttribute("href", "#/admin");
     expect(screen.getByRole("link", { name: /^old gui$/i })).toHaveAttribute("href", "/old/");
   });
 
@@ -62,7 +62,8 @@ describe("App shell", () => {
     expect(screen.getByRole("link", { name: "Estate" })).toHaveAttribute("href", "#/estate");
     expect(screen.getByRole("link", { name: "SBOM manager" })).toHaveAttribute("href", "#/sbom");
     expect(screen.getByRole("link", { name: "Compare" })).toHaveAttribute("href", "#/compare");
-    expect(screen.getByRole("link", { name: /reports \(opens the old gui\)/i })).toHaveAttribute("href", "/old/#/reports");
+    expect(screen.getByRole("link", { name: "Reports" })).toHaveAttribute("href", "#/reports");
+    expect(screen.queryByRole("link", { name: /opens the old gui/i })).toBeNull();
   });
 
   it("routes by hash and hands unbuilt screens to the classic GUI", async () => {
@@ -90,6 +91,11 @@ describe("App shell", () => {
       ["#/compare", "Overview/Compare releases"],
       ["#/new", "Overview/What's new"],
       ["#/cve/CVE-2026-0001", "Overview/What's new/CVE-2026-0001"],
+      ["#/reports", "Overview/Reports"],
+      ["#/feeds", "Overview/Feed health"],
+      ["#/admin", "Overview/Admin"],
+      ["#/watches", "Overview/Watches"],
+      ["#/watches/w1", "Overview/Watches/Watch"],
     ]) {
       act(() => {
         window.location.hash = hash as string;
@@ -98,7 +104,7 @@ describe("App shell", () => {
       expect(await screen.findByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent(crumbs as string);
     }
     act(() => {
-      window.location.hash = "#/watches";
+      window.location.hash = "#/nowhere";
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
     expect(await screen.findByText(/opening this screen in the old gui/i)).toBeInTheDocument();

@@ -8,7 +8,6 @@ import { Fragment, useMemo, useState, type KeyboardEvent } from "react";
 import { ArrowUpRight, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Count } from "@/components/count";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,8 +27,9 @@ import {
   priorityTitle,
 } from "@/components/finding-bits";
 import { FindingDrawer } from "@/components/finding-drawer";
+import { CustomerVexCard, DocSheet, PublicationsCard, RemediationPlanCard, type Doc } from "@/components/release-extras";
 import { Empty, ErrorPanel } from "@/components/states";
-import { useCveReleases, useEvidence, usePosture, useProject, useRelease, useScanReport, useUploadOutcome, type PostureEntry, type UploadOutcome } from "@/lib/queries";
+import { useCveReleases, useEvidence, useWhoAmI, usePosture, useProject, useRelease, useScanReport, useUploadOutcome, type PostureEntry, type UploadOutcome } from "@/lib/queries";
 import { classicHref, releaseHash, scanHash } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -232,6 +232,8 @@ export function Release({ id, version: hashVersion }: { id: string; version: str
   const [text, setText] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [drawer, setDrawer] = useState<PostureEntry | null>(null);
+  const [doc, setDoc] = useState<Doc | null>(null);
+  const who = useWhoAmI();
 
   const all = useMemo(
     () =>
@@ -267,7 +269,7 @@ export function Release({ id, version: hashVersion }: { id: string; version: str
           {version ? `v${version}` : "Release"}
         </h1>
         <a className="inline-flex items-center gap-1 text-xs text-ink-2 hover:text-ink" href={oldPage}>
-          Remediation plan, VEX and publications: in the old GUI
+          This release in the old GUI
           <ArrowUpRight className="size-3.5" aria-hidden />
         </a>
       </div>
@@ -411,17 +413,13 @@ export function Release({ id, version: hashVersion }: { id: string; version: str
           </Card>
           {outcome.data && <UploadOutcomeCard o={outcome.data} />}
           <ScansCard releaseId={id} version={version} />
-          <div>
-            <Button variant="outline" asChild>
-              <a href={oldPage}>
-                Open this release in the old GUI
-                <ArrowUpRight />
-              </a>
-            </Button>
-          </div>
+          <RemediationPlanCard releaseId={id} />
+          <CustomerVexCard releaseId={id} canWrite={who.data?.can_write !== false} onDoc={setDoc} />
+          <PublicationsCard releaseId={id} onDoc={setDoc} />
         </>
       )}
       <FindingDrawer entry={drawer} releaseId={id} version={version} onClose={() => setDrawer(null)} />
+      <DocSheet doc={doc} onClose={() => setDoc(null)} />
     </div>
   );
 }

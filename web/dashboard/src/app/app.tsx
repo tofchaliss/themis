@@ -14,6 +14,11 @@ const Sbom = lazy(() => import("@/routes/sbom").then((m) => ({ default: m.Sbom }
 const Compare = lazy(() => import("@/routes/compare").then((m) => ({ default: m.Compare })));
 const WhatsNew = lazy(() => import("@/routes/whats-new").then((m) => ({ default: m.WhatsNew })));
 const Cve = lazy(() => import("@/routes/cve").then((m) => ({ default: m.Cve })));
+const Reports = lazy(() => import("@/routes/reports").then((m) => ({ default: m.Reports })));
+const Feeds = lazy(() => import("@/routes/feeds").then((m) => ({ default: m.Feeds })));
+const Admin = lazy(() => import("@/routes/admin").then((m) => ({ default: m.Admin })));
+const Watches = lazy(() => import("@/routes/watches").then((m) => ({ default: m.Watches })));
+const WatchView = lazy(() => import("@/routes/watches").then((m) => ({ default: m.WatchView })));
 const Scan = lazy(() => import("@/routes/scan").then((m) => ({ default: m.Scan })));
 const Release = lazy(() => import("@/routes/release").then((m) => ({ default: m.Release })));
 
@@ -23,6 +28,11 @@ const CRUMBS: Record<string, Crumb[]> = {
   sbom: [{ label: "Overview", href: "#/" }, { label: "SBOM manager" }],
   compare: [{ label: "Overview", href: "#/" }, { label: "Compare releases" }],
   new: [{ label: "Overview", href: "#/" }, { label: "What's new" }],
+  reports: [{ label: "Overview", href: "#/" }, { label: "Reports" }],
+  feeds: [{ label: "Overview", href: "#/" }, { label: "Feed health" }],
+  admin: [{ label: "Overview", href: "#/" }, { label: "Admin" }],
+  watches: [{ label: "Overview", href: "#/" }, { label: "Watches" }],
+  watch: [{ label: "Overview", href: "#/" }, { label: "Watches", href: "#/watches" }, { label: "Watch" }],
 };
 
 function crumbsFor(route: Route): Crumb[] {
@@ -49,6 +59,7 @@ function crumbsFor(route: Route): Crumb[] {
 function railFor(route: Route): string {
   if (route.view === "release" || route.view === "decide" || route.view === "scan") return "estate";
   if (route.view === "cve") return "new";
+  if (route.view === "watch") return "watches";
   return route.view;
 }
 
@@ -92,6 +103,11 @@ export function App() {
             {route.view === "sbom" && <Sbom />}
             {route.view === "compare" && <Compare />}
             {route.view === "new" && <WhatsNew />}
+            {route.view === "reports" && <Reports />}
+            {route.view === "feeds" && <Feeds />}
+            {route.view === "admin" && <Admin />}
+            {route.view === "watches" && <Watches />}
+            {route.view === "watch" && <WatchView key={route.id} id={route.id} />}
             {route.view === "cve" && <Cve key={route.cve} cve={route.cve} />}
             {route.view === "scan" && <Scan key={route.evidenceId} evidenceId={route.evidenceId} releaseId={route.releaseId} version={route.version} />}
             {route.view === "classic" && <Classic hash={route.hash} />}

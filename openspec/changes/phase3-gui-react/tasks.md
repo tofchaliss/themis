@@ -28,8 +28,8 @@ Every step waits for the owner's go and lands as its own PR.
   required rationale, unsaved-changes guard, and the severity warning dialog (D14).
   Done 2026-11-23: read-only drawer (no AI or score panel yet) and the decision page (scope
   picker with preview, required rationale, acceptance terms, waiting proposals, other
-  releases, unsaved-changes guard). Open: AI and score panels; the severity warning waits for
-  the governed vector change (EDR-SCORING-01 S6).
+  releases, unsaved-changes guard). AI and score panels added with G5 (2026-11-23). Open: the
+  severity warning waits for the governed vector change (EDR-SCORING-01 S6).
 - [x] 2.5 Owner amendment 2026-11-23 (D13): Original severity and Expert severity in place of
   Score (posture rows gain the two scores from the stored assessment), band beside the CVE,
   and the summary as one small card with two donuts.
@@ -60,6 +60,15 @@ Every step waits for the owner's go and lands as its own PR.
 ## Group 5 — G5 Reports, Watches, Feeds, Admin
 
 - [ ] 5.1 The four screens at parity (Watches CSV export, admin password change); VM check.
+  Done 2026-11-23: Reports at `#/reports` (estate and per-product metrics, age table, tag
+  filter, Markdown/JSON links), Feeds at `#/feeds` (feeds, stale warning, webhook health),
+  Watches at `#/watches` and `#/watches/<id>` (create, state filter, CSV export, add ids,
+  delete), Admin at `#/admin` (password change; no-scope and auth-off explained). Also the
+  release page's remediation plan, customer VEX (preview, view, publish) and publications
+  with the publishable queue and a document view; and the drawer's AI explanation (runs on
+  open, cached for the session, hidden when the AI plane is off), score panel, similar
+  decisions and the unresolved-attribution section. Every rail screen is now in this GUI;
+  any other hash still forwards to `/old/`. No API change. Open: VM check.
 
 ## Group 6 — G6 switch and G7 removal
 

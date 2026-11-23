@@ -202,12 +202,14 @@ describe("Release posture", () => {
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
-    mockFetch({ ...base, "GET /api/governance/findings/f-top/assessment": [200, { knowledge: {}, finding: { components: [], proposals: [] } }] });
+    mockFetch({ ...base, "GET /api/governance/findings/f-top/assessment": [200, { knowledge: {}, finding: { components: [], proposals: [] }, attribution: { status: "unresolved", components: ["openssl"], unresolved_because: ["no CPE names it"] } }] });
     fireEvent.keyDown(rows[0] as HTMLElement, { key: "Enter" });
     const d2 = await screen.findByRole("dialog");
     expect(await within(d2).findByText("none recorded", { selector: "span" })).toBeInTheDocument();
     expect(within(d2).getByText("none for these components")).toBeInTheDocument();
     expect(within(d2).getByText("since 2026-11-20")).toBeInTheDocument();
+    expect(within(d2).getByText("none named by any source")).toBeInTheDocument();
+    expect(within(d2).getByText("no CPE names it")).toBeInTheDocument();
     expect(within(d2).getAllByText("none").length).toBeGreaterThan(0);
   });
 

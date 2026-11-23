@@ -350,7 +350,10 @@ S6); SSO; translations; a mobile layout (EDR-GUI-01 non-goal); any change to the
 - **G4** Compare, What's new, CVE page. Built 2026-11-23 with no API change. The AI pieces
   (the reason table, the answer with its provenance and the TRUST-8 mark) are one shared
   module now, so G5's remediation plan and the drawer's explanation reuse them.
-- **G5** Reports, Watches, Feeds, Admin.
+- **G5** Reports, Watches, Feeds, Admin. Built 2026-11-23 with no API change, together with
+  the release page's remediation plan, customer VEX and publications, and the drawer's AI
+  explanation, score panel and similar decisions. Every rail screen is now in the new GUI; the
+  old one stays at `/old/` until G7, on the owner's go.
 - **G6** Switch the default to the new GUI; old GUI at `/old/`. **Done early, 2026-11-23**, on the
   owner's ask (see the D11 amendment).
 - **G7** Remove the old GUI and `js-check`.

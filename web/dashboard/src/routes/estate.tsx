@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Empty, ErrorPanel, Loading } from "@/components/states";
 import { apiPut, ApiError } from "@/lib/api";
 import { useProducts, useProjects, useReleases, useTags, useWhoAmI, type TagKind, type TagSet } from "@/lib/queries";
-import { classicHref, releaseHash } from "@/lib/router";
+import { releaseHash } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 type Target = { kind: TagKind; id: string; name: string };
@@ -191,7 +191,7 @@ export function Estate() {
               <Empty title="No products yet">
                 <span>
                   Upload the first SBOM in the{" "}
-                  <a className="text-accent" href={classicHref("#/sbom")}>
+                  <a className="text-accent" href="#/sbom">
                     SBOM manager
                   </a>
                   , or run scripts/gf-upload-sbom.sh.

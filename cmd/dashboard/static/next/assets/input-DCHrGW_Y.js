@@ -1,1 +1,0 @@
-import{et as e,tt as t,z as n}from"./index-BynlwYrz.js";t();var r=e();function i({className:e,...t}){return(0,r.jsx)(`input`,{className:n(`h-8 rounded-lg border border-line bg-card px-2.5 text-[13px] text-ink placeholder:text-muted focus-visible:outline-2 focus-visible:outline-accent`,e),...t})}export{i as t};
