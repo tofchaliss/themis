@@ -355,12 +355,11 @@ three angles, and two of them proposed fixes that would not have worked.
   (Enterprise default, Midnight, Ops night), new GUI at `/next/` screen by screen, then the
   switch. Steps G1-G7, one PR each on the owner's go.
 
-- [ ] **PSIRT product severity on the Overview** (id `GUI-PSIRT-1`, owner 2026-11-23, feature).
-  One severity per (product, CVE), derived from the release rows of every project of the
-  product (which already roll up their components, EDR-SCORING-01 section 6), shown as a
-  "latest issues" table on the Overview. Design in EDR-PSIRT-01 (PROPOSED); six owner choices
-  open; steps P1a (Knowledge publish date + CWE), P1 (Governance read) and P2 (GUI card)
-  wait for the owner's go.
+- [ ] **PSIRT early alert on the Overview** (id `GUI-PSIRT-1`, owner 2026-11-23, feature).
+  Newly published critical/high CVEs in the world (original source score, no Themis score),
+  tied to the products whose components they may hit, as the first bucket before the Themis
+  engine. Design in EDR-PSIRT-01 revision 2 (PROPOSED); Q1 (how to tie a world CVE to a
+  product) open; steps P1-P4 wait for the owner's go.
 
 - [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
   feature). The owner's reference table shows per-release assessment-type markers (five status
