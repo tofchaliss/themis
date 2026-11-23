@@ -17,7 +17,7 @@ Every step waits for the owner's go and lands as its own PR.
 - [ ] 1.3 Dashboard: `/next/` mount, cache headers, pre-compressed files, CSP; Go tests.
 - [ ] 1.4 Shell: rail, top bar, breadcrumbs, three-shade picker (contrast test), user chip,
   sign-out, default-password notice, session and node-down handling; generated API types.
-- [ ] 1.5 Overview and Estate screens at parity; size budget measured; VM check.
+- [ ] 1.5 Overview and Estate screens at parity, checked against `docs/engineering/gui-reference/`; size budget measured; VM check.
 
 ## Group 2 — G2 release posture and drawer
 

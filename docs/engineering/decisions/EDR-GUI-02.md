@@ -196,6 +196,18 @@ dashboard binary; no node changes.
   server with hot reload, proxying `/api`, `/login`, `/whoami` to a running dashboard: the same
   edit-and-refresh loop `THEMIS_DASHBOARD_ASSETS` gives today).
 
+## Visual reference
+
+`docs/engineering/gui-reference/` holds the owner's screenshot of today's finding drawer and
+mockups of the new GUI: the release posture in all three shades and the finding drawer (added
+2026-11-23 at owner request). Each build step checks its screens against them. The mockups are
+design targets with example data, not pixel specs; see that folder's README for what each one
+shows and what it fixes.
+
+![Release posture, Enterprise](../gui-reference/mockup-posture-enterprise.png)
+
+![Finding drawer, Enterprise](../gui-reference/mockup-drawer-enterprise.png)
+
 ## Not in scope
 
 Server rendering; new API endpoints (EDR-GUI-01 D5 stands); GUI users and roles (EDR-SCORING-01
