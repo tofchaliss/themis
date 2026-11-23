@@ -355,6 +355,14 @@ three angles, and two of them proposed fixes that would not have worked.
   one PR each on the owner's go; S1-S5 (calculator, source ratings, CR/IR/AR, per-component
   assessment in shadow, read-only GUI panel) change no existing behaviour. Depends on
   EV-CURRENT-SBOM-1 (removal), GUI users and roles (S6 only).
+  **S1-S5 DONE 2026-11-23**: merged #230-#234, VM check PASS (EDR 12.4). S6-S8 open.
+  - [ ] **KN-CVSS-SWEEP-WAIT-1** (S4 follow-up, low): after all nodes restart together, the first
+    assessment sweep starts before Knowledge answers; on the VM 16 of 1,058 Findings failed with
+    "connection refused" and were assessed on the next run (nothing wrong written). Fix: let the
+    first sweep wait (bounded) until Knowledge's read API answers, or retry failed Findings once.
+  - [ ] **AI-EXPLAIN-BAND-1** (low): `explain_vulnerability` text called CVSS 7.0 "medium"; in
+    CVSS 3.1, 7.0 to 8.9 is "high". Seen on the VM 2026-11-23 (CVE-2023-47038). Ground the band
+    word on the stored score band instead of letting the model name it.
 
 - [x] **M4 Δ1 — Intelligence (AI Gateway) walking skeleton** — `phase3-intelligence`, `EDR-INTELLIGENCE-01`
   (Revision 2, D1–D13). **IMPLEMENTED + gated** (2026-07-18): one reactive capability `recommend_position`
