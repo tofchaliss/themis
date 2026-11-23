@@ -30,6 +30,9 @@ Every step waits for the owner's go and lands as its own PR.
   picker with preview, required rationale, acceptance terms, waiting proposals, other
   releases, unsaved-changes guard). Open: AI and score panels; the severity warning waits for
   the governed vector change (EDR-SCORING-01 S6).
+- [x] 2.5 Owner amendment 2026-11-23 (D13): Original severity and Expert severity in place of
+  Score (posture rows gain the two scores from the stored assessment), band beside the CVE,
+  and the summary as one small card with two donuts.
 - [ ] 2.4 VM check.
 
 ## Group 3 — G3 SBOM manager and scan view

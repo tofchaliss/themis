@@ -108,6 +108,16 @@ type PostureEntry struct {
 	// SLA is the Finding's remediation clock (EDR-REMEDIATION-01 D1); nil when the SLA seam is
 	// not wired or could not be read — the posture never fails over a deadline.
 	SLA *domain.SLAStatus
+	// OriginalScore / ExpertScore are the two severities a person compares on the CVE list
+	// (EDR-GUI-02 D13 amendment, EDR-SCORING-01): the source's own CVSS Base score, and
+	// Themis's Environmental score after the assessment — both read from the newest stored
+	// assessment revision, nil when this Finding has none yet. ExpertStatus is final or
+	// provisional when ExpertScore is set; ScoreState is the roll-up state (scored,
+	// no_carrier, unavailable, …) so "not assessed" and "nothing to assess" read differently.
+	OriginalScore *float64
+	ExpertScore   *float64
+	ExpertStatus  string
+	ScoreState    string
 }
 
 // ReadService serves the Governance read side (D10): single-Finding / single-Position reads

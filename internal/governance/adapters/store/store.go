@@ -726,7 +726,82 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return s.attachComponents(ctx, releaseID, out)
+	out, err = s.attachComponents(ctx, releaseID, out)
+	if err != nil {
+		return nil, err
+	}
+	return s.attachScores(ctx, releaseID, out)
+}
+
+// attachScores fills each posture row's original and expert severity from the newest stored
+// CVSS assessment (EDR-SCORING-01 S4; EDR-GUI-02 D13 amendment), in ONE query for the release.
+//
+// Expert is the roll-up's own score (the highest Environmental score over the open carrier
+// components). Original is the highest source Base score over the SAME components, so the two
+// numbers describe the same thing before and after Themis's assessment; only when no such
+// component has a score (all cleared, or scope-only) does Original fall back to every current
+// component, so a cleared CVE still shows what its source said. Retired matches never count.
+func (s *Store) attachScores(ctx context.Context, releaseID string, entries []app.PostureEntry) ([]app.PostureEntry, error) {
+	if len(entries) == 0 {
+		return entries, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		WITH f AS (SELECT id FROM findings WHERE release_id = $1),
+		roll AS (
+			SELECT DISTINCT ON (r.finding_id) r.finding_id, r.state, r.score,
+			       COALESCE(r.snapshot->>'score_status', '') AS status
+			FROM finding_score_revisions r JOIN f ON f.id = r.finding_id
+			ORDER BY r.finding_id, r.revision DESC),
+		latest AS (
+			SELECT DISTINCT ON (c.finding_id, c.purl) c.finding_id, c.snapshot
+			FROM component_score_revisions c
+			JOIN f ON f.id = c.finding_id
+			JOIN finding_components m ON m.finding_id = c.finding_id AND m.purl = c.purl AND m.retired_at IS NULL
+			ORDER BY c.finding_id, c.purl, c.revision DESC),
+		orig AS (
+			SELECT finding_id,
+			       COALESCE(
+			         MAX((snapshot->'scores'->>'base')::float8)
+			           FILTER (WHERE COALESCE((snapshot->>'eligible')::bool, false) AND COALESCE((snapshot->>'open')::bool, false)),
+			         MAX((snapshot->'scores'->>'base')::float8)) AS base
+			FROM latest WHERE snapshot->'scores' IS NOT NULL AND jsonb_typeof(snapshot->'scores') = 'object'
+			GROUP BY finding_id)
+		SELECT f.id, COALESCE(roll.state, ''), roll.score, COALESCE(roll.status, ''), orig.base
+		FROM f LEFT JOIN roll ON roll.finding_id = f.id LEFT JOIN orig ON orig.finding_id = f.id
+		WHERE roll.finding_id IS NOT NULL OR orig.finding_id IS NOT NULL`, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type scores struct {
+		state, status    string
+		expert, original *float64
+	}
+	byFinding := map[string]scores{}
+	for rows.Next() {
+		var id string
+		var sc scores
+		if err := rows.Scan(&id, &sc.state, &sc.expert, &sc.status, &sc.original); err != nil {
+			return nil, err
+		}
+		byFinding[id] = sc
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		sc, ok := byFinding[string(entries[i].FindingID)]
+		if !ok {
+			continue
+		}
+		entries[i].ScoreState = sc.state
+		entries[i].OriginalScore = sc.original
+		if sc.state == domain.RollupScored {
+			entries[i].ExpertScore = sc.expert
+			entries[i].ExpertStatus = sc.status
+		}
+	}
+	return entries, nil
 }
 
 // attachComponents fills each posture row's components in ONE additional query (AI-GROUND-1 /

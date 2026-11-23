@@ -265,6 +265,30 @@ same posture rows each release serves, plus `release_id`, `decided_by_kind` (`hu
 `policy` / `system` = AUTO) and `decided_at` (also added to every posture row). Release and
 project names stay Registry's. The other three gaps are still open.
 
+**Owner amendment 2026-11-23 (two severities, compact summary).** After trying G2 the owner
+asked for two changes to the release page:
+
+1. **"Score" goes; "Original severity" and "Expert severity" come in its place**, on the main
+   row and in the dropdown (and in the drawer). Original is the source's own CVSS Base score
+   and rating; Expert is Themis's score after the assessment (the EDR-SCORING-01 roll-up: the
+   highest Environmental score over the open carrier components). Both come from the newest
+   stored assessment revision, so no number is computed twice:
+   - Governance's posture row (and so `/faultlines/{faultlineId}/findings`) gains
+     `original_score` / `original_severity`, `expert_score` / `expert_severity`,
+     `expert_status` (final | provisional) and `score_state` (the roll-up state). The ratings
+     use the one `ScoreBand` mapping. Read in one query per release, never per row.
+   - Original is taken over the SAME components as Expert, so the two numbers describe one
+     thing before and after the assessment; only when no such component has a score (all
+     cleared, or scope only) does it fall back to every current component, so a cleared CVE
+     still shows what its source said.
+   - No expert score is shown with its reason: "cleared", "no carrier", "no usable score",
+     or "not assessed" when no assessment is stored yet. A provisional score is marked "prov.".
+   - The exploitability band (Knowledge's, KEV-aware) is no longer a column: it rides as a
+     badge beside the CVE, so the row has no third "severity".
+2. **The summary at the top takes less space.** The five tiles and the band bar become one
+   small card: the five counts in a row (CVEs, Open, Suppressed, Cleared, SLA breached) and two
+   small donuts, Exploitability (band) and Expert severity, each with its legend and counts.
+
 ### D14 — Decisions on a full page; a severity change warns first (owner, 2026-11-23)
 
 The owner decided (2026-11-23) that **changing a CVE's details, such as disposition and

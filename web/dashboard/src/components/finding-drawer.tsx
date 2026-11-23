@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { BandBadge, SlaCell, StanceBadge, isCleared } from "@/components/finding-bits";
+import { BandBadge, ExpertSeverity, OriginalSeverity, SlaCell, StanceBadge, isCleared } from "@/components/finding-bits";
 import { ErrorPanel } from "@/components/states";
 import { useAssessment, type Component, type PostureEntry } from "@/lib/queries";
 import { classicHref, decideHash, releaseHash } from "@/lib/router";
@@ -148,6 +148,12 @@ export function FindingDrawer({
                     )}
                     <Row k="SLA">
                       <SlaCell sla={entry.sla} />
+                    </Row>
+                    <Row k="Original severity">
+                      <OriginalSeverity entry={entry} />
+                    </Row>
+                    <Row k="Expert severity">
+                      <ExpertSeverity entry={entry} />
                     </Row>
                     <Row k="Priority">
                       {(entry.residual_priority ?? 0).toFixed(1)} after decisions, {(entry.effective_priority ?? 0).toFixed(1)} before

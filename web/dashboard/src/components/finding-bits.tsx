@@ -19,6 +19,61 @@ export function BandBadge({ band }: { band?: string }) {
   return <Badge tone={BAND_TONE[band] ?? "neutral"}>{band}</Badge>;
 }
 
+const SEVERITY_TONE: Record<string, Tone> = {
+  critical: "crit",
+  high: "serious",
+  medium: "warn",
+  low: "info",
+  none: "good",
+};
+
+/** Why a Finding has no expert severity: the roll-up state in words (EDR-SCORING-01). */
+const UNSCORED: Record<string, string> = {
+  no_carrier: "no carrier",
+  no_open_occurrences: "cleared",
+  no_components: "no components",
+  unavailable: "no usable score",
+};
+
+/** One CVSS severity: the rating, the number beside it, and "provisional" when it may move.
+ * The source's rating ("original") and Themis's after the assessment ("expert") use the same
+ * cell so the two read the same way (EDR-GUI-02 D13 amendment). */
+export function SeverityCell({
+  severity,
+  score,
+  provisional,
+  missing = "not assessed",
+}: {
+  severity?: string;
+  score?: number;
+  provisional?: boolean;
+  missing?: string;
+}) {
+  if (typeof score !== "number" || !severity) return <span className="text-xs text-muted">{missing}</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap" title={provisional ? "provisional: may change as sources arrive" : undefined}>
+      <Badge tone={SEVERITY_TONE[severity] ?? "neutral"}>{severity}</Badge>
+      <span className="tabular-nums">{score.toFixed(1)}</span>
+      {provisional && <span className="text-xs text-muted">prov.</span>}
+    </span>
+  );
+}
+
+export function OriginalSeverity({ entry }: { entry: PostureEntry }) {
+  return <SeverityCell severity={entry.original_severity} score={entry.original_score} />;
+}
+
+export function ExpertSeverity({ entry }: { entry: PostureEntry }) {
+  return (
+    <SeverityCell
+      severity={entry.expert_severity}
+      score={entry.expert_score}
+      provisional={entry.expert_status === "provisional"}
+      missing={UNSCORED[entry.score_state ?? ""] ?? "not assessed"}
+    />
+  );
+}
+
 const STANCE_TONE: Record<string, Tone> = {
   affected: "crit",
   not_affected: "good",

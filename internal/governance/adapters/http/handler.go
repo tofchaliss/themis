@@ -898,6 +898,22 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	if e.DecidedByKind != "" {
 		out.DecidedByKind = strptr(string(e.DecidedByKind))
 	}
+	// The two severities of the CVE list (EDR-GUI-02 D13 amendment): the source's and Themis's,
+	// each with its qualitative rating so every consumer reads the same band for the same number.
+	if e.OriginalScore != nil {
+		v := *e.OriginalScore
+		out.OriginalScore, out.OriginalSeverity = &v, strptr(domain.ScoreBand(v))
+	}
+	if e.ExpertScore != nil {
+		v := *e.ExpertScore
+		out.ExpertScore, out.ExpertSeverity = &v, strptr(domain.ScoreBand(v))
+	}
+	if e.ExpertStatus != "" {
+		out.ExpertStatus = strptr(e.ExpertStatus)
+	}
+	if e.ScoreState != "" {
+		out.ScoreState = strptr(e.ScoreState)
+	}
 	if !e.DecidedAt.IsZero() {
 		at := e.DecidedAt
 		out.DecidedAt = &at

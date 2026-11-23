@@ -1,7 +1,9 @@
 // Release posture (EDR-GUI-02 G2, D13): one row per CVE, its other releases in a dropdown under
 // the row, and a click on the CVE or the row opens the read-only drawer. Blast, Base, Band and
 // the two-number priority column are gone; the list is still sorted by priority, which is on
-// hover and in the drawer.
+// hover and in the drawer. D13 amendment (2026-11-23): "Score" is replaced by Original severity
+// (the source's CVSS) and Expert severity (Themis's after the assessment), the exploitability
+// band rides beside the CVE, and the summary is one small card with two donuts.
 import { Fragment, useMemo, useState, type KeyboardEvent } from "react";
 import { ArrowUpRight, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -9,10 +11,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { BANDS, bandSlices } from "@/components/bands";
+import { bandSlices, severitySlices } from "@/components/bands";
+import { Donut } from "@/components/donut";
 import {
   BandBadge,
+  ExpertSeverity,
   FixCell,
+  OriginalSeverity,
   PackageCell,
   SlaCell,
   StanceBadge,
@@ -27,35 +32,45 @@ import { useCveReleases, usePosture, useProject, useRelease, type PostureEntry }
 import { classicHref, releaseHash } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
-function Tile({ value, label, note, tone }: { value: number; label: string; note: string; tone?: string }) {
+function Count({ value, label, note, tone }: { value: number; label: string; note: string; tone?: string }) {
   return (
-    <Card className="px-3.5 py-3">
-      <div className="font-medium text-ink-2">{label}</div>
-      <div className={cn("mt-1 text-2xl font-semibold tabular-nums", tone)}>{value}</div>
-      <div className="text-xs text-muted">{note}</div>
-    </Card>
+    <div title={note} className="min-w-[72px]">
+      <div className={cn("text-xl leading-tight font-semibold tabular-nums", tone)}>{value}</div>
+      <div className="text-xs text-ink-2">{label}</div>
+    </div>
   );
 }
 
-function BandBar({ posture }: { posture: PostureEntry[] }) {
-  const slices = bandSlices(posture.map((p) => p.band));
-  const total = posture.length;
+/** The release in one small card: the counts in a row, then two small donuts — the
+ * exploitability band and the expert severity (D13 amendment: the tiles and the bar were
+ * taking half the screen). */
+function Summary({ all, breached }: { all: PostureEntry[]; breached: number }) {
   return (
-    <div>
-      <div className="flex h-3 overflow-hidden rounded-full bg-mono-bg" role="img" aria-label={slices.map((s) => `${s.label} ${s.n}`).join(", ")}>
-        {slices.map((s) => (
-          <div key={s.id} style={{ width: `${(100 * s.n) / total}%`, background: s.color }} title={`${s.label}: ${s.n}`} />
-        ))}
+    <Card className="flex flex-wrap items-center gap-x-8 gap-y-3 px-4 py-3">
+      <div className="flex flex-wrap gap-x-6 gap-y-2">
+        <Count value={all.length} label="CVEs" note="Findings on this release" />
+        <Count value={all.filter((p) => !p.has_position).length} label="Open" note="no decision yet" />
+        <Count value={all.filter(isSuppressed).length} label="Suppressed" note="not affected / accepted, kept" />
+        <Count value={all.filter(allCarriersCleared).length} label="Cleared" note="vendor fix proven on every copy" />
+        <Count value={breached} label="SLA breached" note="past the days to fix" tone={breached ? "text-crit" : undefined} />
       </div>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-2">
-        {slices.map((s) => (
-          <span key={s.id} className="inline-flex items-center gap-1.5">
-            <i className="size-2 rounded-full" style={{ background: s.color }} />
-            {s.label} <b className="text-ink tabular-nums">{s.n}</b>
-          </span>
-        ))}
-      </div>
-    </div>
+      {all.length > 0 && (
+        <div className="flex flex-wrap gap-x-8 gap-y-3">
+          <figure className="flex flex-col gap-1">
+            <figcaption className="text-xs font-medium text-ink-2" title="Knowledge's band: critical means CVSS 9 or more and listed in KEV">
+              Exploitability
+            </figcaption>
+            <Donut compact slices={bandSlices(all.map((p) => p.band))} total={all.length} />
+          </figure>
+          <figure className="flex flex-col gap-1">
+            <figcaption className="text-xs font-medium text-ink-2" title="Themis's CVSS score after the assessment">
+              Expert severity
+            </figcaption>
+            <Donut compact label="findings by expert severity" slices={severitySlices(all.map((p) => p.expert_severity))} total={all.length} />
+          </figure>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -80,6 +95,8 @@ function ReleasesDropdown({ entry, releaseId }: { entry: PostureEntry; releaseId
           <th className="py-1.5 pr-3 font-medium">Decision</th>
           <th className="py-1.5 pr-3 font-medium">Decided by</th>
           <th className="py-1.5 pr-3 font-medium">Decided</th>
+          <th className="py-1.5 pr-3 font-medium">Original severity</th>
+          <th className="py-1.5 pr-3 font-medium">Expert severity</th>
           <th className="py-1.5 pr-3 font-medium">Package</th>
           <th className="py-1.5 pr-3 font-medium">Fix</th>
           <th className="py-1.5 pr-3 font-medium">Next SLA</th>
@@ -104,6 +121,12 @@ function ReleasesDropdown({ entry, releaseId }: { entry: PostureEntry; releaseId
             </td>
             <td className="py-1.5 pr-3">{decidedBy(r.entry.decided_by_kind)}</td>
             <td className="py-1.5 pr-3 font-mono text-xs">{r.entry.decided_at ? r.entry.decided_at.slice(0, 10) : "—"}</td>
+            <td className="py-1.5 pr-3">
+              <OriginalSeverity entry={r.entry} />
+            </td>
+            <td className="py-1.5 pr-3">
+              <ExpertSeverity entry={r.entry} />
+            </td>
             <td className="py-1.5 pr-3">
               <PackageCell components={r.entry.components} />
             </td>
@@ -175,32 +198,10 @@ export function Release({ id, version: hashVersion }: { id: string; version: str
       {posture.isError ? (
         <ErrorPanel error={posture.error} />
       ) : posture.isPending ? (
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-          {BANDS.map((b) => (
-            <Skeleton key={b.id} className="h-20" />
-          ))}
-        </div>
+        <Skeleton className="h-24" />
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-            <Tile value={all.length} label="CVEs" note="Findings on this release" />
-            <Tile value={all.filter((p) => !p.has_position).length} label="Open" note="no decision yet" />
-            <Tile value={all.filter(isSuppressed).length} label="Suppressed" note="not affected / accepted, kept" />
-            <Tile value={all.filter(allCarriersCleared).length} label="Cleared" note="vendor fix proven on every copy" />
-            <Tile value={breached.length} label="SLA breached" note="past the days to fix" tone={breached.length ? "text-crit" : undefined} />
-          </div>
-
-          {all.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Severity</CardTitle>
-                <CardDescription>Knowledge's exploitability band: critical means CVSS 9 or more and listed in KEV.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <BandBar posture={all} />
-              </CardContent>
-            </Card>
-          )}
+          <Summary all={all} breached={breached.length} />
 
           <Card>
             <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
@@ -241,13 +242,17 @@ export function Release({ id, version: hashVersion }: { id: string; version: str
               ) : rows.length === 0 ? (
                 <Empty title="Nothing matches">Change the filter or the search.</Empty>
               ) : (
-                <table className="w-full min-w-[820px] text-left">
+                <table className="w-full min-w-[920px] text-left">
                   <thead className="border-y border-line text-xs text-ink-2">
                     <tr>
                       <th className="w-8" aria-label="Releases" />
                       <th className="py-2 pr-3 font-medium">CVE</th>
-                      <th className="py-2 pr-3 font-medium">Severity</th>
-                      <th className="py-2 pr-3 text-right font-medium">Score</th>
+                      <th className="py-2 pr-3 font-medium" title="The source's own CVSS rating">
+                        Original severity
+                      </th>
+                      <th className="py-2 pr-3 font-medium" title="Themis's CVSS score after the assessment">
+                        Expert severity
+                      </th>
                       <th className="py-2 pr-3 font-medium">Package</th>
                       <th className="py-2 pr-3 font-medium">Decision</th>
                       <th className="py-2 pr-3 font-medium">Fix</th>
@@ -284,6 +289,9 @@ export function Release({ id, version: hashVersion }: { id: string; version: str
                             </td>
                             <td className="py-2 pr-3 font-mono text-xs font-medium">
                               {p.cve}
+                              <span className="ml-1.5 font-sans">
+                                <BandBadge band={p.band} />
+                              </span>
                               {p.disposition_stale && (
                                 <Badge tone="warn" className="ml-1.5" title={p.disposition_stale.reason}>
                                   re-surfaced
@@ -291,9 +299,11 @@ export function Release({ id, version: hashVersion }: { id: string; version: str
                               )}
                             </td>
                             <td className="py-2 pr-3">
-                              <BandBadge band={p.band} />
+                              <OriginalSeverity entry={p} />
                             </td>
-                            <td className="py-2 pr-3 text-right tabular-nums">{p.base_score ?? "—"}</td>
+                            <td className="py-2 pr-3">
+                              <ExpertSeverity entry={p} />
+                            </td>
                             <td className="py-2 pr-3">
                               <PackageCell components={p.components} />
                             </td>
@@ -309,7 +319,7 @@ export function Release({ id, version: hashVersion }: { id: string; version: str
                           </tr>
                           {isOpen && (
                             <tr className="border-b border-line bg-page/60">
-                              <td colSpan={8}>
+                              <td colSpan={9}>
                                 <ReleasesDropdown entry={p} releaseId={id} />
                               </td>
                             </tr>

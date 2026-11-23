@@ -29,6 +29,9 @@ const posture = [
     components: [{ name: "zlib", claim_class: "carrier", verdict_state: "cleared_vendor_fix" }],
     fixes: [],
     sla: sla("met", 0),
+    original_score: 5.3,
+    original_severity: "medium",
+    score_state: "no_open_occurrences",
   },
   {
     finding_id: "f-top",
@@ -47,6 +50,12 @@ const posture = [
     fixes: [{ package: "openssl", version: "3.0.7-27" }, { version: "3.0.8" }],
     sla: sla("breached", -3),
     disposition_stale: { since: "2026-11-20T00:00:00Z", reason: "entered KEV" },
+    original_score: 9.8,
+    original_severity: "critical",
+    expert_score: 6.4,
+    expert_severity: "medium",
+    expert_status: "provisional",
+    score_state: "scored",
   },
 ];
 
@@ -57,7 +66,7 @@ const base: Record<string, Reply> = {
 };
 
 describe("Release posture", () => {
-  it("shows the tiles and one row per CVE, most urgent first, without the dropped columns", async () => {
+  it("shows the summary card and one row per CVE, most urgent first, with both severities and without the dropped columns", async () => {
     mockFetch(base);
     renderWithQuery(<Release id="r1" version="" />);
     expect(await screen.findByRole("heading", { name: "project-a v1.4.0" })).toBeInTheDocument();
@@ -65,7 +74,8 @@ describe("Release posture", () => {
     expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual(["CVE-2026-0001, openssl", "CVE-2026-0002, zlib"]);
     expect(rows[0]).toHaveAttribute("title", "priority 19.6 after decisions (19.6 before), base 9.8");
     const top = rows[0] as HTMLElement;
-    expect(within(top).getByText("critical")).toBeInTheDocument();
+    // The band beside the CVE and the original severity are both "critical" here.
+    expect(within(top).getAllByText("critical")).toHaveLength(2);
     expect(within(top).getByText("open")).toBeInTheDocument();
     expect(within(top).getByText("re-surfaced")).toBeInTheDocument();
     expect(within(top).getByText("breached 3d ago")).toBeInTheDocument();
@@ -74,9 +84,17 @@ describe("Release posture", () => {
     expect(within(top).getAllByText("+1")).toHaveLength(2);
     expect(within(rows[1] as HTMLElement).getByText("none attributed")).toBeInTheDocument();
     expect(within(rows[1] as HTMLElement).getByText("not affected")).toBeInTheDocument();
-    for (const gone of ["Blast", "Base", "Band"]) expect(screen.queryByRole("columnheader", { name: gone })).toBeNull();
-    expect(screen.getByText("SLA breached", { selector: "div" }).nextElementSibling).toHaveTextContent("1");
-    expect(screen.getByRole("img", { name: /critical 1, elevated 1/ })).toBeInTheDocument();
+    for (const gone of ["Blast", "Base", "Band", "Score", "Severity"]) expect(screen.queryByRole("columnheader", { name: gone })).toBeNull();
+    expect(screen.getByRole("columnheader", { name: "Original severity" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Expert severity" })).toBeInTheDocument();
+    expect(within(top).getByText("9.8")).toBeInTheDocument();
+    expect(within(top).getByText("6.4")).toBeInTheDocument();
+    expect(within(top).getByText("prov.")).toBeInTheDocument();
+    expect(within(rows[1] as HTMLElement).getByText("5.3")).toBeInTheDocument();
+    expect(within(rows[1] as HTMLElement).getByText("cleared")).toBeInTheDocument();
+    expect(screen.getByText("SLA breached", { selector: "div" }).previousElementSibling).toHaveTextContent("1");
+    expect(screen.getByRole("img", { name: /exploitability band: critical 1, elevated 1/ })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /expert severity: medium 1, not assessed 1/ })).toBeInTheDocument();
   });
 
   it("filters by open, SLA breached and text", async () => {

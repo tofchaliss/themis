@@ -17,3 +17,19 @@ export function bandSlices(bands: (string | undefined)[]): Slice[] {
   if (unbanded) out.push({ id: "unbanded", label: "unbanded", color: "var(--muted)", n: unbanded });
   return out.filter((s) => s.n > 0);
 }
+
+// The CVSS qualitative ratings (EDR-SCORING-01), for the original and expert severities.
+export const SEVERITIES = [
+  { id: "critical", label: "critical", color: "var(--st-crit)" },
+  { id: "high", label: "high", color: "var(--st-serious)" },
+  { id: "medium", label: "medium", color: "var(--st-warn)" },
+  { id: "low", label: "low", color: "var(--st-info)" },
+  { id: "none", label: "none", color: "var(--st-good)" },
+] as const;
+
+export function severitySlices(sevs: (string | undefined)[]): Slice[] {
+  const out: Slice[] = SEVERITIES.map((b) => ({ ...b, n: sevs.filter((x) => x === b.id).length }));
+  const unrated = sevs.filter((x) => !x).length;
+  if (unrated) out.push({ id: "unrated", label: "not assessed", color: "var(--muted)", n: unrated });
+  return out.filter((s) => s.n > 0);
+}
