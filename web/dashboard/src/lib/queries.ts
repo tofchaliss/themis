@@ -66,3 +66,55 @@ export async function sweepEstate(products: Product[]) {
 
 export const useEstateSweep = (products: Product[] | undefined) =>
   useQuery({ queryKey: ["estate-sweep", products?.map((p) => p.id)], enabled: !!products, queryFn: () => sweepEstate(products ?? []) });
+
+export type Assessment = Governance["schemas"]["FindingAssessment"];
+export type Component = Governance["schemas"]["Component"];
+export type SLA = Governance["schemas"]["SLAStatus"];
+export type ProposalView = Governance["schemas"]["ProposalView"];
+
+export const useRelease = (id: string) =>
+  useQuery({ queryKey: ["release", id], queryFn: () => apiGet<Release>("registry", `/releases/${enc(id)}`) });
+
+export const useProject = (id: string | undefined) =>
+  useQuery({ queryKey: ["project", id], enabled: !!id, queryFn: () => apiGet<Project>("registry", `/projects/${enc(id ?? "")}`) });
+
+const postureQuery = (releaseId: string) => ({
+  queryKey: ["posture", releaseId],
+  queryFn: async () => asArray<PostureEntry>(await apiGet("governance", `/releases/${enc(releaseId)}/posture`)),
+});
+
+export const usePosture = (releaseId: string) => useQuery(postureQuery(releaseId));
+
+export const useAssessment = (findingId: string | undefined) =>
+  useQuery({
+    queryKey: ["assessment", findingId],
+    enabled: !!findingId,
+    queryFn: () => apiGet<Assessment>("governance", `/findings/${enc(findingId ?? "")}/assessment`),
+  });
+
+/** One row of a CVE's releases dropdown (EDR-GUI-02 D13). */
+export type CveRelease = { releaseId: string; version: string; project: string; entry: PostureEntry };
+
+/** Every release a CVE is filed under, with that release's Finding for it: ONE Governance
+ * read (GET /faultlines/{id}/findings), then Registry names, shared per project. A release
+ * whose name cannot be read still shows, by id. */
+export async function cveReleases(faultlineId: string): Promise<CveRelease[]> {
+  const rows = asArray<PostureEntry>(await apiGet("governance", `/faultlines/${enc(faultlineId)}/findings`));
+  const projects = new Map<string, Promise<Project | null>>();
+  const projectOf = (id: string) => {
+    if (!projects.has(id)) projects.set(id, apiGet<Project>("registry", `/projects/${enc(id)}`).catch(() => null));
+    return projects.get(id) as Promise<Project | null>;
+  };
+  return Promise.all(
+    rows.map(async (entry) => {
+      const releaseId = entry.release_id ?? "";
+      const rel = await apiGet<Release>("registry", `/releases/${enc(releaseId)}`).catch(() => null);
+      const proj = rel?.project_id ? await projectOf(rel.project_id) : null;
+      return { releaseId, version: rel?.version ?? "", project: proj?.name ?? "", entry };
+    }),
+  );
+}
+
+/** Loaded only when a row's dropdown is opened. */
+export const useCveReleases = (faultlineId: string | undefined, open: boolean) =>
+  useQuery({ queryKey: ["cve-releases", faultlineId], enabled: open && !!faultlineId, queryFn: () => cveReleases(faultlineId ?? "") });

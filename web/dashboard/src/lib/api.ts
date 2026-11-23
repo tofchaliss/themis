@@ -68,6 +68,15 @@ export async function apiPut<T>(node: Node, path: string, body: unknown): Promis
   return (await r.json()) as T;
 }
 
+/** POST a JSON body. Returns the status and the parsed JSON (null when there is none); a
+ * non-2xx is an ApiError carrying the node's problem detail. */
+export async function apiPost<T>(node: Node, path: string, body?: unknown): Promise<{ status: number; data: T | null }> {
+  const r = await send(node, path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
+  if (!r.ok) throw new ApiError(r.status, await problemDetail(r));
+  const text = r.status === 204 ? "" : await r.text();
+  return { status: r.status, data: text ? (JSON.parse(text) as T) : null };
+}
+
 /** The dashboard's own routes (not a node): /whoami and the admin status. */
 export type WhoAmI = { user: string; scopes?: string[]; can_write: boolean };
 export type AdminStatus = { auth_enabled: boolean; is_default_password?: boolean } | { forbidden: true } | null;

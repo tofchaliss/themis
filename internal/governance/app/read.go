@@ -30,7 +30,10 @@ type BlastRadiusReader interface {
 // PostureEntry is one row of a Release's security posture: the Finding, its investigation
 // stage, and its current Enterprise Position stance (empty when no Position exists yet).
 type PostureEntry struct {
-	FindingID   domain.FindingID
+	FindingID domain.FindingID
+	// ReleaseID is the Release this Finding is filed under — what tells the rows of the
+	// cross-release read (FaultlineFindings) apart.
+	ReleaseID   string
 	FaultlineID string
 	CVE         string
 	Stage       domain.Stage
@@ -44,6 +47,10 @@ type PostureEntry struct {
 	// rollup's statements as status notes (D13), read from the join this projection already
 	// pays for.
 	PositionRationale string
+	// DecidedByKind / DecidedAt: who established the current Position (a person, or a rule)
+	// and when — zero when none. Read from the join this projection already pays for.
+	DecidedByKind domain.ActorKind
+	DecidedAt     time.Time
 	// BaseScore is Knowledge's CVE-intrinsic priority (0–100), materialized from the
 	// FaultlineEnriched event (C6). Governance scales it by the blast multiplier (C2).
 	BaseScore int
@@ -262,6 +269,31 @@ func openCarriers(comps []domain.MatchedComponent) int {
 		}
 	}
 	return n
+}
+
+// FaultlineFindings returns every release's Finding for one Faultline (EDR-GUI-02 D13): the
+// rows each release's posture serves, so priority, SLA and the decision are derived by the
+// one rule above and never a second time. One posture read per affected release, in the
+// order the projection lists them; a release that cannot be read fails the whole answer,
+// because a dropdown that silently drops a release would under-report where the CVE is.
+func (s *ReadService) FaultlineFindings(ctx context.Context, faultlineID string) ([]PostureEntry, error) {
+	releases, err := s.proj.FaultlineBlastRadius(ctx, faultlineID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PostureEntry, 0, len(releases))
+	for _, rel := range releases {
+		entries, err := s.ReleasePosture(ctx, rel)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			if e.FaultlineID == faultlineID {
+				out = append(out, e)
+			}
+		}
+	}
+	return out, nil
 }
 
 // FaultlineBlastRadius returns the Releases affected by a Faultline (D10).

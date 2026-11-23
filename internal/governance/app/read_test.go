@@ -265,3 +265,53 @@ func TestReadService_WithMitigatedWeightOverridesTheDefault(t *testing.T) {
 		t.Fatalf("overridden residual = %d, want 20 (80 x 0.25)", over[0].ResidualPriority)
 	}
 }
+
+// perReleaseProjection answers each release's posture separately, so the cross-release read
+// can be shown to keep only its own Faultline and to fail loudly on one unreadable release.
+type perReleaseProjection struct {
+	posture  map[string][]app.PostureEntry
+	blast    []string
+	blastErr error
+	failRel  string
+}
+
+func (f perReleaseProjection) ReleasePosture(_ context.Context, rel string) ([]app.PostureEntry, error) {
+	if rel == f.failRel {
+		return nil, errors.New("posture down")
+	}
+	return f.posture[rel], nil
+}
+
+func (f perReleaseProjection) FaultlineBlastRadius(context.Context, string) ([]string, error) {
+	return f.blast, f.blastErr
+}
+
+// EDR-GUI-02 D13: one CVE's Finding in every release, each the same derived posture row.
+func TestReadService_FaultlineFindings(t *testing.T) {
+	ctx := context.Background()
+	proj := perReleaseProjection{
+		blast: []string{"rel-1", "rel-2"},
+		posture: map[string][]app.PostureEntry{
+			"rel-1": {{FindingID: "f1", ReleaseID: "rel-1", FaultlineID: "fl-1", BaseScore: 40}, {FindingID: "f9", ReleaseID: "rel-1", FaultlineID: "fl-9"}},
+			"rel-2": {{FindingID: "f2", ReleaseID: "rel-2", FaultlineID: "fl-1", BaseScore: 40, HasPosition: true, Stance: domain.StanceNotAffected}},
+		},
+	}
+	got, err := app.NewReadService(newRepo(), proj, nil, 0).FaultlineFindings(ctx, "fl-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].FindingID != "f1" || got[1].FindingID != "f2" {
+		t.Fatalf("rows = %+v, want f1 then f2 and never the other faultline", got)
+	}
+	if got[0].EffectivePriority != 40 || got[1].ResidualPriority != 0 {
+		t.Errorf("priorities not derived by the posture rule: %+v", got)
+	}
+
+	if _, err := app.NewReadService(newRepo(), perReleaseProjection{blastErr: errors.New("db")}, nil, 0).FaultlineFindings(ctx, "fl-1"); err == nil {
+		t.Error("a blast-radius error must fail the read")
+	}
+	proj.failRel = "rel-2"
+	if _, err := app.NewReadService(newRepo(), proj, nil, 0).FaultlineFindings(ctx, "fl-1"); err == nil {
+		t.Error("an unreadable release must fail the read, never drop the release silently")
+	}
+}

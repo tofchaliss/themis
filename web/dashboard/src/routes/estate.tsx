@@ -3,7 +3,6 @@
 // a classic-GUI screen until EDR-GUI-02 step G2.
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUpRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Empty, ErrorPanel, Loading } from "@/components/states";
 import { apiPut, ApiError } from "@/lib/api";
 import { useProducts, useProjects, useReleases, useTags, useWhoAmI, type TagKind, type TagSet } from "@/lib/queries";
-import { classicHref } from "@/lib/router";
+import { classicHref, releaseHash } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 type Target = { kind: TagKind; id: string; name: string };
@@ -259,11 +258,10 @@ export function Estate() {
               <div key={r.id} className="flex flex-wrap items-center gap-1.5 rounded-lg px-2.5 py-2 hover:bg-hover">
                 <a
                   className="flex items-center gap-1 font-medium text-ink hover:text-accent"
-                  href={classicHref(`#/release/${r.id}?v=${encodeURIComponent(r.version ?? "")}`)}
-                  title="Open this release's posture (old GUI until step G2)"
+                  href={releaseHash(r.id ?? "", r.version)}
+                  title="Open this release's posture"
                 >
                   v{r.version}
-                  <ArrowUpRight className="size-3.5 text-muted" aria-hidden />
                 </a>
                 <Tags tags={r.tags} />
                 <button

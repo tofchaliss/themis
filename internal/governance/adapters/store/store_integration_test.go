@@ -407,9 +407,13 @@ func TestProjectionsAndFanout(t *testing.T) {
 	if !posture[0].HasPosition || posture[0].Stance != domain.StanceAffected {
 		t.Errorf("posture[0] = %+v", posture[0])
 	}
+	// The row names its release and who decided when (EDR-GUI-02 D13).
+	if posture[0].ReleaseID != "rel-1" || posture[0].DecidedByKind == "" || posture[0].DecidedAt.IsZero() {
+		t.Errorf("posture[0] release/decider = %q %q %v", posture[0].ReleaseID, posture[0].DecidedByKind, posture[0].DecidedAt)
+	}
 	// rel-2's Finding has no Position yet.
 	p2, _ := st.ReleasePosture(ctx, "rel-2")
-	if len(p2) != 1 || p2[0].HasPosition {
+	if len(p2) != 1 || p2[0].HasPosition || p2[0].DecidedByKind != "" || !p2[0].DecidedAt.IsZero() {
 		t.Errorf("rel-2 posture = %+v", p2)
 	}
 

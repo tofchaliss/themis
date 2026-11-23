@@ -340,6 +340,37 @@ func TestPostureAndBlastRadius(t *testing.T) {
 	}
 }
 
+// EDR-GUI-02 D13: one CVE's Finding in every release, with the release and the decision's
+// author and time on each row.
+func TestFaultlineFindings(t *testing.T) {
+	at := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
+	proj := fakeProjection{
+		posture: []app.PostureEntry{
+			{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", HasPosition: true, Stance: domain.StanceNotAffected,
+				DecidedByKind: domain.ActorHuman, DecidedAt: at},
+			{FindingID: "fnd-9", ReleaseID: "rel-1", FaultlineID: "fl-9"},
+		},
+		blast: []string{"rel-1"},
+	}
+	srv := server(t, newRepo(), proj)
+	status, body := do(t, http.MethodGet, srv.URL+"/faultlines/fl-1/findings", nil)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d", status)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(body, &rows); err != nil || len(rows) != 1 {
+		t.Fatalf("rows = %v err=%v", rows, err)
+	}
+	if rows[0]["release_id"] != "rel-1" || rows[0]["decided_by_kind"] != "human" || rows[0]["decided_at"] != "2026-11-02T10:00:00Z" {
+		t.Errorf("row = %v", rows[0])
+	}
+
+	bad := server(t, newRepo(), fakeProjection{err: errors.New("proj down")})
+	if status, _ := do(t, http.MethodGet, bad.URL+"/faultlines/fl-1/findings", nil); status != http.StatusInternalServerError {
+		t.Errorf("error status = %d, want 500", status)
+	}
+}
+
 // --- writes ----------------------------------------------------------------------------
 
 func TestRaiseProposal(t *testing.T) {
