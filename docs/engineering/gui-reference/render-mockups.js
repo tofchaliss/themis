@@ -8,7 +8,8 @@ const { chromium } = require('playwright');
   for (const [name, qs] of [
     ['posture-enterprise', 'theme=enterprise'], ['posture-midnight', 'theme=midnight'],
     ['posture-ops-night', 'theme=ops-night'], ['drawer-enterprise', 'theme=enterprise&drawer=1'],
-    ['drawer-ops-night', 'theme=ops-night&drawer=1']]) {
+    ['drawer-ops-night', 'theme=ops-night&drawer=1'],
+    ['cve-releases-enterprise', 'theme=enterprise&view=cve'], ['cve-releases-midnight', 'theme=midnight&view=cve']]) {
     await p.goto(f + '?' + qs); await p.waitForTimeout(300);
     await p.screenshot({ path: __dirname + `/mockup-${name}.png` });
   }

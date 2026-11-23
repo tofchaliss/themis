@@ -199,14 +199,16 @@ dashboard binary; no node changes.
 ## Visual reference
 
 `docs/engineering/gui-reference/` holds the owner's screenshot of today's finding drawer and
-mockups of the new GUI: the release posture in all three shades and the finding drawer (added
-2026-11-23 at owner request). Each build step checks its screens against them. The mockups are
+mockups of the new GUI: the release posture in all three shades, the finding drawer, and the CVE
+page's affected-releases table (added 2026-11-23 at owner request). Each build step checks its screens against them. The mockups are
 design targets with example data, not pixel specs; see that folder's README for what each one
 shows and what it fixes.
 
 ![Release posture, Enterprise](../gui-reference/mockup-posture-enterprise.png)
 
 ![Finding drawer, Enterprise](../gui-reference/mockup-drawer-enterprise.png)
+
+![CVE page, affected releases, Midnight](../gui-reference/mockup-cve-releases-midnight.png)
 
 ## Not in scope
 

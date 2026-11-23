@@ -29,6 +29,7 @@
   --scrim:rgba(0,0,0,.6); --ai-bg:rgba(63,163,122,.08); --ai-ink:#7cc9a6;
 }
 * { box-sizing:border-box; }
+[hidden] { display:none !important; }
 html,body { margin:0; height:100%; }
 body { background:var(--page); color:var(--ink); font:13px/1.45 var(--sans); display:grid; grid-template-columns:60px 1fr; overflow:hidden; }
 svg { width:18px; height:18px; stroke:currentColor; fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
@@ -136,6 +137,21 @@ tr.selrow td { background:var(--sel); }
 .mini td .chip { font-size:11.5px; }
 .decide { border-top:1px solid var(--line); padding:12px 20px; display:flex; gap:8px; align-items:center; background:var(--card); }
 .decide .scope { white-space:nowrap; display:flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:8px; height:32px; padding:0 10px; color:var(--ink2); font-size:12px; }
+
+/* CVE page: affected releases */
+.cvehead { display:flex; gap:10px; align-items:center; }
+.cvehead h1 { font-family:var(--mono); }
+.dec { display:inline-flex; align-items:center; gap:5px; font-weight:600; font-size:11px; padding:1px 7px; border-radius:5px; font-family:var(--mono); }
+.dec.auto { background:var(--accent-soft); color:var(--accent); }
+.dec.man { background:var(--mono-bg); color:var(--ink); border:1px solid var(--line); }
+.hl { outline:2px dashed var(--st-warn); outline-offset:2px; border-radius:6px; }
+.acts { display:flex; gap:6px; color:var(--ink2); }
+.acts svg { width:15px; height:15px; }
+.ticket { color:var(--accent); font-family:var(--mono); font-size:12px; }
+.scorepair b { font-variant-numeric:tabular-nums; }
+.scorepair span { color:var(--muted); }
+.rationale { max-width:220px; overflow:hidden; text-overflow:ellipsis; color:var(--ink2); }
+.legend { display:flex; gap:18px; color:var(--ink2); font-size:12px; padding:10px 12px; border-top:1px solid var(--line); flex-wrap:wrap; }
 </style>
 </head>
 <body>
@@ -165,7 +181,7 @@ tr.selrow td { background:var(--sel); }
     </div>
   </header>
 
-  <main class="main">
+  <main class="main" id="posture-view">
     <div class="h">
       <div><h1>project-a 1.4.0</h1><p>Release posture · SBOM uploaded 2 h ago · 1,284 components · last correlated 14 min ago</p></div>
       <div style="display:flex;gap:8px">
@@ -199,6 +215,40 @@ tr.selrow td { background:var(--sel); }
         <tbody id="rows"></tbody>
       </table>
       <div class="foot"><span>Showing 1–11 of 231 · rows are virtualized, scroll for more</span><span>Sorted by residual priority</span></div>
+    </section>
+  </main>
+
+  <main class="main" id="cve-view" hidden>
+    <div class="h">
+      <div>
+        <div class="cvehead"><h1>CVE-2023-47038</h1><span class="sev m">Medium</span><span class="badge fix">fix available</span></div>
+        <p>Perl: a crafted regular expression can overflow a heap buffer · NVD 7.0 · Red Hat 6.7 · EPSS 0.02 · not in KEV</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <span class="btn hl"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg>Re-evaluate all releases</span>
+        <span class="btn"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Export CSV</span>
+        <span class="btn p">Decide for selected (3)</span>
+      </div>
+    </div>
+    <div class="tiles" style="grid-template-columns:repeat(4,1fr)">
+      <div class="tile"><small>Releases affected</small><b>6</b><em>across 2 projects</em></div>
+      <div class="tile"><small>Decided</small><b>5 of 6</b><em>1 automatic · 4 manual</em></div>
+      <div class="tile"><small>Open</small><b>1</b><em>project-b 2.0.0, SLA 12 d left</em></div>
+      <div class="tile"><small>Tracked in a ticket</small><b>4</b><em>2 tickets</em></div>
+    </div>
+    <section class="card">
+      <div class="toolbar">
+        <h3 style="margin:0;font-size:14px">Affected releases</h3>
+        <span class="sp"></span>
+        <div class="seg"><span class="on">All 6</span><span>Open 1</span><span>Decided 5</span></div>
+        <span class="sel"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Decided by</span>
+        <span class="sel"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Project</span>
+      </div>
+      <table>
+        <thead><tr><th style="width:28px"><input type="checkbox"></th><th>Release</th><th>Project</th><th><span class="hl" style="padding:1px 4px">Decided by</span></th><th>Status</th><th class="num">Source score</th><th class="num">Themis score</th><th>Decided</th><th>Disposition</th><th>Rationale</th><th>Ticket</th><th>Actions</th></tr></thead>
+        <tbody id="cverows"></tbody>
+      </table>
+      <div class="legend"><span><span class="dec auto">AUTO</span> decided by a policy rule, recorded against the rule</span><span><span class="dec man">MANUAL</span> decided by a named person</span><span>Source score: what the vendor or CNA published · Themis score: Environmental, with this release's requirements</span></div>
     </section>
   </main>
 </div>
@@ -285,6 +335,35 @@ document.getElementById("rows").innerHTML = rows.map(r => `
     <td>${status(r[8])}</td>
     <td class="${r[9].includes("over") ? "sla-bad" : "pkg"}">${r[9]}</td>
   </tr>`).join("");
+
+if (q.get("view") === "cve") {
+  document.getElementById("posture-view").hidden = true;
+  document.getElementById("cve-view").hidden = false;
+  document.querySelector(".crumbs").innerHTML = '<span>What\'s new</span><i>/</i><b>CVE-2023-47038</b>';
+  document.querySelectorAll(".rl").forEach((r, i) => r.classList.toggle("on", i === 4));
+  const ic = { open:'<svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
+    hist:'<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/></svg>',
+    re:'<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg>' };
+  const cr = [
+    ["1.4.0","project-a","auto","not affected","6.7","5.1","2026-11-20","Not affected","version-range rule: build carries the fix","—"],
+    ["1.3.2","project-a","man","accepted","6.7","6.7","2026-11-18","Mitigate","Patch to mitigate the vulnerability","TICKET-101"],
+    ["1.3.1","project-a","man","accepted","6.7","6.7","2026-11-18","Mitigate","Patch to mitigate the vulnerability","TICKET-101"],
+    ["1.3.0","project-a","man","accepted","6.7","6.7","2026-11-12","Accept risk","Release out of support, no customer","TICKET-087"],
+    ["2.1.0","project-b","man","accepted","6.7","4.4","2026-11-21","Not affected","Perl not on the execution path","—"],
+    ["2.0.0","project-b","",  "open","6.7","6.7","—","—","Undecided · SLA 12 d left","—"],
+  ];
+  document.getElementById("cverows").innerHTML = cr.map((r, i) => `
+    <tr${r[3]==="open" ? ' class="selrow"' : ""}>
+      <td><input type="checkbox" ${i>=3 && i<=5 ? "checked" : ""}></td>
+      <td><span class="chip">${r[0]}</span></td><td class="pkg">${r[1]}</td>
+      <td>${r[2]==="auto" ? '<span class="dec auto">AUTO</span>' : r[2]==="man" ? '<span class="dec man">MANUAL</span>' : '<span class="pkg">—</span>'}</td>
+      <td>${r[3]==="open" ? '<span class="badge">undecided</span>' : '<span class="badge acc">'+r[3]+'</span>'}</td>
+      <td class="num scorepair"><b>${r[4]}</b></td><td class="num scorepair"><b>${r[5]}</b></td>
+      <td class="pkg">${r[6]}</td><td>${r[7]}</td><td class="rationale">${r[8]}</td>
+      <td>${r[9]==="—" ? '<span class="pkg">—</span>' : '<span class="ticket">'+r[9]+'</span>'}</td>
+      <td><span class="acts">${ic.open}${ic.hist}${ic.re}</span></td>
+    </tr>`).join("");
+}
 </script>
 </body>
 </html>
