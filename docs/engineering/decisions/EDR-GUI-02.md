@@ -196,11 +196,87 @@ dashboard binary; no node changes.
   server with hot reload, proxying `/api`, `/login`, `/whoami` to a running dashboard: the same
   edit-and-refresh loop `THEMIS_DASHBOARD_ASSETS` gives today).
 
+### D13 — Vulnerability list: one row per CVE, its releases in a dropdown (owner, 2026-11-23)
+
+The owner asked (2026-11-23) for a CVE-first list: each CVE is one row, its affected releases
+open as a **dropdown under the row**, and **clicking the CVE or the row opens the CVE details
+drawer** as today. The scope picker sets which releases count (a project's releases, a product,
+the estate); the release posture stays for one release. Mockup:
+`gui-reference/mockup-vulns-*.png`.
+
+**Main row columns:** CVE · Severity · Score (Themis score; source score on hover) · Package ·
+Releases (count in scope) · Decisions (decided / open, AUTO / MANUAL split) · Signals (KEV,
+EPSS) · Fix · Next SLA.
+
+**Columns dropped from today's release table** (the data stays on the wire and in the drawer;
+only the column goes):
+
+| Today | Why it goes | Instead |
+| --- | --- | --- |
+| Blast | the blast-radius multiplier needs the estate graph filled in; without it every row reads 1.0 and means nothing to the reader | kept inside priority; shown in the drawer when the graph is filled |
+| Base | a second score beside the severity | one Score column |
+| Band | a second name for severity | Severity |
+| Priority — residual over effective | two numbers in one cell | the list sorts by priority; the numbers are on hover and in the drawer |
+| Stance / Due / Component | renamed for the reader | Decisions / Next SLA / Package |
+
+**Dropdown columns**, mapped from the owner's reference (an older tool's "Affected Releases"
+table) to Themis data:
+
+| Reference column | Themis column | Source of the data |
+| --- | --- | --- |
+| Expand arrow, checkbox | arrow, checkbox | checkbox feeds "Decide for selected", which maps onto EDR-SYNC-01 scope |
+| Actions (copy, attach, delete, view) | open release posture, history | **no delete**: Themis never deletes a Finding or a Position |
+| AT (MA / AA) | **Decided by**: MANUAL / AUTO | the Position's `decided_by`: a named person, or a policy rule. An AI or vendor proposal is never AUTO; it waits for a person |
+| MI · RA · I · E · M (status dots) | **Stages**: decided · remediated · published | Finding stage times (EDR-REMEDIATION-01) and Communication publications. The reference's five letters are not mapped one to one; the owner confirms the meaning in G2 |
+| Release, Product | Release (product and project in the scope picker) | Registry |
+| Overall score / severity | **Source** | the selected source rating (EDR-SCORING-01) |
+| Expert score / severity | **Themis** | the per-component Environmental score with this release's requirements (EDR-SCORING-01 S4; a person's governed vector change comes with S6) |
+| Distribution date | **Published** | the date Communication published the VEX statement for this Finding |
+| (none) | **Decided** | when the Position was established |
+| Disposition | **Disposition** | the remediation treatment (mitigate, upgrade, accept), beside the Decision stance |
+| Rationale | **Rationale** | the Position's rationale |
+| Tracking ID | **Ticket** | the Jira issue key from the delivery result (`jira_issue_key`) |
+| Refresh (left toolbar) | **Re-evaluate** | see the API gaps below |
+
+**API gaps this list needs** (each is a read- or write-API change in the owning context first,
+EDR-GUI-01 D5, decided in the step that builds the screen): Findings of one CVE across a scope
+(Governance has only the `(release, faultline)` key and Watches today); the ticket key per
+Finding (Communication); the publication date per Finding (Communication); an on-demand
+re-evaluate for one CVE or one release (Governance; today only the one-time re-judge pass and the
+release-evaluation worker).
+
+### D14 — Decisions on a full page; a severity change warns first (owner, 2026-11-23)
+
+The owner decided (2026-11-23) that **changing a CVE's details, such as disposition and
+rationale, happens on its own full page**, not in the drawer, and that **changing severity
+shows a warning first**. Mockups: `gui-reference/mockup-decide-*.png`.
+
+1. **The drawer only reads.** It shows the CVE, the score panel, components, vendor statements
+   and history, with two actions: "Ask AI" and "Decide…". "Decide…" opens the decision page.
+2. **Decision page** (`#/decide/<finding-id>`, a hash route like the rest): releases it applies
+   to (EDR-SYNC-01 scope: this release, project or product; a release with its own decision is
+   never overwritten), decision stance, disposition, review-by date, ticket, and a **required
+   rationale**. Beside the form, the facts the person decides on: packages, exploit signals,
+   vendor fix and statement, the same CVE's decisions in other releases, and any AI proposal
+   (labeled; policy cannot accept it). "Record decision" posts the same Governance mutation as
+   today; the proxy's identity and scope checks are unchanged (EDR-GUI-01 D11-D13). Leaving
+   the page with unsaved changes asks first.
+3. **Severity change warns first.** Severity comes from the CVSS vector, so a person changes it
+   by changing the vector (EDR-SCORING-01: never by typing a number; the governed change is
+   step S6, not in 0.5.x). Before anything is recorded, a warning dialog shows the old and new
+   severity and score, the changed metric, how many releases change, what moves with it
+   (priority and SLA due date once EDR-SCORING-01 S7 switches priority onto the score; Jira,
+   mail and Teams), that the vendor and CNA scores stay unchanged and visible, and that the
+   change is recorded against the person. It needs a **reason** and a **confirm checkbox**; the
+   safe button ("Keep Medium") is the default focus and the change button is red. The dialog
+   states only the effects that are true at the time it is built (in shadow, priority and SLA
+   do not move, and the dialog says so).
+
 ## Visual reference
 
 `docs/engineering/gui-reference/` holds the owner's screenshot of today's finding drawer and
-mockups of the new GUI: the release posture in all three shades, the finding drawer, and the CVE
-page's affected-releases table (added 2026-11-23 at owner request). Each build step checks its screens against them. The mockups are
+mockups of the new GUI: the release posture in all three shades, the finding drawer, and the Vulnerabilities
+list with its affected-releases dropdown (added 2026-11-23 at owner request). Each build step checks its screens against them. The mockups are
 design targets with example data, not pixel specs; see that folder's README for what each one
 shows and what it fixes.
 
@@ -208,7 +284,7 @@ shows and what it fixes.
 
 ![Finding drawer, Enterprise](../gui-reference/mockup-drawer-enterprise.png)
 
-![CVE page, affected releases, Midnight](../gui-reference/mockup-cve-releases-midnight.png)
+![Vulnerabilities list with the affected-releases dropdown](../gui-reference/mockup-vulns-enterprise.png)
 
 ## Not in scope
 
@@ -221,7 +297,8 @@ S6); SSO; translations; a mobile layout (EDR-GUI-01 non-goal); any change to the
 - **G1 Skeleton**: toolchain, Makefile, CI, CSP and cache headers, `/next/` mount; app shell
   (rail, top bar, breadcrumbs, three-shade picker, user chip, sign-out), session handling, and the
   **Overview** and **Estate** screens.
-- **G2** Release posture + finding drawer (decisions, scope picker, AI panels, score panel).
+- **G2** Release posture, Vulnerabilities list with the releases dropdown (D13), finding drawer
+  (read only), and the decision page (D14) with scope picker and AI panels.
 - **G3** SBOM manager + scan view.
 - **G4** Compare, What's new, CVE page.
 - **G5** Reports, Watches, Feeds, Admin.

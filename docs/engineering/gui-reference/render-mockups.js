@@ -9,7 +9,10 @@ const { chromium } = require('playwright');
     ['posture-enterprise', 'theme=enterprise'], ['posture-midnight', 'theme=midnight'],
     ['posture-ops-night', 'theme=ops-night'], ['drawer-enterprise', 'theme=enterprise&drawer=1'],
     ['drawer-ops-night', 'theme=ops-night&drawer=1'],
-    ['cve-releases-enterprise', 'theme=enterprise&view=cve'], ['cve-releases-midnight', 'theme=midnight&view=cve']]) {
+    ['vulns-enterprise', 'theme=enterprise&view=vulns'], ['vulns-midnight', 'theme=midnight&view=vulns'],
+    ['vulns-ops-night', 'theme=ops-night&view=vulns'],
+    ['decide-enterprise', 'theme=enterprise&view=decide'], ['decide-severity-warning-enterprise', 'theme=enterprise&view=decide&warn=1'],
+    ['decide-severity-warning-midnight', 'theme=midnight&view=decide&warn=1']]) {
     await p.goto(f + '?' + qs); await p.waitForTimeout(300);
     await p.screenshot({ path: __dirname + `/mockup-${name}.png` });
   }

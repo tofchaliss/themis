@@ -22,8 +22,10 @@ Every step waits for the owner's go and lands as its own PR.
 ## Group 2 — G2 release posture and drawer
 
 - [ ] 2.1 Release posture (virtual rows, filters, residual priority, SLA, scope chips).
-- [ ] 2.2 Finding drawer: decisions, scope picker and preview, AI panels (D6), score panel.
-- [ ] 2.3 VM check.
+- [ ] 2.2 Vulnerabilities list with the releases dropdown (D13) and its read-API changes.
+- [ ] 2.3 Finding drawer read only (AI panels, score panel); decision page with scope picker,
+  required rationale, unsaved-changes guard, and the severity warning dialog (D14).
+- [ ] 2.4 VM check.
 
 ## Group 3 — G3 SBOM manager and scan view
 

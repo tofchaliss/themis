@@ -152,6 +152,55 @@ tr.selrow td { background:var(--sel); }
 .scorepair span { color:var(--muted); }
 .rationale { max-width:220px; overflow:hidden; text-overflow:ellipsis; color:var(--ink2); }
 .legend { display:flex; gap:18px; color:var(--ink2); font-size:12px; padding:10px 12px; border-top:1px solid var(--line); flex-wrap:wrap; }
+
+/* vulnerability list with release dropdown */
+.chev { width:22px; height:22px; display:grid; place-items:center; border-radius:6px; color:var(--ink2); }
+.chev.open { background:var(--accent-soft); color:var(--accent); }
+.chev svg { width:14px; height:14px; }
+tr.cverow td { cursor:pointer; }
+tr.cverow.expanded td { background:var(--sel); border-bottom-color:transparent; }
+tr.subwrap > td { padding:0 12px 12px 46px; background:var(--sel); }
+.sub { border:1px solid var(--line); border-radius:8px; background:var(--card); overflow:hidden; }
+.sub .subhead { display:flex; justify-content:space-between; align-items:center; padding:7px 10px; border-bottom:1px solid var(--line); color:var(--ink2); font-size:12px; }
+.sub th, .sub td { padding:6px 9px; font-size:12px; }
+.stages { display:flex; gap:3px; }
+.stages i { width:9px; height:9px; border-radius:50%; background:var(--line); display:block; }
+.stages i.on { background:var(--st-good); }
+.cnt { font-variant-numeric:tabular-nums; }
+.cnt em { font-style:normal; color:var(--muted); }
+
+/* full decision page + severity warning */
+.dgrid { display:grid; grid-template-columns:1fr 380px; gap:16px; align-items:start; }
+.fpad { padding:16px 18px; gap:12px; }
+.ftitle { margin:6px 0 0; font-size:13px; font-weight:650; display:flex; gap:8px; align-items:center; }
+.field { display:flex; flex-direction:column; gap:5px; }
+.field label { font-size:12px; font-weight:500; color:var(--ink2); }
+.req { font-style:normal; color:var(--st-crit); font-weight:500; margin-left:4px; }
+.fake { border:1px solid var(--line); border-radius:8px; padding:7px 10px; display:flex; justify-content:space-between; align-items:center; background:var(--card); }
+.fake svg { width:14px; height:14px; color:var(--muted); }
+.fake.area { min-height:68px; align-items:flex-start; line-height:1.5; }
+.frow { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+.pill-row { display:flex; gap:6px; align-items:center; }
+.radios { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.radio { border:1px solid var(--line); border-radius:9px; padding:9px 10px; display:flex; gap:8px; align-items:flex-start; }
+.radio i { width:14px; height:14px; border-radius:50%; border:1.5px solid var(--muted); margin-top:2px; flex:none; }
+.radio.on { border-color:var(--accent); background:var(--accent-soft); }
+.radio.on i { border:4px solid var(--accent); }
+.radio b { display:block; font-size:12.5px; }
+.radio em { font-style:normal; color:var(--ink2); font-size:11.5px; }
+.sevbox { display:flex; justify-content:space-between; align-items:center; gap:12px; border:1px dashed var(--line); border-radius:9px; padding:10px 12px; }
+.side .kv { grid-template-columns:120px 1fr; }
+.dialog { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:540px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; display:flex; flex-direction:column; gap:12px; box-shadow:0 20px 50px rgba(0,0,0,.3); }
+.dlg-head { display:flex; gap:12px; }
+.dlg-head h2 { margin:0; font-size:16px; }
+.dlg-head p { margin:3px 0 0; color:var(--ink2); }
+.warnicon { width:36px; height:36px; border-radius:50%; flex:none; display:grid; place-items:center; color:#a86a00; background:color-mix(in srgb, var(--st-warn) 22%, transparent); }
+:root[data-theme="midnight"] .warnicon, :root[data-theme="ops-night"] .warnicon { color:var(--st-warn); }
+.warnlist { margin:0; padding:10px 12px 10px 28px; border-radius:9px; background:color-mix(in srgb, var(--st-warn) 10%, transparent); display:flex; flex-direction:column; gap:4px; }
+.confirm { display:flex; gap:8px; align-items:center; font-weight:500; }
+.confirm i { width:15px; height:15px; border-radius:4px; background:var(--accent); display:block; }
+.dlg-foot { display:flex; justify-content:flex-end; gap:8px; }
+.btn.danger { background:var(--st-crit); border-color:var(--st-crit); color:#fff; }
 </style>
 </head>
 <body>
@@ -217,40 +266,100 @@ tr.selrow td { background:var(--sel); }
       <div class="foot"><span>Showing 1–11 of 231 · rows are virtualized, scroll for more</span><span>Sorted by residual priority</span></div>
     </section>
   </main>
-
-  <main class="main" id="cve-view" hidden>
+  <main class="main" id="vulns-view" hidden>
     <div class="h">
-      <div>
-        <div class="cvehead"><h1>CVE-2023-47038</h1><span class="sev m">Medium</span><span class="badge fix">fix available</span></div>
-        <p>Perl: a crafted regular expression can overflow a heap buffer · NVD 7.0 · Red Hat 6.7 · EPSS 0.02 · not in KEV</p>
-      </div>
+      <div><h1>Vulnerabilities · project-a</h1><p>One row per CVE across all releases of project-a · 4 releases · last correlated 14 min ago</p></div>
       <div style="display:flex;gap:8px">
-        <span class="btn hl"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg>Re-evaluate all releases</span>
+        <span class="btn"><svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg>Re-evaluate</span>
         <span class="btn"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Export CSV</span>
-        <span class="btn p">Decide for selected (3)</span>
+        <span class="btn p">Decide for selected (2)</span>
       </div>
-    </div>
-    <div class="tiles" style="grid-template-columns:repeat(4,1fr)">
-      <div class="tile"><small>Releases affected</small><b>6</b><em>across 2 projects</em></div>
-      <div class="tile"><small>Decided</small><b>5 of 6</b><em>1 automatic · 4 manual</em></div>
-      <div class="tile"><small>Open</small><b>1</b><em>project-b 2.0.0, SLA 12 d left</em></div>
-      <div class="tile"><small>Tracked in a ticket</small><b>4</b><em>2 tickets</em></div>
     </div>
     <section class="card">
       <div class="toolbar">
-        <h3 style="margin:0;font-size:14px">Affected releases</h3>
-        <span class="sp"></span>
-        <div class="seg"><span class="on">All 6</span><span>Open 1</span><span>Decided 5</span></div>
+        <span class="sel" style="border-style:solid">Scope: project-a, all releases <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>
+        <div class="input"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Filter CVE or package…</div>
+        <div class="seg"><span class="on">Open 58</span><span>Undecided 21</span><span>All 140</span></div>
+        <span class="sel"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Severity</span>
         <span class="sel"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Decided by</span>
-        <span class="sel"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Project</span>
+        <span class="sp"></span>
+        <span class="btn"><svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4"/></svg>Columns</span>
       </div>
       <table>
-        <thead><tr><th style="width:28px"><input type="checkbox"></th><th>Release</th><th>Project</th><th><span class="hl" style="padding:1px 4px">Decided by</span></th><th>Status</th><th class="num">Source score</th><th class="num">Themis score</th><th>Decided</th><th>Disposition</th><th>Rationale</th><th>Ticket</th><th>Actions</th></tr></thead>
-        <tbody id="cverows"></tbody>
+        <thead><tr><th style="width:34px"></th><th>CVE</th><th>Severity</th><th class="num">Score</th><th>Package</th><th>Releases</th><th>Decisions</th><th>Signals</th><th>Fix</th><th>Next SLA</th></tr></thead>
+        <tbody id="vrows"></tbody>
       </table>
-      <div class="legend"><span><span class="dec auto">AUTO</span> decided by a policy rule, recorded against the rule</span><span><span class="dec man">MANUAL</span> decided by a named person</span><span>Source score: what the vendor or CNA published · Themis score: Environmental, with this release's requirements</span></div>
+      <div class="foot"><span>Click a CVE row to open its details. Click the arrow to list its releases.</span><span>Sorted by priority</span></div>
     </section>
   </main>
+  <main class="main" id="decide-view" hidden style="overflow:auto">
+    <div class="h">
+      <div><div class="cvehead"><h1>Decide CVE-2023-47038</h1><span class="sev m">Medium</span><span class="badge fix">fix available</span></div>
+      <p>Perl: a crafted regular expression can overflow a heap buffer · project-a · the decision is recorded against you and cannot be deleted, only replaced by a later one</p></div>
+      <div style="display:flex;gap:8px"><span class="btn">Cancel</span><span class="btn p">Record decision</span></div>
+    </div>
+    <div class="dgrid">
+      <section class="card fpad">
+        <h3 class="ftitle">1 · Releases</h3>
+        <div class="field"><label>Apply to</label>
+          <div class="seg"><span>This release</span><span class="on">Selected releases (2)</span><span>All of project-a</span><span>All of example-product</span></div></div>
+        <div class="pill-row"><span class="chip">1.3.1</span><span class="chip">1.3.0</span><span class="pkg">· a release that already has its own decision is never overwritten</span></div>
+
+        <h3 class="ftitle">2 · Decision</h3>
+        <div class="radios">
+          <label class="radio"><i></i><span><b>Not affected</b><em>the flaw cannot be reached in these releases</em></span></label>
+          <label class="radio"><i></i><span><b>Affected</b><em>the flaw is present; remediation follows</em></span></label>
+          <label class="radio on"><i></i><span><b>Accept risk</b><em>present, and accepted until a review date</em></span></label>
+          <label class="radio"><i></i><span><b>Fixed</b><em>the release already ships the fix</em></span></label>
+        </div>
+        <div class="frow">
+          <div class="field"><label>Disposition</label><div class="fake">Accept risk <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div>
+          <div class="field"><label>Review by</label><div class="fake">2027-02-15 <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></div></div>
+          <div class="field"><label>Ticket</label><div class="fake mono">TICKET-087</div></div>
+        </div>
+        <div class="field"><label>Rationale <em class="req">required</em></label>
+          <div class="fake area">Release 1.3.x is out of support and has no customer deployment. Perl runs only build-time scripts with fixed inputs; no user-supplied regular expression reaches it. Re-check if a customer is added.</div></div>
+
+        <h3 class="ftitle">3 · Severity <span class="badge">optional</span></h3>
+        <div class="sevbox">
+          <div><b>Medium · 6.7</b> <span class="pkg">Themis Environmental score, from the Red Hat vector with project-a's requirements</span></div>
+          <span class="btn"><svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 17.6A2 2 0 0 0 4.1 20.6h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>Change severity…</span>
+        </div>
+      </section>
+      <aside class="card fpad side">
+        <h3 class="ftitle">What you are deciding on</h3>
+        <div class="kv">
+          <span>Packages</span><span>perl-interpreter + 6 perl packages in the rebuild set</span>
+          <span>Exploit signals</span><span>EPSS 0.02 · not in KEV · no public exploit</span>
+          <span>Vendor fix</span><span class="mono">perl 5.32.1-473.module+el8.10.0</span>
+          <span>Vendor statement</span><span>Red Hat: affected, fixed in RHSA (applies here)</span>
+          <span>Same CVE elsewhere</span><span>1.3.2 Affected · 1.4.0 Not affected (AUTO)</span>
+        </div>
+        <div class="box ai-box" style="margin-top:12px">
+          <h3><span class="badge ai">AI · proposal</span>Suggested: accept risk</h3>
+          <p style="font-size:12.5px">Out-of-support release, low EPSS, flaw needs attacker-controlled regex. A person decides; policy cannot accept this for you.</p>
+        </div>
+      </aside>
+    </div>
+  </main>
+  <div id="sevwarn" hidden>
+    <div class="scrim"></div>
+    <div class="dialog" role="alertdialog">
+      <div class="dlg-head"><span class="warnicon"><svg viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 2.4 17.6A2 2 0 0 0 4.1 20.6h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg></span>
+        <div><h2>Change severity from Medium to High?</h2><p>Severity comes from the CVSS vector. You change it by changing the vector, never by typing a number.</p></div></div>
+      <div class="field"><label>Changed metric</label><div class="fake mono">Attack Complexity: High → Low &nbsp;·&nbsp; score 6.7 → 7.8</div></div>
+      <ul class="warnlist">
+        <li><b>2 releases</b> change: 1.3.1 and 1.3.0 of project-a.</li>
+        <li><b>Priority and SLA</b> move: the due date shortens from 90 to 30 days.</li>
+        <li><b>Jira, mail and Teams</b> receive the new severity.</li>
+        <li>The vendor's and CNA's published scores are <b>not changed</b>; both stay visible.</li>
+        <li>The change is recorded against you with its reason and cannot be deleted.</li>
+      </ul>
+      <div class="field"><label>Reason <em class="req">required</em></label><div class="fake area" style="min-height:44px">Exposed parser path in 1.3.x accepts a regex from the admin API.</div></div>
+      <label class="confirm"><i></i>I understand this changes priority and SLA for 2 releases</label>
+      <div class="dlg-foot"><span class="btn">Keep Medium</span><span class="btn danger">Change to High</span></div>
+    </div>
+  </div>
 </div>
 
 <div id="drawer" hidden>
@@ -295,10 +404,10 @@ tr.selrow td { background:var(--sel); }
       <div style="color:var(--ink2);font-size:12px">Full purl on hover, one click copies it. Per-component provenance opens in the Score tab.</div>
     </div>
     <div class="decide">
-      <span class="btn">Not affected</span><span class="btn">Affected</span><span class="btn">Accept risk</span>
-      <span class="scope">Scope: this release <svg viewBox="0 0 24 24" style="width:13px;height:13px"><path d="m6 9 6 6 6-6"/></svg></span>
+      <span class="pkg">The drawer only reads. Decisions are made on their own page.</span>
       <span class="sp"></span>
-      <span class="btn p" title="AI proposes, a person decides"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4L12 3Z"/></svg>Ask AI</span>
+      <span class="btn"><svg viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18 9l-4.2 1.4L12 15l-1.8-4.6L6 9l4.2-1.4L12 3Z"/></svg>Ask AI</span>
+      <span class="btn p">Decide… <svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
     </div>
   </aside>
 </div>
@@ -336,33 +445,55 @@ document.getElementById("rows").innerHTML = rows.map(r => `
     <td class="${r[9].includes("over") ? "sla-bad" : "pkg"}">${r[9]}</td>
   </tr>`).join("");
 
-if (q.get("view") === "cve") {
+
+if (q.get("view") === "vulns") {
   document.getElementById("posture-view").hidden = true;
-  document.getElementById("cve-view").hidden = false;
-  document.querySelector(".crumbs").innerHTML = '<span>What\'s new</span><i>/</i><b>CVE-2023-47038</b>';
-  document.querySelectorAll(".rl").forEach((r, i) => r.classList.toggle("on", i === 4));
-  const ic = { open:'<svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
-    hist:'<svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/></svg>',
-    re:'<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4"/></svg>' };
-  const cr = [
-    ["1.4.0","project-a","auto","not affected","6.7","5.1","2026-11-20","Not affected","version-range rule: build carries the fix","—"],
-    ["1.3.2","project-a","man","accepted","6.7","6.7","2026-11-18","Mitigate","Patch to mitigate the vulnerability","TICKET-101"],
-    ["1.3.1","project-a","man","accepted","6.7","6.7","2026-11-18","Mitigate","Patch to mitigate the vulnerability","TICKET-101"],
-    ["1.3.0","project-a","man","accepted","6.7","6.7","2026-11-12","Accept risk","Release out of support, no customer","TICKET-087"],
-    ["2.1.0","project-b","man","accepted","6.7","4.4","2026-11-21","Not affected","Perl not on the execution path","—"],
-    ["2.0.0","project-b","",  "open","6.7","6.7","—","—","Undecided · SLA 12 d left","—"],
+  document.getElementById("vulns-view").hidden = false;
+  document.querySelector(".crumbs").innerHTML = '<span>Estate</span><i>/</i><span>example-product</span><i>/</i><b>project-a</b>';
+  const chev = (o) => `<span class="chev${o ? " open" : ""}"><svg viewBox="0 0 24 24"><path d="${o ? "m6 9 6 6 6-6" : "m9 6 6 6-6 6"}"/></svg></span>`;
+  const sig = (a) => a.map(b => b==="kev" ? '<span class="badge kev">KEV</span> ' : '<span class="badge">EPSS '+b+'</span> ').join("");
+  const V = [
+    ["CVE-2024-6387","c","Critical","9.8","openssh-server","4","4 open","",["kev","0.94"],"8.0p1-25.el8","2 d left"],
+    ["CVE-2023-47038","m","Medium","6.7","perl-interpreter","4","3 decided · 1 open","1 auto · 2 manual",["0.02"],"5.32.1-473","12 d left", true],
+    ["CVE-2023-38545","c","Critical","9.1","curl","3","1 decided · 2 open","1 manual",["0.71"],"7.61.1-34.el8_9","9 d over"],
+    ["CVE-2024-2961","h","High","7.3","glibc","4","4 decided","4 manual",["kev","0.44"],"2.28-251.el8_10.2","—"],
+    ["CVE-2024-0727","m","Medium","5.5","openssl-libs","2","2 open","",["0.05"],"1.1.1k-14.el8","21 d left"],
+    ["CVE-2023-52425","m","Medium","5.3","expat","4","4 decided","4 auto",["0.01"],"2.2.5-16.el8","—"],
   ];
-  document.getElementById("cverows").innerHTML = cr.map((r, i) => `
-    <tr${r[3]==="open" ? ' class="selrow"' : ""}>
-      <td><input type="checkbox" ${i>=3 && i<=5 ? "checked" : ""}></td>
-      <td><span class="chip">${r[0]}</span></td><td class="pkg">${r[1]}</td>
-      <td>${r[2]==="auto" ? '<span class="dec auto">AUTO</span>' : r[2]==="man" ? '<span class="dec man">MANUAL</span>' : '<span class="pkg">—</span>'}</td>
-      <td>${r[3]==="open" ? '<span class="badge">undecided</span>' : '<span class="badge acc">'+r[3]+'</span>'}</td>
-      <td class="num scorepair"><b>${r[4]}</b></td><td class="num scorepair"><b>${r[5]}</b></td>
-      <td class="pkg">${r[6]}</td><td>${r[7]}</td><td class="rationale">${r[8]}</td>
-      <td>${r[9]==="—" ? '<span class="pkg">—</span>' : '<span class="ticket">'+r[9]+'</span>'}</td>
-      <td><span class="acts">${ic.open}${ic.hist}${ic.re}</span></td>
-    </tr>`).join("");
+  const R = [
+    ["1.4.0","auto","not affected",[1,0,1],"6.7","5.1","2026-11-20","2026-11-21","Not affected","Range rule: this build carries the fix","—"],
+    ["1.3.2","man","affected",[1,1,1],"6.7","6.7","2026-11-18","2026-11-19","Mitigate","Patch to mitigate the vulnerability","TICKET-101"],
+    ["1.3.1","man","accepted risk",[1,0,1],"6.7","6.7","2026-11-12","2026-11-13","Accept risk","Out of support, no customer","TICKET-087"],
+    ["1.3.0","","undecided",[0,0,0],"6.7","6.7","—","—","—","Undecided · SLA 12 d left","—"],
+  ];
+  const ic = '<span class="acts"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/></svg></span>';
+  const sub = `<tr class="subwrap"><td colspan="10"><div class="sub">
+    <div class="subhead"><span><b style="color:var(--ink)">Affected releases</b> · 4 in scope</span><span>Stages: decided · remediated · published</span></div>
+    <table><thead><tr><th style="width:24px"><input type="checkbox"></th><th>Release</th><th>Decided by</th><th>Decision</th><th>Stages</th><th class="num">Source</th><th class="num">Themis</th><th>Decided</th><th>Published</th><th>Disposition</th><th>Rationale</th><th>Ticket</th><th></th></tr></thead><tbody>
+    ${R.map((r,i) => `<tr${r[2]==="undecided" ? ' style="background:var(--hover)"' : ""}>
+      <td><input type="checkbox"${i>=2 ? " checked" : ""}></td><td><span class="chip">${r[0]}</span></td>
+      <td>${r[1]==="auto" ? '<span class="dec auto">AUTO</span>' : r[1]==="man" ? '<span class="dec man">MANUAL</span>' : '<span class="pkg">—</span>'}</td>
+      <td>${r[2]==="undecided" ? '<span class="badge">undecided</span>' : '<span class="badge acc">'+r[2]+'</span>'}</td>
+      <td><span class="stages">${r[3].map(x => `<i${x ? ' class="on"' : ""}></i>`).join("")}</span></td>
+      <td class="num">${r[4]}</td><td class="num"><b>${r[5]}</b></td><td class="pkg">${r[6]}</td><td class="pkg">${r[7]}</td>
+      <td>${r[8]}</td><td class="rationale">${r[9]}</td>
+      <td>${r[10]==="—" ? '<span class="pkg">—</span>' : '<span class="ticket">'+r[10]+'</span>'}</td><td>${ic}</td></tr>`).join("")}
+    </tbody></table></div></td></tr>`;
+  document.getElementById("vrows").innerHTML = V.map(v => `
+    <tr class="cverow${v[11] ? " expanded" : ""}">
+      <td>${chev(v[11])}</td><td><span class="chip">${v[0]}</span></td><td><span class="sev ${v[1]}">${v[2]}</span></td>
+      <td class="num"><b>${v[3]}</b></td><td class="pkg"><b>${v[4]}</b></td>
+      <td class="cnt">${v[5]} <em>releases</em></td>
+      <td class="pkg">${v[6]}${v[7] ? ' <em style="font-style:normal;color:var(--muted)">· '+v[7]+'</em>' : ""}</td>
+      <td>${sig(v[8])}</td><td class="pkg"><span class="badge fix">fix</span> ${v[9]}</td>
+      <td class="${v[10].includes("over") ? "sla-bad" : "pkg"}">${v[10]}</td></tr>${v[11] ? sub : ""}`).join("");
+}
+
+if (q.get("view") === "decide") {
+  document.getElementById("posture-view").hidden = true;
+  document.getElementById("decide-view").hidden = false;
+  document.querySelector(".crumbs").innerHTML = '<span>project-a</span><i>/</i><span>Vulnerabilities</span><i>/</i><span>CVE-2023-47038</span><i>/</i><b>Decide</b>';
+  if (q.get("warn")) document.getElementById("sevwarn").hidden = false;
 }
 </script>
 </body>
