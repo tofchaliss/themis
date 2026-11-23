@@ -672,6 +672,33 @@ paths:
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
+  /faultlines/{faultlineId}/findings:
+    get:
+      operationId: getFaultlineFindings
+      summary: >-
+        Every release's Finding for one Faultline (one CVE), as posture rows (EDR-GUI-02 D13).
+      description: >-
+        The cross-release read behind the GUI's per-CVE releases dropdown: one row per release
+        the CVE is filed under, each the same row that release's posture serves (priority, SLA,
+        components, decision), plus release_id, decided_by_kind and decided_at. Read scope. An
+        unknown Faultline answers an empty list. Release names are Registry's, not here.
+      parameters:
+        - name: faultlineId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PostureEntry'
+        '500':
+          $ref: '#/components/responses/Problem'
   /faultlines/{faultlineId}/blast-radius:
     get:
       operationId: getBlastRadius
@@ -1577,6 +1604,21 @@ components:
       properties:
         finding_id:
           type: string
+        release_id:
+          type: string
+          description: >-
+            The Release this Finding is filed under. Always set; it matters on the cross-release
+            read (GET /faultlines/{faultlineId}/findings), where rows come from many releases.
+        decided_by_kind:
+          type: string
+          description: >-
+            Who established the current Position (absent when none): `human` (a named person)
+            or `policy` / `system` (a rule). The GUI shows MANUAL / AUTO (EDR-GUI-02 D13). An AI
+            or vendor proposal is never a decider: it waits for a person.
+        decided_at:
+          type: string
+          format: date-time
+          description: When the current Position was established (absent when none).
         faultline_id:
           type: string
         cve:

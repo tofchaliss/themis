@@ -307,6 +307,21 @@ func (h *Handler) GetReleasePosture(w http.ResponseWriter, r *http.Request, rele
 	writeJSON(w, http.StatusOK, out)
 }
 
+// GetFaultlineFindings handles GET /faultlines/{faultlineId}/findings — every release's
+// Finding for one CVE (EDR-GUI-02 D13), as posture rows.
+func (h *Handler) GetFaultlineFindings(w http.ResponseWriter, r *http.Request, faultlineID string) {
+	entries, err := h.read.FaultlineFindings(r.Context(), faultlineID)
+	if err != nil {
+		writeProblem(w, http.StatusInternalServerError, "cannot read the faultline's findings", err.Error())
+		return
+	}
+	out := make([]gen.PostureEntry, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, toPostureEntry(e))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // GetReleaseEvaluatedEvents handles GET /events/release-evaluated — the cursor read of the
 // release-evaluated feed (EDR-DELIVERY-01 M2-4 / N-M2d). Paging rules (default, cap, negative
 // cursor) are the app's; this maps the wire. A node with no feed wired answers 503, never an
@@ -876,6 +891,16 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	if e.PositionRationale != "" {
 		pr := e.PositionRationale
 		out.PositionRationale = &pr
+	}
+	if e.ReleaseID != "" {
+		out.ReleaseId = strptr(e.ReleaseID)
+	}
+	if e.DecidedByKind != "" {
+		out.DecidedByKind = strptr(string(e.DecidedByKind))
+	}
+	if !e.DecidedAt.IsZero() {
+		at := e.DecidedAt
+		out.DecidedAt = &at
 	}
 	if e.SLA != nil {
 		sla := toSLAStatus(*e.SLA)

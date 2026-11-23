@@ -646,7 +646,8 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.id, f.faultline_id, f.cve, f.stage, f.current_stance, f.current_position_version,
 		       f.base_score, COALESCE(pr.evidence_trust, ''), f.band, f.selected_fixes,
-		       COALESCE(po.rationale, ''), f.stale_since, f.stale_reason
+		       COALESCE(po.rationale, ''), f.stale_since, f.stale_reason,
+		       COALESCE(po.actor_kind, ''), po.established_at
 		FROM findings f
 		-- The reservation (EDR-TRUST-01 T12) is DERIVED, never stored: join the current
 		-- Position to the proposal it accepted and read that proposal's evidence class. A
@@ -673,9 +674,12 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 			positionRationale           string
 			staleSince                  *time.Time
 			staleReason                 string
+			decidedByKind               string
+			decidedAt                   *time.Time
 		)
 		if err := rows.Scan(&id, &faultlineID, &cve, &stage, &curStance, &curVersion, &baseScore,
-			&evidenceTrust, &band, &fixesRaw, &positionRationale, &staleSince, &staleReason); err != nil {
+			&evidenceTrust, &band, &fixesRaw, &positionRationale, &staleSince, &staleReason,
+			&decidedByKind, &decidedAt); err != nil {
 			return nil, err
 		}
 		var fixes []app.FixedVersion
@@ -686,6 +690,7 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 		}
 		e := app.PostureEntry{
 			FindingID:   domain.FindingID(id),
+			ReleaseID:   releaseID,
 			FaultlineID: faultlineID,
 			StaleReason: staleReason,
 			CVE:         cve,
@@ -706,6 +711,10 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 				e.PositionVersion = *curVersion
 			}
 			e.PositionRationale = positionRationale
+			e.DecidedByKind = domain.ActorKind(decidedByKind)
+			if decidedAt != nil {
+				e.DecidedAt = decidedAt.UTC()
+			}
 			// Derived must not mean invisible (T12): a Position resting on anything weaker
 			// than Observed carries its class here, beside stance and priority.
 			if c := value.MaxTrust(value.TrustClass(evidenceTrust)); c != value.TrustObserved {

@@ -95,35 +95,44 @@ describe("Release posture", () => {
   });
 
   it("opens the releases dropdown under a CVE without opening the drawer", async () => {
-    mockFetch({
+    const calls = mockFetch({
       ...base,
-      "GET /api/knowledge/faultlines/fl-top/releases": [200, ["r1", "r2", "r3"]],
-      "GET /api/registry/releases/r2": [200, { id: "r2", project_id: "j2", version: "2.0.0" }],
-      "GET /api/registry/projects/j2": [200, { id: "j2", name: "project-b" }],
-      "GET /api/governance/releases/r2/posture": [
+      "GET /api/governance/faultlines/fl-top/findings": [
         200,
-        [{ finding_id: "f2", faultline_id: "fl-top", cve: "CVE-2026-0001", has_position: true, stance: "affected", components: [{ name: "openssl" }], fixes: [] }],
+        [
+          { ...posture[1], release_id: "r1" },
+          { finding_id: "f2", release_id: "r2", faultline_id: "fl-top", has_position: true, stance: "affected", decided_by_kind: "human", decided_at: "2026-11-02T10:00:00Z", components: [{ name: "openssl" }], fixes: [] },
+          { finding_id: "f4", release_id: "r4", faultline_id: "fl-top", has_position: true, stance: "not_affected", decided_by_kind: "policy", decided_at: "2026-11-03T10:00:00Z" },
+          { finding_id: "f3", release_id: "r3", faultline_id: "fl-top", has_position: false },
+        ],
       ],
+      "GET /api/registry/releases/r2": [200, { id: "r2", project_id: "j1", version: "2.0.0" }],
+      "GET /api/registry/releases/r4": [200, { id: "r4", project_id: "j1", version: "2.1.0" }],
       "GET /api/registry/releases/r3": [502],
     });
     renderWithQuery(<Release id="r1" version="1.4.0" />);
     fireEvent.click(await screen.findByRole("button", { name: "Show releases with CVE-2026-0001" }));
-    expect(await screen.findByRole("link", { name: "project-b v2.0.0" })).toHaveAttribute("href", "#/release/r2?v=2.0.0");
+    expect(await screen.findByRole("link", { name: "project-a v2.0.0" })).toHaveAttribute("href", "#/release/r2?v=2.0.0");
     expect(screen.getByText("this release")).toBeInTheDocument();
     expect(screen.getByText("affected")).toBeInTheDocument();
+    expect(screen.getByText("MANUAL")).toBeInTheDocument();
+    expect(screen.getByText("AUTO")).toBeInTheDocument();
+    expect(screen.getByText("2026-11-02")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "release vr3" })).toBeInTheDocument();
+    // One project read for the two releases of project-a (r1's comes from the page itself).
+    expect(calls.filter((c) => c.url === "/api/registry/projects/j1").length).toBeLessThanOrEqual(2);
     expect(screen.queryByRole("dialog")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Hide releases with CVE-2026-0001" }));
-    expect(screen.queryByRole("link", { name: "project-b v2.0.0" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "project-a v2.0.0" })).toBeNull();
   });
 
-  it("says so when Knowledge lists no release, and shows its error", async () => {
-    mockFetch({ ...base, "GET /api/knowledge/faultlines/fl-top/releases": [200, []], "GET /api/knowledge/faultlines/fl-low/releases": [502] });
+  it("says so when Governance lists no release, and shows its error", async () => {
+    mockFetch({ ...base, "GET /api/governance/faultlines/fl-top/findings": [200, []], "GET /api/governance/faultlines/fl-low/findings": [502] });
     renderWithQuery(<Release id="r1" version="1.4.0" />);
     fireEvent.click(await screen.findByRole("button", { name: "Show releases with CVE-2026-0001" }));
-    expect(await screen.findByText("Knowledge lists no releases for this CVE.")).toBeInTheDocument();
+    expect(await screen.findByText("Governance lists no releases for this CVE.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show releases with CVE-2026-0002" }));
-    expect(await screen.findByText(/knowledge node did not answer/i)).toBeInTheDocument();
+    expect(await screen.findByText(/governance node did not answer/i)).toBeInTheDocument();
   });
 
   it("opens the read-only drawer on a row click and on Enter", async () => {

@@ -1,6 +1,6 @@
 // EDR-GUI-02 D5: one place for the read queries, so two parts of a screen that need the
 // same answer share one request and back-navigation is instant.
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiGet, getAdminStatus, getWhoAmI } from "./api";
 import { asArray } from "./utils";
 import type { components as Registry } from "@/types/api/registry";
@@ -93,38 +93,28 @@ export const useAssessment = (findingId: string | undefined) =>
   });
 
 /** One row of a CVE's releases dropdown (EDR-GUI-02 D13). */
-export type CveRelease = { releaseId: string; version: string; project: string; entry: PostureEntry | null };
+export type CveRelease = { releaseId: string; version: string; project: string; entry: PostureEntry };
 
-/** Every release a CVE is filed under, with that release's Finding for it. Built from the
- * existing reads (Knowledge's rollup, Registry names, each release's posture), one release at
- * a time, until Governance answers it in one call (the D13 API gap). Posture reads are shared
- * with the release screen through the query cache. */
-export async function cveReleases(
-  faultlineId: string,
-  readPosture: (releaseId: string) => Promise<PostureEntry[]>,
-): Promise<CveRelease[]> {
-  const ids = asArray<string>(await apiGet("knowledge", `/faultlines/${enc(faultlineId)}/releases`));
+/** Every release a CVE is filed under, with that release's Finding for it: ONE Governance
+ * read (GET /faultlines/{id}/findings), then Registry names, shared per project. A release
+ * whose name cannot be read still shows, by id. */
+export async function cveReleases(faultlineId: string): Promise<CveRelease[]> {
+  const rows = asArray<PostureEntry>(await apiGet("governance", `/faultlines/${enc(faultlineId)}/findings`));
+  const projects = new Map<string, Promise<Project | null>>();
+  const projectOf = (id: string) => {
+    if (!projects.has(id)) projects.set(id, apiGet<Project>("registry", `/projects/${enc(id)}`).catch(() => null));
+    return projects.get(id) as Promise<Project | null>;
+  };
   return Promise.all(
-    ids.map(async (releaseId) => {
+    rows.map(async (entry) => {
+      const releaseId = entry.release_id ?? "";
       const rel = await apiGet<Release>("registry", `/releases/${enc(releaseId)}`).catch(() => null);
-      const proj = rel?.project_id ? await apiGet<Project>("registry", `/projects/${enc(rel.project_id)}`).catch(() => null) : null;
-      const posture = await readPosture(releaseId).catch(() => []);
-      return {
-        releaseId,
-        version: rel?.version ?? "",
-        project: proj?.name ?? "",
-        entry: posture.find((p) => p.faultline_id === faultlineId) ?? null,
-      };
+      const proj = rel?.project_id ? await projectOf(rel.project_id) : null;
+      return { releaseId, version: rel?.version ?? "", project: proj?.name ?? "", entry };
     }),
   );
 }
 
 /** Loaded only when a row's dropdown is opened. */
-export function useCveReleases(faultlineId: string | undefined, open: boolean) {
-  const qc = useQueryClient();
-  return useQuery({
-    queryKey: ["cve-releases", faultlineId],
-    enabled: open && !!faultlineId,
-    queryFn: () => cveReleases(faultlineId ?? "", (id) => qc.fetchQuery(postureQuery(id))),
-  });
-}
+export const useCveReleases = (faultlineId: string | undefined, open: boolean) =>
+  useQuery({ queryKey: ["cve-releases", faultlineId], enabled: open && !!faultlineId, queryFn: () => cveReleases(faultlineId ?? "") });

@@ -429,6 +429,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/faultlines/{faultlineId}/findings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Every release's Finding for one Faultline (one CVE), as posture rows (EDR-GUI-02 D13).
+         * @description The cross-release read behind the GUI's per-CVE releases dropdown: one row per release the CVE is filed under, each the same row that release's posture serves (priority, SLA, components, decision), plus release_id, decided_by_kind and decided_at. Read scope. An unknown Faultline answers an empty list. Release names are Registry's, not here.
+         */
+        get: operations["getFaultlineFindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/faultlines/{faultlineId}/blast-radius": {
         parameters: {
             query?: never;
@@ -929,6 +949,15 @@ export interface components {
         };
         PostureEntry: {
             finding_id?: string;
+            /** @description The Release this Finding is filed under. Always set; it matters on the cross-release read (GET /faultlines/{faultlineId}/findings), where rows come from many releases. */
+            release_id?: string;
+            /** @description Who established the current Position (absent when none): `human` (a named person) or `policy` / `system` (a rule). The GUI shows MANUAL / AUTO (EDR-GUI-02 D13). An AI or vendor proposal is never a decider: it waits for a person. */
+            decided_by_kind?: string;
+            /**
+             * Format: date-time
+             * @description When the current Position was established (absent when none).
+             */
+            decided_at?: string;
             faultline_id?: string;
             cve?: string;
             stage?: string;
@@ -1826,6 +1855,29 @@ export interface operations {
             };
             400: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+        };
+    };
+    getFaultlineFindings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                faultlineId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostureEntry"][];
+                };
+            };
             500: components["responses"]["Problem"];
         };
     };

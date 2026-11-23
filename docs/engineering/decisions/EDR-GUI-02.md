@@ -259,6 +259,12 @@ Finding (Communication); the publication date per Finding (Communication); an on
 re-evaluate for one CVE or one release (Governance; today only the one-time re-judge pass and the
 release-evaluation worker).
 
+**Realized 2026-11-23 (owner chose "add the read"):** `GET /faultlines/{faultlineId}/findings`
+in Governance answers the first gap in one call: every release's Finding for the CVE, as the
+same posture rows each release serves, plus `release_id`, `decided_by_kind` (`human` = MANUAL,
+`policy` / `system` = AUTO) and `decided_at` (also added to every posture row). Release and
+project names stay Registry's. The other three gaps are still open.
+
 ### D14 — Decisions on a full page; a severity change warns first (owner, 2026-11-23)
 
 The owner decided (2026-11-23) that **changing a CVE's details, such as disposition and

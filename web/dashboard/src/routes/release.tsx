@@ -59,19 +59,27 @@ function BandBar({ posture }: { posture: PostureEntry[] }) {
   );
 }
 
+/** D13: a person's decision is MANUAL, a rule's is AUTO; nothing else ever decides. */
+function decidedBy(kind?: string) {
+  if (!kind) return <span className="text-muted">—</span>;
+  return kind === "human" ? <Badge>MANUAL</Badge> : <Badge tone="accent">AUTO</Badge>;
+}
+
 /** The dropdown under a CVE row: every release the CVE is filed under (D13). */
 function ReleasesDropdown({ entry, releaseId }: { entry: PostureEntry; releaseId: string }) {
   const q = useCveReleases(entry.faultline_id, true);
   if (q.isPending) return <Skeleton className="m-3 h-4 w-1/3" />;
   if (q.isError) return <ErrorPanel error={q.error} />;
   const rows = [...(q.data ?? [])].sort((a, b) => `${a.project} ${a.version}`.localeCompare(`${b.project} ${b.version}`));
-  if (!rows.length) return <p className="p-3 text-muted">Knowledge lists no releases for this CVE.</p>;
+  if (!rows.length) return <p className="p-3 text-muted">Governance lists no releases for this CVE.</p>;
   return (
     <table className="w-full text-left">
       <thead className="text-xs text-ink-2">
         <tr>
           <th className="py-1.5 pr-3 pl-10 font-medium">Release</th>
           <th className="py-1.5 pr-3 font-medium">Decision</th>
+          <th className="py-1.5 pr-3 font-medium">Decided by</th>
+          <th className="py-1.5 pr-3 font-medium">Decided</th>
           <th className="py-1.5 pr-3 font-medium">Package</th>
           <th className="py-1.5 pr-3 font-medium">Fix</th>
           <th className="py-1.5 pr-3 font-medium">Next SLA</th>
@@ -91,10 +99,20 @@ function ReleasesDropdown({ entry, releaseId }: { entry: PostureEntry; releaseId
                 </a>
               )}
             </td>
-            <td className="py-1.5 pr-3">{r.entry ? <StanceBadge stance={r.entry.stance} decided={r.entry.has_position} /> : <span className="text-muted">—</span>}</td>
-            <td className="py-1.5 pr-3">{r.entry ? <PackageCell components={r.entry.components} /> : "—"}</td>
-            <td className="py-1.5 pr-3">{r.entry ? <FixCell entry={r.entry} /> : "—"}</td>
-            <td className="py-1.5 pr-3">{r.entry ? <SlaCell sla={r.entry.sla} /> : "—"}</td>
+            <td className="py-1.5 pr-3">
+              <StanceBadge stance={r.entry.stance} decided={r.entry.has_position} />
+            </td>
+            <td className="py-1.5 pr-3">{decidedBy(r.entry.decided_by_kind)}</td>
+            <td className="py-1.5 pr-3 font-mono text-xs">{r.entry.decided_at ? r.entry.decided_at.slice(0, 10) : "—"}</td>
+            <td className="py-1.5 pr-3">
+              <PackageCell components={r.entry.components} />
+            </td>
+            <td className="py-1.5 pr-3">
+              <FixCell entry={r.entry} />
+            </td>
+            <td className="py-1.5 pr-3">
+              <SlaCell sla={r.entry.sla} />
+            </td>
           </tr>
         ))}
       </tbody>
