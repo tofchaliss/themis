@@ -1,7 +1,8 @@
 # EDR-PSIRT-01 — Product severity per CVE on the Overview (PSIRT view)
 
-Status: **PROPOSED — 2026-11-23. Design only. Nothing is built until the owner answers the
-choices in "Owner choices" and says "go" per step (release freeze rule since v0.5.0).**
+Status: **PROPOSED — 2026-11-23. Owner choices 1-6 answered 2026-11-23; the owner OK'd the
+Knowledge change (P1a), the Governance read (P1) and this design PR the same day ("let us see
+how it performs, if not we will revert").**
 Date: 2026-11-23
 Author: the design discussion of 2026-11-23 (thread "Add PSIRT product severity view").
 
@@ -152,7 +153,7 @@ Each choice lists the recommendation first.
      someone must keep the tags right.
    - (c) Only the newest release of each project. Needs a Registry change first (release date
      or order is not stored).
-2. **How is the product severity made from the releases?** **SETTLED by the owner 2026-11-23: a new option, the ORIGINAL (source) severity.** The product severity is the highest Original (source CVSS Base) severity over the live releases. The Expert score is not the basis; whether it is still shown beside it is asked separately.
+2. **How is the product severity made from the releases?** **SETTLED by the owner 2026-11-23: a new option, the ORIGINAL (source) severity.** The product severity is the highest Original (source CVSS Base) severity over the live releases. The Expert score is not the basis. **Assumed until the owner confirms (2026-11-23):** (A) when releases differ, the highest source severity wins; (B) the Expert severity still shows as a small second column. **Open (C):** a "new in product" filter beside "published recently", so an old CVE that reaches the product today is also listed.
    - **(a) Highest severity over the live releases (recommended).** Same max rule as the
      component level.
    - (b) The severity of most releases (majority). Hides a bad outlier release.
