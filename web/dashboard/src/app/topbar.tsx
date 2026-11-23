@@ -45,13 +45,20 @@ export function TopBar({
         {defaultPassword && (
           // Plain and persistent, not a toast: it has to still be there next time somebody looks.
           <a
-            href="/#/admin"
+            href="/old/#/admin"
             className="rounded-lg border border-warn/60 bg-warn/15 px-2.5 py-1 text-xs font-medium text-ink"
             title="The dashboard's admin account still uses the password it shipped with"
           >
             Default password in use — change it
           </a>
         )}
+        <a
+          href="/old/"
+          className="rounded-lg border border-line px-2.5 py-1 text-xs font-medium text-ink-2 hover:text-ink"
+          title="The previous GUI, kept at /old/ until every screen is rebuilt here"
+        >
+          Old GUI
+        </a>
         <ThemePicker value={theme} onChange={onTheme} />
         <span
           className="flex items-center gap-2 text-ink-2"

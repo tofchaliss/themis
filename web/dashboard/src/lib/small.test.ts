@@ -49,8 +49,8 @@ describe("router", () => {
   });
 
   it("builds classic GUI links", () => {
-    expect(classicHref("#/sbom")).toBe("/#/sbom");
-    expect(classicHref("/feeds")).toBe("/#/feeds");
+    expect(classicHref("#/sbom")).toBe("/old/#/sbom");
+    expect(classicHref("/feeds")).toBe("/old/#/feeds");
   });
 });
 

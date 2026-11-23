@@ -28,7 +28,7 @@ export function Rail({ active, showAdmin }: { active: string; showAdmin: boolean
       {RAIL.filter((i) => !i.adminOnly || showAdmin).map((i) => {
         const Icon = i.icon;
         const href = i.here ? i.hash : classicHref(i.hash);
-        const title = i.here ? i.label : `${i.label} (opens the classic GUI)`;
+        const title = i.here ? i.label : `${i.label} (opens the old GUI)`;
         return (
           <a
             key={i.id}

@@ -1,5 +1,5 @@
 // EDR-GUI-02 D2/D3/D8: a static SPA built into the dashboard binary's embedded assets.
-// During the move-over (D11) it lives at /next/ beside the old GUI.
+// The page is served at "/" (the default GUI since 2026-11-23); its files keep the /next/ base.
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";

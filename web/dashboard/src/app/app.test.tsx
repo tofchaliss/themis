@@ -20,7 +20,8 @@ describe("App shell", () => {
     expect(screen.getByText("JD")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /sign out/i })).toBeInTheDocument();
     expect(await screen.findByText(/default password in use/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /admin/i })).toHaveAttribute("href", "/#/admin");
+    expect(screen.getByRole("link", { name: /admin/i })).toHaveAttribute("href", "/old/#/admin");
+    expect(screen.getByRole("link", { name: /^old gui$/i })).toHaveAttribute("href", "/old/");
   });
 
   it("hides sign out and admin when auth is on and the user is read-only", async () => {
@@ -59,7 +60,7 @@ describe("App shell", () => {
     mockFetch({ ...base, "GET /whoami": [200, { user: "operator", can_write: true }] });
     renderWithQuery(<App />);
     expect(screen.getByRole("link", { name: "Estate" })).toHaveAttribute("href", "#/estate");
-    expect(screen.getByRole("link", { name: /sbom manager \(opens the classic gui\)/i })).toHaveAttribute("href", "/#/sbom");
+    expect(screen.getByRole("link", { name: /sbom manager \(opens the old gui\)/i })).toHaveAttribute("href", "/old/#/sbom");
   });
 
   it("routes by hash and hands unbuilt screens to the classic GUI", async () => {
@@ -76,6 +77,6 @@ describe("App shell", () => {
       window.location.hash = "#/release/r1";
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     });
-    expect(await screen.findByText(/opening this screen in the classic gui/i)).toBeInTheDocument();
+    expect(await screen.findByText(/opening this screen in the old gui/i)).toBeInTheDocument();
   });
 });

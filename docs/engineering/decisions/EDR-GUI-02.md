@@ -186,6 +186,20 @@ dashboard binary; no node changes.
    release.
 4. Then the old `app.js`, `style.css` and `make js-check` are deleted.
 
+**Owner amendment 2026-11-23 (order change).** After trying G1 on the VM, the owner asked to make
+the new GUI the default **now**, before G2-G5, with the old GUI at **`/old/`** (not `/classic/`).
+So step 3 happens early:
+
+- `/` serves the new GUI's page; its files keep their `/next/` URLs (the build's base), and
+  `/next/` itself redirects to `/`. The old GUI is served at `/old/` with the prefix stripped.
+- Any hash route the new GUI has not rebuilt yet is handed to `/old/#/<route>`. That keeps the
+  links already sent by the webhook, Teams and mail routes (`/#/release/<id>`, `/#/reports`)
+  working: they reach the new GUI, which forwards them. The rail marks those screens "opens the
+  old GUI", and the top bar has an "Old GUI" link.
+- Sign-in returns to the page asked for when that page is under `/old/` (or `/next/`), instead of
+  always to `/` — the defect that made `/next/` look like the old GUI on the first VM try.
+- Steps 2 and 4 are unchanged: screens keep moving one PR at a time, and `/old/` is removed in G7.
+
 ### D12 — Where the code lives
 
 - `web/dashboard/` (new top-level directory): `package.json`, lockfile, Vite, Tailwind and
@@ -302,7 +316,8 @@ S6); SSO; translations; a mobile layout (EDR-GUI-01 non-goal); any change to the
 - **G3** SBOM manager + scan view.
 - **G4** Compare, What's new, CVE page.
 - **G5** Reports, Watches, Feeds, Admin.
-- **G6** Switch the default to the new GUI; old GUI at `/classic/`.
+- **G6** Switch the default to the new GUI; old GUI at `/old/`. **Done early, 2026-11-23**, on the
+  owner's ask (see the D11 amendment).
 - **G7** Remove the old GUI and `js-check`.
 
 ## Owner approvals this record asks for (CLAUDE.md "Must ask")

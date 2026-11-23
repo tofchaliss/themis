@@ -20,7 +20,7 @@ describe("Estate", () => {
     fireEvent.click(await screen.findByRole("button", { name: /example-product/ }));
     fireEvent.click(await screen.findByRole("button", { name: /project-a/ }));
     const rel = await screen.findByRole("link", { name: /v1\.4\.0/ });
-    expect(rel).toHaveAttribute("href", "/#/release/r1-cccccccc?v=1.4.0");
+    expect(rel).toHaveAttribute("href", "/old/#/release/r1-cccccccc?v=1.4.0");
     expect(screen.getByText(/Tags — project project-a/)).toBeInTheDocument();
     expect(await screen.findByText(/team:sec\)/)).toBeInTheDocument();
   });

@@ -10,12 +10,12 @@ Every step waits for the owner's go and lands as its own PR.
 
 ## Group 1 — G1 skeleton
 
-- [ ] 1.1 `web/dashboard/` toolchain: pinned Node, lockfile, Vite, React, TypeScript strict,
+- [x] 1.1 `web/dashboard/` toolchain: pinned Node, lockfile, Vite, React, TypeScript strict,
   Tailwind, shadcn/ui init, ESLint (no `dangerouslySetInnerHTML`), Vitest, Playwright.
-- [ ] 1.2 Makefile `web-install` / `web-build` / `web-check` / `web-verify` / `web-dev`;
+- [x] 1.2 Makefile `web-install` / `web-build` / `web-check` / `web-verify` / `web-dev`;
   `check` and `check-ci` gain `web-check` and `web-verify`; workflows gain `setup-node`.
-- [ ] 1.3 Dashboard: `/next/` mount, cache headers, pre-compressed files, CSP; Go tests.
-- [ ] 1.4 Shell: rail, top bar, breadcrumbs, three-shade picker (contrast test), user chip,
+- [x] 1.3 Dashboard: `/next/` mount, cache headers, pre-compressed files, CSP; Go tests.
+- [x] 1.4 Shell: rail, top bar, breadcrumbs, three-shade picker (contrast test), user chip,
   sign-out, default-password notice, session and node-down handling; generated API types.
 - [ ] 1.5 Overview and Estate screens at parity, checked against `docs/engineering/gui-reference/`; size budget measured; VM check.
 
@@ -41,5 +41,6 @@ Every step waits for the owner's go and lands as its own PR.
 
 ## Group 6 — G6 switch and G7 removal
 
-- [ ] 6.1 `/` serves the new GUI, old GUI at `/classic/`; webhook links checked.
+- [x] 6.1 `/` serves the new GUI, old GUI at `/old/` (owner 2026-11-23, done ahead of G2);
+  webhook-style `/#/<route>` links forward to `/old/#/<route>` (checked in a browser). VM check pending.
 - [ ] 6.2 After one release: old `app.js`, `style.css` and `make js-check` removed.

@@ -480,3 +480,65 @@ func TestChangePassword_EndsOtherSessions(t *testing.T) {
 		t.Error("the other session could still write after the password change")
 	}
 }
+
+// EDR-GUI-02 D11: a signed-out request for an /old/ (or /next/) page is remembered, and
+// sign-in returns there instead of to "/". Anything else still lands on "/".
+func TestRequireSession_ReturnsToRequestedGUIAfterLogin(t *testing.T) {
+	h := newHandler(map[string]auth.Principal{"good-key": alice})
+	gated := h.RequireSession(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+
+	remembered := func(path string) *http.Cookie {
+		rec := httptest.NewRecorder()
+		gated.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == session.ReturnCookieName {
+				return c
+			}
+		}
+		return nil
+	}
+	loginWith := func(c *http.Cookie) *httptest.ResponseRecorder {
+		form := url.Values{"key": {"good-key"}}
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if c != nil {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		h.Login(rec, req)
+		return rec
+	}
+
+	if c := remembered("/next/assets/x.js"); c == nil || c.Value != "/next/assets/x.js" {
+		t.Errorf("return cookie for /next/ = %+v", c)
+	}
+	c := remembered("/old/")
+	if c == nil || c.Value != "/old/" || !c.HttpOnly {
+		t.Fatalf("return cookie for /old/ = %+v, want HttpOnly /old/", c)
+	}
+	rec := loginWith(c)
+	if got := rec.Header().Get("Location"); got != "/old/" {
+		t.Fatalf("login after /old/ → %q, want /old/", got)
+	}
+	cleared := false
+	for _, rc := range rec.Result().Cookies() {
+		if rc.Name == session.ReturnCookieName && rc.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Error("return cookie not cleared after use")
+	}
+
+	for _, p := range []string{"/", "/index.html", "/nextx"} {
+		if c := remembered(p); c != nil {
+			t.Errorf("%s remembered as %q, want nothing", p, c.Value)
+		}
+	}
+	for _, v := range []string{"//evil.example/", "/old//evil.example", "/elsewhere/", "https://evil.example/"} {
+		got := loginWith(&http.Cookie{Name: session.ReturnCookieName, Value: v}).Header().Get("Location")
+		if got != "/" {
+			t.Errorf("forged return %q → %q, want /", v, got)
+		}
+	}
+}
