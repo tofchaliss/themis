@@ -38,6 +38,13 @@ Every step waits for the owner's go and lands as its own PR.
 ## Group 3 — G3 SBOM manager and scan view
 
 - [ ] 3.1 SBOM manager (upload, new product chain) and scan view at parity; VM check.
+  Done 2026-11-23: SBOM manager at `#/sbom` (pickers with "New…" registering the
+  product → project → release chain, refusing a name that exists; intake door upload with
+  the receipt as a pair of counts, the scan date for a CSV, receipt follow for a slow file,
+  the refusal reason verbatim with its meaning; VEX through POST /evidence; the release's
+  evidence list). Scan view at `#/scan/<id>?rel=&v=` (every claim beside its Finding, claims
+  with no Finding shown as filtered, row opens the drawer). The release page gains the Scans
+  card and "What the latest SBOM changed". No API change. Open: VM check.
 
 ## Group 4 — G4 Compare, What's new, CVE page
 

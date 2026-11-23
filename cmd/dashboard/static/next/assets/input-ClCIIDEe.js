@@ -1,0 +1,1 @@
+import{J as e,N as t,q as n}from"./index-CJIJlea8.js";e();var r=n();function i({className:e,...n}){return(0,r.jsx)(`input`,{className:t(`h-8 rounded-lg border border-line bg-card px-2.5 text-[13px] text-ink placeholder:text-muted focus-visible:outline-2 focus-visible:outline-accent`,e),...n})}export{i as t};

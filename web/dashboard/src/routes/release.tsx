@@ -28,8 +28,8 @@ import {
 } from "@/components/finding-bits";
 import { FindingDrawer } from "@/components/finding-drawer";
 import { Empty, ErrorPanel } from "@/components/states";
-import { useCveReleases, usePosture, useProject, useRelease, type PostureEntry } from "@/lib/queries";
-import { classicHref, releaseHash } from "@/lib/router";
+import { useCveReleases, useEvidence, usePosture, useProject, useRelease, useScanReport, useUploadOutcome, type PostureEntry, type UploadOutcome } from "@/lib/queries";
+import { classicHref, releaseHash, scanHash } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
 function Count({ value, label, note, tone }: { value: number; label: string; note: string; tone?: string }) {
@@ -143,10 +143,95 @@ function ReleasesDropdown({ entry, releaseId }: { entry: PostureEntry; releaseId
   );
 }
 
+/** What the latest SBOM changed (Governance's upload outcome). "No longer present" closes
+ * nothing: those Findings stay open with their decisions until someone resolves them. */
+function UploadOutcomeCard({ o }: { o: UploadOutcome }) {
+  const cell = (n: number, label: string, cves?: string[], note?: string) => (
+    <div className="min-w-[120px] flex-1">
+      <div className="text-xl leading-tight font-semibold tabular-nums">{n}</div>
+      <div className="text-xs text-ink-2">{label}</div>
+      {note && <div className="text-xs text-muted">{note}</div>}
+      {!!cves?.length && <div className="mt-1 font-mono text-[11px] break-words text-ink-2">{cves.join(", ")}</div>}
+    </div>
+  );
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>What the latest SBOM changed</CardTitle>
+        <CardDescription>
+          SBOM <span className="font-mono">{o.sbom_id.slice(0, 16)}</span>, evaluated {o.evaluated_at.slice(0, 10)}
+          {o.has_baseline ? ", against the SBOM filed before it" : ": the first SBOM of this release, so everything present is new"}. "No longer
+          present" closes nothing: those findings stay open with their decisions.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap gap-4">
+        {cell(o.new, "New", o.new_cves)}
+        {cell(o.reappeared, "Reappeared", o.reappeared_cves)}
+        {cell(o.no_longer_present, "No longer present", o.no_longer_present_cves)}
+        {cell(o.unchanged, "Unchanged", undefined, `${o.not_judged} not judged (in neither SBOM, or closed)`)}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** How many claims one report made: read from the stored document after the page shows. */
+function ClaimCount({ id }: { id: string }) {
+  const r = useScanReport(id);
+  if (r.isPending) return <Skeleton className="ml-auto h-3 w-6" />;
+  return <>{r.data?.findings ? r.data.findings.length : "?"}</>;
+}
+
+/** Each scanner report filed against the release. The stored document is the complete per-tool
+ * record: match recording is first-wins, so only the document says what one tool claimed. */
+function ScansCard({ releaseId, version }: { releaseId: string; version: string }) {
+  const ev = useEvidence(releaseId);
+  const scans = (ev.data ?? []).filter((e) => e.kind === "scanner-report");
+  if (!scans.length) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Scans</CardTitle>
+        <CardDescription>Each scanner report filed against this release. Open one to see every claim beside what was decided.</CardDescription>
+      </CardHeader>
+      <CardContent className="overflow-x-auto px-0">
+        <table className="w-full text-left">
+          <thead className="border-y border-line text-xs text-ink-2">
+            <tr>
+              <th className="py-2 pr-3 pl-4 font-medium">Tool</th>
+              <th className="py-2 pr-3 font-medium">Filed</th>
+              <th className="py-2 pr-3 text-right font-medium">Claims</th>
+              <th className="py-2 pr-3 font-medium">Evidence id</th>
+            </tr>
+          </thead>
+          <tbody>
+            {scans.map((s) => (
+              <tr key={s.id} className="border-b border-line">
+                <td className="py-2 pr-3 pl-4">
+                  <a className="font-medium text-accent" href={scanHash(s.id ?? "", releaseId, version)}>
+                    {s.provenance_source || "scanner"}
+                  </a>
+                </td>
+                <td className="py-2 pr-3 font-mono text-xs" title={s.filed_at}>
+                  {(s.filed_at ?? "").slice(0, 10) || "—"}
+                </td>
+                <td className="py-2 pr-3 text-right tabular-nums">
+                  <ClaimCount id={s.id ?? ""} />
+                </td>
+                <td className="py-2 pr-3 font-mono text-xs">{s.id}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
 type Filter = "all" | "open" | "breached";
 
 export function Release({ id, version: hashVersion }: { id: string; version: string }) {
   const posture = usePosture(id);
+  const outcome = useUploadOutcome(id);
   const release = useRelease(id);
   const project = useProject(release.data?.project_id);
   const version = release.data?.version || hashVersion;
@@ -190,7 +275,7 @@ export function Release({ id, version: hashVersion }: { id: string; version: str
           {version ? `v${version}` : "Release"}
         </h1>
         <a className="inline-flex items-center gap-1 text-xs text-ink-2 hover:text-ink" href={oldPage}>
-          Scans, remediation plan, VEX and publications: in the old GUI
+          Remediation plan, VEX and publications: in the old GUI
           <ArrowUpRight className="size-3.5" aria-hidden />
         </a>
       </div>
@@ -332,6 +417,8 @@ export function Release({ id, version: hashVersion }: { id: string; version: str
               )}
             </CardContent>
           </Card>
+          {outcome.data && <UploadOutcomeCard o={outcome.data} />}
+          <ScansCard releaseId={id} version={version} />
           <div>
             <Button variant="outline" asChild>
               <a href={oldPage}>

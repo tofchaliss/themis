@@ -10,11 +10,14 @@ import { Loading } from "@/components/states";
 const Overview = lazy(() => import("@/routes/overview").then((m) => ({ default: m.Overview })));
 const Estate = lazy(() => import("@/routes/estate").then((m) => ({ default: m.Estate })));
 const Decide = lazy(() => import("@/routes/decide").then((m) => ({ default: m.Decide })));
+const Sbom = lazy(() => import("@/routes/sbom").then((m) => ({ default: m.Sbom })));
+const Scan = lazy(() => import("@/routes/scan").then((m) => ({ default: m.Scan })));
 const Release = lazy(() => import("@/routes/release").then((m) => ({ default: m.Release })));
 
 const CRUMBS: Record<string, Crumb[]> = {
   overview: [{ label: "Overview" }],
   estate: [{ label: "Overview", href: "#/" }, { label: "Estate" }],
+  sbom: [{ label: "Overview", href: "#/" }, { label: "SBOM manager" }],
 };
 
 function crumbsFor(route: Route): Crumb[] {
@@ -26,6 +29,13 @@ function crumbsFor(route: Route): Crumb[] {
       { label: "Estate", href: "#/estate" },
       ...(route.releaseId ? [{ label: route.version ? `Release v${route.version}` : "Release", href: releaseHash(route.releaseId, route.version) }] : []),
       { label: "Decide" },
+    ];
+  if (route.view === "scan")
+    return [
+      { label: "Overview", href: "#/" },
+      { label: "Estate", href: "#/estate" },
+      { label: route.version ? `Release v${route.version}` : "Release", href: releaseHash(route.releaseId, route.version) },
+      { label: "Scan report" },
     ];
   return CRUMBS[route.view] ?? [];
 }
@@ -52,7 +62,7 @@ export function App() {
 
   return (
     <div className="grid h-full grid-cols-[60px_1fr]">
-      <Rail active={route.view === "release" || route.view === "decide" ? "estate" : route.view} showAdmin={isAdmin || authOff} />
+      <Rail active={route.view === "release" || route.view === "decide" || route.view === "scan" ? "estate" : route.view} showAdmin={isAdmin || authOff} />
       <div className="flex min-w-0 flex-col">
         <TopBar
           crumbs={crumbsFor(route)}
@@ -67,6 +77,8 @@ export function App() {
             {route.view === "estate" && <Estate />}
             {route.view === "decide" && <Decide key={route.findingId} findingId={route.findingId} releaseId={route.releaseId} version={route.version} />}
             {route.view === "release" && <Release key={route.id} id={route.id} version={route.version} />}
+            {route.view === "sbom" && <Sbom />}
+            {route.view === "scan" && <Scan key={route.evidenceId} evidenceId={route.evidenceId} releaseId={route.releaseId} version={route.version} />}
             {route.view === "classic" && <Classic hash={route.hash} />}
           </Suspense>
         </main>

@@ -12,7 +12,14 @@ export function mockFetch(routes: Routes) {
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input.toString();
     const method = (init?.method ?? "GET").toUpperCase();
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    let body: unknown = init?.body;
+    if (typeof init?.body === "string") {
+      try {
+        body = JSON.parse(init.body);
+      } catch {
+        body = init.body;
+      }
+    }
     calls.push({ method, url, body });
     const r = routes[`${method} ${url}`];
     const [status, payload] = typeof r === "function" ? r(body) : (r ?? [404, { title: "not found" }]);

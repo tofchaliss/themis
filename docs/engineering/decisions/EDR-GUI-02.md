@@ -343,7 +343,10 @@ S6); SSO; translations; a mobile layout (EDR-GUI-01 non-goal); any change to the
   **Overview** and **Estate** screens.
 - **G2** Release posture, Vulnerabilities list with the releases dropdown (D13), finding drawer
   (read only), and the decision page (D14) with scope picker and AI panels.
-- **G3** SBOM manager + scan view.
+- **G3** SBOM manager + scan view. Built 2026-11-23 with no API change; the release page's
+  Scans card and "What the latest SBOM changed" came with it (they open the scan view and
+  describe uploads). The intake reason table is typed against the spec's `RejectReason`, so a
+  reason added there without a meaning here fails the type check instead of showing blank.
 - **G4** Compare, What's new, CVE page.
 - **G5** Reports, Watches, Feeds, Admin.
 - **G6** Switch the default to the new GUI; old GUI at `/old/`. **Done early, 2026-11-23**, on the

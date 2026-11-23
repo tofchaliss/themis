@@ -10,7 +10,7 @@ type Item = { id: string; label: string; hash: string; icon: ComponentType<{ cla
 export const RAIL: Item[] = [
   { id: "overview", label: "Overview", hash: "#/", icon: LayoutGrid, here: true },
   { id: "estate", label: "Estate", hash: "#/estate", icon: Network, here: true },
-  { id: "sbom", label: "SBOM manager", hash: "#/sbom", icon: Boxes, here: false },
+  { id: "sbom", label: "SBOM manager", hash: "#/sbom", icon: Boxes, here: true },
   { id: "compare", label: "Compare", hash: "#/compare", icon: GitCompareArrows, here: false },
   { id: "new", label: "What's new", hash: "#/new", icon: Sparkles, here: false },
   { id: "reports", label: "Reports", hash: "#/reports", icon: ChartColumn, here: false },

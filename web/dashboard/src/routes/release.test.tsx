@@ -218,6 +218,35 @@ describe("Release posture", () => {
     expect(await within(await screen.findByRole("dialog")).findByText(/governance node did not answer/i)).toBeInTheDocument();
   });
 
+  it("shows what the latest SBOM changed and the scans, each opening its report", async () => {
+    mockFetch({
+      ...base,
+      "GET /api/governance/releases/r1/upload-outcome": [
+        200,
+        { sbom_id: "sbom-123456789012345678", evaluated_at: "2026-11-21T08:00:00Z", new: 2, reappeared: 0, no_longer_present: 1, unchanged: 5, not_judged: 3, new_cves: ["CVE-2026-0001", "CVE-2026-0002"], has_baseline: true },
+      ],
+      "GET /api/evidence/evidence?release=r1": [
+        200,
+        [
+          { id: "e-sbom", kind: "sbom" },
+          { id: "e-scan", kind: "scanner-report", provenance_source: "grype", filed_at: "2026-11-20T10:00:00Z" },
+          { id: "e-bad", kind: "scanner-report" },
+        ],
+      ],
+      "GET /api/evidence/evidence/e-scan/document": [200, { kind: "scanner-report", document: '{"findings":[{},{}]}' }],
+      "GET /api/evidence/evidence/e-bad/document": [200, { kind: "scanner-report", document: "{}" }],
+    });
+    renderWithQuery(<Release id="r1" version="1.4.0" />);
+    expect(await screen.findByText("What the latest SBOM changed")).toBeInTheDocument();
+    expect(screen.getByText(/against the SBOM filed before it/)).toBeInTheDocument();
+    expect(screen.getByText("CVE-2026-0001, CVE-2026-0002")).toBeInTheDocument();
+    expect(screen.getByText(/3 not judged/)).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "grype" })).toHaveAttribute("href", "#/scan/e-scan?rel=r1&v=1.4.0");
+    expect(screen.getByRole("link", { name: "scanner" })).toBeInTheDocument();
+    expect(await screen.findByText("?")).toBeInTheDocument();
+    expect(await screen.findByText("2", { selector: "td" })).toBeInTheDocument();
+  });
+
   it("shows the posture error and the empty release", async () => {
     mockFetch({ "GET /api/governance/releases/r9/posture": [502] });
     renderWithQuery(<Release id="r9" version="9" />);

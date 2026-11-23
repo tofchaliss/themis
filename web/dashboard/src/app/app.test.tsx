@@ -60,7 +60,8 @@ describe("App shell", () => {
     mockFetch({ ...base, "GET /whoami": [200, { user: "operator", can_write: true }] });
     renderWithQuery(<App />);
     expect(screen.getByRole("link", { name: "Estate" })).toHaveAttribute("href", "#/estate");
-    expect(screen.getByRole("link", { name: /sbom manager \(opens the old gui\)/i })).toHaveAttribute("href", "/old/#/sbom");
+    expect(screen.getByRole("link", { name: "SBOM manager" })).toHaveAttribute("href", "#/sbom");
+    expect(screen.getByRole("link", { name: /compare \(opens the old gui\)/i })).toHaveAttribute("href", "/old/#/compare");
   });
 
   it("routes by hash and hands unbuilt screens to the classic GUI", async () => {
@@ -73,6 +74,17 @@ describe("App shell", () => {
     });
     expect(await screen.findByText("Filter by tag")).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Overview/Estate");
+    act(() => {
+      window.location.hash = "#/sbom";
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    expect(await screen.findByText("Upload evidence")).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Overview/SBOM manager");
+    act(() => {
+      window.location.hash = "#/scan/e1?rel=r1&v=1.0";
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    expect(await screen.findByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Overview/Estate/Release v1.0/Scan report");
     act(() => {
       window.location.hash = "#/watches";
       window.dispatchEvent(new HashChangeEvent("hashchange"));

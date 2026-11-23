@@ -6,6 +6,7 @@ import { asArray } from "./utils";
 import type { components as Registry } from "@/types/api/registry";
 import type { components as Knowledge } from "@/types/api/knowledge";
 import type { components as Governance } from "@/types/api/governance";
+import type { components as Evidence } from "@/types/api/evidence";
 
 export type Product = Registry["schemas"]["ProductView"];
 export type Project = Registry["schemas"]["ProjectView"];
@@ -118,3 +119,37 @@ export async function cveReleases(faultlineId: string): Promise<CveRelease[]> {
 /** Loaded only when a row's dropdown is opened. */
 export const useCveReleases = (faultlineId: string | undefined, open: boolean) =>
   useQuery({ queryKey: ["cve-releases", faultlineId], enabled: open && !!faultlineId, queryFn: () => cveReleases(faultlineId ?? "") });
+
+export type EvidenceSummary = Evidence["schemas"]["EvidenceSummary"];
+export type EvidenceFacts = Evidence["schemas"]["EvidenceFacts"];
+export type UploadOutcome = Governance["schemas"]["UploadOutcome"];
+
+/** Every document filed against a release (SBOMs, VEX, scanner reports). */
+export const useEvidence = (releaseId: string) =>
+  useQuery({
+    queryKey: ["evidence", releaseId],
+    enabled: !!releaseId,
+    queryFn: async () => asArray<EvidenceSummary>(await apiGet("evidence", `/evidence?release=${enc(releaseId)}`)),
+  });
+
+export const useEvidenceFacts = (id: string) =>
+  useQuery({ queryKey: ["evidence-facts", id], queryFn: () => apiGet<EvidenceFacts>("evidence", `/evidence/${enc(id)}`) });
+
+/** A scanner report as filed: the curated {findings:[…]} document. A document that is not one
+ * reads as null findings, never as an empty report. */
+export type ScanClaim = { cve?: string; severity?: string; cvss_score?: number; component?: { name?: string; version?: string }; fixed?: string[] };
+export async function scanReport(id: string): Promise<{ findings: ScanClaim[] | null } | null> {
+  const doc = await apiGet<{ kind: string; document: string }>("evidence", `/evidence/${enc(id)}/document`);
+  if (!doc) return null;
+  try {
+    const j = JSON.parse(doc.document) as { findings?: unknown };
+    return { findings: Array.isArray(j.findings) ? (j.findings as ScanClaim[]) : null };
+  } catch {
+    return { findings: null };
+  }
+}
+export const useScanReport = (id: string) => useQuery({ queryKey: ["scan-report", id], queryFn: () => scanReport(id), staleTime: Infinity });
+
+/** What the latest SBOM changed on a release; null before the first one (or on an older node). */
+export const useUploadOutcome = (releaseId: string) =>
+  useQuery({ queryKey: ["upload-outcome", releaseId], queryFn: () => apiGet<UploadOutcome>("governance", `/releases/${enc(releaseId)}/upload-outcome`) });

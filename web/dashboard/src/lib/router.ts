@@ -7,6 +7,8 @@ export type Route =
   | { view: "estate" }
   | { view: "release"; id: string; version: string }
   | { view: "decide"; findingId: string; releaseId: string; version: string }
+  | { view: "sbom" }
+  | { view: "scan"; evidenceId: string; releaseId: string; version: string }
   | { view: "classic"; hash: string };
 
 /** Screens built in this GUI so far. Everything else opens in the classic GUI (D11). */
@@ -15,6 +17,12 @@ export function parseHash(hash: string): Route {
   const path = h.split("?")[0] ?? "/";
   if (path === "/" || path === "") return { view: "overview" };
   if (path === "/estate") return { view: "estate" };
+  if (path === "/sbom") return { view: "sbom" };
+  const scan = /^\/scan\/([^/]+)$/.exec(path);
+  if (scan?.[1]) {
+    const q = new URLSearchParams(h.split("?")[1] ?? "");
+    return { view: "scan", evidenceId: decodeURIComponent(scan[1]), releaseId: q.get("rel") ?? "", version: q.get("v") ?? "" };
+  }
   const dec = /^\/decide\/([^/]+)$/.exec(path);
   if (dec?.[1]) {
     const q = new URLSearchParams(h.split("?")[1] ?? "");
@@ -55,4 +63,10 @@ export function releaseHash(id: string, version?: string): string {
 export function decideHash(findingId: string, releaseId: string, version?: string): string {
   const q = new URLSearchParams({ rel: releaseId, ...(version ? { v: version } : {}) });
   return `#/decide/${encodeURIComponent(findingId)}?${q.toString()}`;
+}
+
+/** One scanner report, joined to its release (today's shape: #/scan/<id>?rel=&v=). */
+export function scanHash(evidenceId: string, releaseId: string, version?: string): string {
+  const q = new URLSearchParams({ rel: releaseId, v: version ?? "" });
+  return `#/scan/${encodeURIComponent(evidenceId)}?${q.toString()}`;
 }

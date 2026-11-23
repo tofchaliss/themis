@@ -53,6 +53,12 @@ async function send(node: Node, path: string, init?: RequestInit): Promise<Respo
   return r;
 }
 
+/** The raw answer for a caller that reads a non-2xx body itself (the intake receipt, whose
+ * refusal is a closed reason plus a detail). 401 and 502 keep their shared meanings. */
+export function apiRaw(node: Node, path: string, init?: RequestInit): Promise<Response> {
+  return send(node, path, init);
+}
+
 /** GET a JSON document. 404 and 204 read as null ("nothing there"). */
 export async function apiGet<T>(node: Node, path: string): Promise<T | null> {
   const r = await send(node, path);
