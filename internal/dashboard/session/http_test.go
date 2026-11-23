@@ -480,3 +480,62 @@ func TestChangePassword_EndsOtherSessions(t *testing.T) {
 		t.Error("the other session could still write after the password change")
 	}
 }
+
+// EDR-GUI-02 D11: a signed-out request for a new-GUI page is remembered, and sign-in
+// returns there instead of to the classic GUI at "/". Anything else still lands on "/".
+func TestRequireSession_ReturnsToNewGUIAfterLogin(t *testing.T) {
+	h := newHandler(map[string]auth.Principal{"good-key": alice})
+	gated := h.RequireSession(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+
+	remembered := func(path string) *http.Cookie {
+		rec := httptest.NewRecorder()
+		gated.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		for _, c := range rec.Result().Cookies() {
+			if c.Name == session.ReturnCookieName {
+				return c
+			}
+		}
+		return nil
+	}
+	loginWith := func(c *http.Cookie) *httptest.ResponseRecorder {
+		form := url.Values{"key": {"good-key"}}
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if c != nil {
+			req.AddCookie(c)
+		}
+		rec := httptest.NewRecorder()
+		h.Login(rec, req)
+		return rec
+	}
+
+	c := remembered("/next/")
+	if c == nil || c.Value != "/next/" || !c.HttpOnly {
+		t.Fatalf("return cookie for /next/ = %+v, want HttpOnly /next/", c)
+	}
+	rec := loginWith(c)
+	if got := rec.Header().Get("Location"); got != "/next/" {
+		t.Fatalf("login after /next/ → %q, want /next/", got)
+	}
+	cleared := false
+	for _, rc := range rec.Result().Cookies() {
+		if rc.Name == session.ReturnCookieName && rc.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Error("return cookie not cleared after use")
+	}
+
+	for _, p := range []string{"/", "/index.html", "/nextx"} {
+		if c := remembered(p); c != nil {
+			t.Errorf("%s remembered as %q, want nothing", p, c.Value)
+		}
+	}
+	for _, v := range []string{"//evil.example/", "/next//evil.example", "https://evil.example/"} {
+		got := loginWith(&http.Cookie{Name: session.ReturnCookieName, Value: v}).Header().Get("Location")
+		if got != "/" {
+			t.Errorf("forged return %q → %q, want /", v, got)
+		}
+	}
+}

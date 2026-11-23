@@ -53,7 +53,35 @@ func (h Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.setSessionCookie(w, r, token)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, returnTarget(w, r), http.StatusSeeOther)
+}
+
+// ReturnCookieName remembers which page a signed-out operator asked for, so sign-in lands
+// there instead of always on "/" (EDR-GUI-02 D11: during the move-over a sign-in from
+// /next/ must return to /next/, not to the classic GUI). A cookie rather than a ?next=
+// query parameter so no link can carry a redirect target, and the value is re-checked on
+// the way out anyway.
+const ReturnCookieName = "themis_return"
+
+// returnable reports whether a requested path may be returned to after sign-in. Only the
+// new GUI's own pages qualify: a local absolute path under /next/, never "//host" or a
+// back-slash form a browser could read as another origin.
+func returnable(p string) bool {
+	return strings.HasPrefix(p, "/next/") && !strings.Contains(p, "//") && !strings.Contains(p, `\`)
+}
+
+// returnTarget reads and clears the remembered page; anything missing or not returnable
+// falls back to "/", exactly as before.
+func returnTarget(w http.ResponseWriter, r *http.Request) string {
+	c, err := r.Cookie(ReturnCookieName)
+	if err != nil {
+		return "/"
+	}
+	http.SetCookie(w, &http.Cookie{Name: ReturnCookieName, Value: "", Path: "/", HttpOnly: true, MaxAge: -1})
+	if !returnable(c.Value) {
+		return "/"
+	}
+	return c.Value
 }
 
 // setSessionCookie writes the one cookie the browser holds: a random token, never a
@@ -106,6 +134,13 @@ func (h Handler) Reverify(r *http.Request) (auth.Principal, bool) {
 func (h Handler) RequireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := h.Principal(r); !ok {
+			if r.Method == http.MethodGet && returnable(r.URL.Path) {
+				http.SetCookie(w, &http.Cookie{
+					Name: ReturnCookieName, Value: r.URL.Path, Path: "/", HttpOnly: true,
+					SameSite: http.SameSiteLaxMode, MaxAge: 600,
+					Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+				})
+			}
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
