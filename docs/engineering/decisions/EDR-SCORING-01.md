@@ -1047,6 +1047,28 @@ choice the model left to the build, or a gap still open.
 
 ---
 
+### 12.4 VM check (task 5.3, 2026-11-23): PASS
+
+On the test VM (Rocky and Alpine components, 1,058 Findings), after S1 to S5 were merged:
+
+1. First sweep after a restart of all nodes: 16 of 1,058 failed with "connection refused" on
+   Knowledge, because Knowledge was still starting. A failed read wrote nothing; the next run
+   assessed them. Follow-up (not needed for shadow): let the first sweep wait until Knowledge
+   answers.
+2. Knowledge recorded source ratings for the first time over several minutes after its restart, so
+   the second and third sweeps wrote revisions with cause `source_added` (and `component_added`).
+   Once no new rating arrived, the fourth sweep reported `changed 0`: a revision is written only
+   when an input changes (R-H2).
+3. Current state: 660 Findings scored, 360 `no_carrier`, 38 `no_open_occurrences`. Components:
+   5,004 RPM final; PyPI 71 final and 62 provisional; Maven 24 and Alpine 2 provisional.
+4. RPM sample (CVE-2023-47038, perl on Rocky 8.10): Base 7.0 from
+   `AV:L/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:H`, RL:O from the applicable fix, 6.7 temporal and
+   environmental, final; coverage 6 of 6 carriers, 31 scope packages shown as "scope, not counted".
+5. Alpine sample (musl 1.2.5-r3, Alpine 3.20): Base 8.1, RL:O gives 7.7, provisional with
+   `higher_class_unresolved`.
+6. GUI: the Finding drawer shows "How Themis got this score" with the shadow chip, coverage,
+   finality and per-component rows; priority and SLA unchanged.
+
 ## 13. Label audit (what the owner explicitly confirmed)
 
 "Accepted" below means the owner wrote accept, preserve, retain, or verified the item as addressed in a review.

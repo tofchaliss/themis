@@ -39,7 +39,7 @@ Every step waits for the owner's go and lands as its own PR.
 
 - [x] 5.1 Finding page: score panel (roll-up, coverage, finality, per-component provenance).
 - [x] 5.2 CVE page: source ratings by publication, linked duplicates as one row.
-- [ ] 5.3 VM check on a release with RPM and Alpine components.
+- [x] 5.3 VM check on a release with RPM and Alpine components (PASS 2026-11-23, EDR 12.4).
 
 ## Group 6 — S6 to S8 (later steps, owner's go each)
 
