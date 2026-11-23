@@ -26,6 +26,10 @@ Every step waits for the owner's go and lands as its own PR.
   (Governance `GET /faultlines/{faultlineId}/findings`; ticket, publication date and re-evaluate still open).
 - [ ] 2.3 Finding drawer read only (AI panels, score panel); decision page with scope picker,
   required rationale, unsaved-changes guard, and the severity warning dialog (D14).
+  Done 2026-11-23: read-only drawer (no AI or score panel yet) and the decision page (scope
+  picker with preview, required rationale, acceptance terms, waiting proposals, other
+  releases, unsaved-changes guard). Open: AI and score panels; the severity warning waits for
+  the governed vector change (EDR-SCORING-01 S6).
 - [ ] 2.4 VM check.
 
 ## Group 3 — G3 SBOM manager and scan view

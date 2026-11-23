@@ -1,7 +1,6 @@
-// The Finding drawer (EDR-GUI-02 G2): READ ONLY. Deciding moves to a full page (D14); until
-// that page is built here, "Decide" opens the release in the old GUI.
+// The Finding drawer (EDR-GUI-02 G2): READ ONLY. Deciding happens on the full decision page
+// (D14), which "Decide…" opens.
 import type { ReactNode } from "react";
-import { ArrowUpRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
@@ -9,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { BandBadge, SlaCell, StanceBadge, isCleared } from "@/components/finding-bits";
 import { ErrorPanel } from "@/components/states";
 import { useAssessment, type Component, type PostureEntry } from "@/lib/queries";
-import { classicHref, releaseHash } from "@/lib/router";
+import { classicHref, decideHash, releaseHash } from "@/lib/router";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -155,10 +154,7 @@ export function FindingDrawer({
                     </Row>
                   </dl>
                   <Button asChild className="mt-3">
-                    <a href={oldRelease} title="The decision page comes with the next step; today you decide in the old GUI">
-                      Decide in the old GUI
-                      <ArrowUpRight />
-                    </a>
+                    <a href={decideHash(entry.finding_id ?? "", releaseId, version)}>Decide…</a>
                   </Button>
                 </Section>
 

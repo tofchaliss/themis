@@ -2,13 +2,14 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { Rail } from "./rail";
 import { TopBar, type Crumb } from "./topbar";
 import { applyTheme, loadTheme, type ThemeId } from "@/lib/theme";
-import { classicHref, useRoute, type Route } from "@/lib/router";
+import { classicHref, releaseHash, useRoute, type Route } from "@/lib/router";
 import { useAdminStatus, useWhoAmI } from "@/lib/queries";
 import { Loading } from "@/components/states";
 
 // EDR-GUI-02 D8: one lazy chunk per screen; the first load carries the shell and the screen opened.
 const Overview = lazy(() => import("@/routes/overview").then((m) => ({ default: m.Overview })));
 const Estate = lazy(() => import("@/routes/estate").then((m) => ({ default: m.Estate })));
+const Decide = lazy(() => import("@/routes/decide").then((m) => ({ default: m.Decide })));
 const Release = lazy(() => import("@/routes/release").then((m) => ({ default: m.Release })));
 
 const CRUMBS: Record<string, Crumb[]> = {
@@ -19,6 +20,13 @@ const CRUMBS: Record<string, Crumb[]> = {
 function crumbsFor(route: Route): Crumb[] {
   if (route.view === "release")
     return [{ label: "Overview", href: "#/" }, { label: "Estate", href: "#/estate" }, { label: route.version ? `Release v${route.version}` : "Release" }];
+  if (route.view === "decide")
+    return [
+      { label: "Overview", href: "#/" },
+      { label: "Estate", href: "#/estate" },
+      ...(route.releaseId ? [{ label: route.version ? `Release v${route.version}` : "Release", href: releaseHash(route.releaseId, route.version) }] : []),
+      { label: "Decide" },
+    ];
   return CRUMBS[route.view] ?? [];
 }
 
@@ -44,7 +52,7 @@ export function App() {
 
   return (
     <div className="grid h-full grid-cols-[60px_1fr]">
-      <Rail active={route.view === "release" ? "estate" : route.view} showAdmin={isAdmin || authOff} />
+      <Rail active={route.view === "release" || route.view === "decide" ? "estate" : route.view} showAdmin={isAdmin || authOff} />
       <div className="flex min-w-0 flex-col">
         <TopBar
           crumbs={crumbsFor(route)}
@@ -57,6 +65,7 @@ export function App() {
           <Suspense fallback={<Loading what="screen" />}>
             {route.view === "overview" && <Overview />}
             {route.view === "estate" && <Estate />}
+            {route.view === "decide" && <Decide key={route.findingId} findingId={route.findingId} releaseId={route.releaseId} version={route.version} />}
             {route.view === "release" && <Release key={route.id} id={route.id} version={route.version} />}
             {route.view === "classic" && <Classic hash={route.hash} />}
           </Suspense>

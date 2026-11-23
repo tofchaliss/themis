@@ -180,7 +180,7 @@ describe("Release posture", () => {
     expect(within(dialog).getByText("rpm build carries the fix")).toBeInTheDocument();
     expect(within(dialog).getByText("applicable")).toBeInTheDocument();
     expect(within(dialog).getByText("AI says so")).toBeInTheDocument();
-    expect(within(dialog).getByRole("link", { name: /decide in the old gui/i })).toHaveAttribute("href", "/old/#/release/r1?v=1.4.0");
+    expect(within(dialog).getByRole("link", { name: "Decide…" })).toHaveAttribute("href", "#/decide/f-low?rel=r1&v=1.4.0");
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
