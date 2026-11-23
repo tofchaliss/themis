@@ -347,7 +347,8 @@ func TestFaultlineFindings(t *testing.T) {
 	proj := fakeProjection{
 		posture: []app.PostureEntry{
 			{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", HasPosition: true, Stance: domain.StanceNotAffected,
-				DecidedByKind: domain.ActorHuman, DecidedAt: at},
+				DecidedByKind: domain.ActorHuman, DecidedAt: at,
+				OriginalScore: ptrF(9.8), ExpertScore: ptrF(6.1), ExpertStatus: "provisional", ScoreState: "scored"},
 			{FindingID: "fnd-9", ReleaseID: "rel-1", FaultlineID: "fl-9"},
 		},
 		blast: []string{"rel-1"},
@@ -363,6 +364,12 @@ func TestFaultlineFindings(t *testing.T) {
 	}
 	if rows[0]["release_id"] != "rel-1" || rows[0]["decided_by_kind"] != "human" || rows[0]["decided_at"] != "2026-11-02T10:00:00Z" {
 		t.Errorf("row = %v", rows[0])
+	}
+	// The two severities of the CVE list, each with its rating (D13 amendment).
+	if rows[0]["original_score"] != 9.8 || rows[0]["original_severity"] != "critical" ||
+		rows[0]["expert_score"] != 6.1 || rows[0]["expert_severity"] != "medium" ||
+		rows[0]["expert_status"] != "provisional" || rows[0]["score_state"] != "scored" {
+		t.Errorf("scores = %v", rows[0])
 	}
 
 	bad := server(t, newRepo(), fakeProjection{err: errors.New("proj down")})
@@ -1069,3 +1076,5 @@ func TestDispositionStaleOnTheWire(t *testing.T) {
 		t.Fatalf("posture = %+v err=%v: %s", posture, err, body)
 	}
 }
+
+func ptrF(v float64) *float64 { return &v }

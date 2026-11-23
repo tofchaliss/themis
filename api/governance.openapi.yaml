@@ -1619,6 +1619,33 @@ components:
           type: string
           format: date-time
           description: When the current Position was established (absent when none).
+        original_score:
+          type: number
+          format: double
+          description: >-
+            The source's own CVSS Base score from the newest stored assessment (EDR-SCORING-01) -
+            the highest over the open carrier components, else over every current component.
+            Absent when this Finding has no assessment yet.
+        original_severity:
+          type: string
+          description: The CVSS qualitative rating of original_score (critical | high | medium | low | none).
+        expert_score:
+          type: number
+          format: double
+          description: >-
+            Themis's score after the assessment - the roll-up's highest Environmental score.
+            Present only when score_state is scored.
+        expert_severity:
+          type: string
+          description: The CVSS qualitative rating of expert_score.
+        expert_status:
+          type: string
+          description: final or provisional when expert_score is set (EDR-SCORING-01 D5).
+        score_state:
+          type: string
+          description: >-
+            The assessment roll-up state (scored | no_components | no_carrier | no_open_occurrences |
+            unavailable); absent when no assessment is stored.
         faultline_id:
           type: string
         cve:

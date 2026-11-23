@@ -14,7 +14,7 @@ describe("Overview", () => {
       "GET /api/knowledge/feeds": [200, { signals_stale: true, feeds: [{ status: "healthy" }, { status: "stale" }], degraded_feeds: ["alpine"] }],
     });
     renderWithQuery(<Overview />);
-    expect(await screen.findByRole("img", { name: "3 findings by exploitability band" })).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: /^3 findings by exploitability band/ })).toBeInTheDocument();
     expect(screen.getByText("1/2")).toBeInTheDocument();
     expect(screen.getByText("STALE")).toBeInTheDocument();
     expect(screen.getByText("a critical feed has gone quiet")).toBeInTheDocument();

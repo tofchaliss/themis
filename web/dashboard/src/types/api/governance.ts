@@ -958,6 +958,24 @@ export interface components {
              * @description When the current Position was established (absent when none).
              */
             decided_at?: string;
+            /**
+             * Format: double
+             * @description The source's own CVSS Base score from the newest stored assessment (EDR-SCORING-01) - the highest over the open carrier components, else over every current component. Absent when this Finding has no assessment yet.
+             */
+            original_score?: number;
+            /** @description The CVSS qualitative rating of original_score (critical | high | medium | low | none). */
+            original_severity?: string;
+            /**
+             * Format: double
+             * @description Themis's score after the assessment - the roll-up's highest Environmental score. Present only when score_state is scored.
+             */
+            expert_score?: number;
+            /** @description The CVSS qualitative rating of expert_score. */
+            expert_severity?: string;
+            /** @description final or provisional when expert_score is set (EDR-SCORING-01 D5). */
+            expert_status?: string;
+            /** @description The assessment roll-up state (scored | no_components | no_carrier | no_open_occurrences | unavailable); absent when no assessment is stored. */
+            score_state?: string;
             faultline_id?: string;
             cve?: string;
             stage?: string;

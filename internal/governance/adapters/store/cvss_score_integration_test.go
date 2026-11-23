@@ -85,3 +85,68 @@ func TestFindingIDsAfter(t *testing.T) {
 		t.Fatalf("page 2 %v", ids)
 	}
 }
+
+// TestPostureCarriesBothSeverities: the release posture reads the newest assessment — the
+// roll-up's score as the expert severity, the source Base score over the same open carriers as
+// the original — and a retired or superseded revision never counts (EDR-GUI-02 D13 amendment).
+func TestPostureCarriesBothSeverities(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	at := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
+
+	seed := func(id string, purls ...string) {
+		f := newFinding(t, id, "rel-s", "fl-"+id, "CVE-"+id)
+		for _, p := range purls {
+			if _, err := f.AbsorbComponent(domain.MatchedComponent{PURL: p, Name: p, Version: "1"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := st.Save(ctx, f, true, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed("a", "pkg:a@1", "pkg:b@1")
+	seed("c", "pkg:c@1")
+	seed("n") // no assessment at all
+
+	comp := func(purl string, open bool, base, env float64) app.ScoreRevision {
+		return app.ScoreRevision{PURL: purl, Cause: domain.CauseComponentAdded, Fingerprint: purl, RecordedAt: at,
+			Snapshot: domain.ComponentScore{PURL: purl, Eligible: true, Open: open, Status: domain.ScoreFinal, Scores: &domain.Scores{Base: base, Environmental: env}}}
+	}
+	expert := 5.5
+	// Finding a: an old revision of pkg:a said 9.9; the newest says 8.1 → original 8.1, expert 5.5.
+	if err := st.AppendScores(ctx, "a", []app.ScoreRevision{comp("pkg:a@1", true, 9.9, 9.9)}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendScores(ctx, "a", []app.ScoreRevision{comp("pkg:a@1", true, 8.1, 5.5), comp("pkg:b@1", true, 6.0, 4.0)},
+		&app.RollupRevision{Cause: domain.CauseComponentAdded, Fingerprint: "ra", RecordedAt: at,
+			Snapshot: domain.FindingScore{State: domain.RollupScored, Score: &expert, Status: domain.ScoreProvisional}}); err != nil {
+		t.Fatal(err)
+	}
+	// Finding c: its only carrier is cleared, so nothing is scored; the original falls back to it.
+	if err := st.AppendScores(ctx, "c", []app.ScoreRevision{comp("pkg:c@1", false, 7.3, 7.3)},
+		&app.RollupRevision{Cause: domain.CauseComponentAdded, Fingerprint: "rc", RecordedAt: at,
+			Snapshot: domain.FindingScore{State: domain.RollupNoOpenOccurrences}}); err != nil {
+		t.Fatal(err)
+	}
+
+	posture, err := st.ReleasePosture(ctx, "rel-s")
+	if err != nil || len(posture) != 3 {
+		t.Fatalf("posture = %+v err=%v", posture, err)
+	}
+	by := map[string]app.PostureEntry{}
+	for _, p := range posture {
+		by[string(p.FindingID)] = p
+	}
+	if a := by["a"]; a.OriginalScore == nil || *a.OriginalScore != 8.1 || a.ExpertScore == nil || *a.ExpertScore != 5.5 ||
+		a.ExpertStatus != domain.ScoreProvisional || a.ScoreState != domain.RollupScored {
+		t.Errorf("a = %+v", a)
+	}
+	if c := by["c"]; c.OriginalScore == nil || *c.OriginalScore != 7.3 || c.ExpertScore != nil || c.ScoreState != domain.RollupNoOpenOccurrences {
+		t.Errorf("c = %+v", c)
+	}
+	if n := by["n"]; n.OriginalScore != nil || n.ExpertScore != nil || n.ScoreState != "" {
+		t.Errorf("n = %+v", n)
+	}
+}

@@ -2,7 +2,17 @@
 // never rides on hue alone; the centre carries the total.
 import type { Slice } from "./bands";
 
-export function Donut({ slices, total }: { slices: Slice[]; total: number }) {
+export function Donut({
+  slices,
+  total,
+  label = "findings by exploitability band",
+  compact = false,
+}: {
+  slices: Slice[];
+  total: number;
+  label?: string;
+  compact?: boolean;
+}) {
   const R = 74;
   const r = 46;
   const c = 84;
@@ -19,8 +29,13 @@ export function Donut({ slices, total }: { slices: Slice[]; total: number }) {
     { a0: -Math.PI / 2, paths: [] },
   ).paths;
   return (
-    <div className="flex flex-wrap items-center gap-6">
-      <svg viewBox="0 0 168 168" className="size-40 shrink-0" role="img" aria-label={`${total} findings by exploitability band`}>
+    <div className={compact ? "flex items-center gap-3" : "flex flex-wrap items-center gap-6"}>
+      <svg
+        viewBox="0 0 168 168"
+        className={compact ? "size-20 shrink-0" : "size-40 shrink-0"}
+        role="img"
+        aria-label={`${total} ${label}: ${slices.map((s) => `${s.label} ${s.n}`).join(", ")}`}
+      >
         {arcs.map(({ d, s }) => (
           <path key={s.id} d={d} fill={s.color}>
             <title>{`${s.label}: ${s.n}`}</title>
@@ -33,11 +48,11 @@ export function Donut({ slices, total }: { slices: Slice[]; total: number }) {
           findings
         </text>
       </svg>
-      <ul className="flex min-w-[160px] flex-col gap-1.5">
+      <ul className={compact ? "flex min-w-[120px] flex-col gap-0.5 text-xs" : "flex min-w-[160px] flex-col gap-1.5"}>
         {slices.map((s) => (
           <li key={s.id} className="flex items-center justify-between gap-4">
             <span className="flex items-center gap-2">
-              <span className="size-2.5 rounded-full" style={{ background: s.color }} aria-hidden />
+              <span className={compact ? "size-2 rounded-full" : "size-2.5 rounded-full"} style={{ background: s.color }} aria-hidden />
               {s.label}
             </span>
             <span className="font-semibold tabular-nums">{s.n}</span>
