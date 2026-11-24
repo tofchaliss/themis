@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/themis-project/themis/internal/kernel/value"
@@ -60,7 +61,7 @@ type PSIRTResult struct {
 // Bounds of one alert read. The CVE.org lookups run only for rows NVD left without a score or
 // without affected names (a record NVD has not analysed yet), and at most this many per read.
 const (
-	PSIRTMaxCVEOrgLookups = 100
+	PSIRTMaxCVEOrgLookups = 200
 	psirtLookupWorkers    = 4
 	// PSIRTLookupBudget bounds the whole CVE.org pass: an unreachable CVE.org must cost one
 	// page view a few seconds, not a minute per row. A lookup cut off by it leaves its row as
@@ -70,6 +71,12 @@ const (
 	// SBOMs change on upload, minutes apart at most; one walk per read would be one Evidence
 	// round-trip per release on every page view.
 	PSIRTEstateTTL = 15 * time.Minute
+	// PSIRTCVEOrgTTL is how long one CVE.org answer is reused, a "nothing there" included. A
+	// fresh week holds more unanalysed records than one read may ask about (VM 2026-11-24:
+	// 1656 over the cap), so each read asks only about rows not yet answered and the list fills
+	// in over a few page views. A CNA rarely changes a record within hours; an error is never
+	// kept, so the next read asks again.
+	PSIRTCVEOrgTTL = 6 * time.Hour
 )
 
 // PSIRTService builds the PSIRT early alert (EDR-PSIRT-01 P2). It reads the live world list,
@@ -86,6 +93,17 @@ type PSIRTService struct {
 	mu       sync.Mutex
 	cachedAt time.Time
 	cached   []productComponents
+
+	orgMu   sync.Mutex
+	answers map[string]cveorgAnswer
+}
+
+// cveorgAnswer is what one CVE.org lookup said: its best stated score and the CNA's affected
+// entries ("vendor:product[:package]"); both empty when the record was not found.
+type cveorgAnswer struct {
+	at       time.Time
+	score    float64
+	affected []string
 }
 
 type productComponents struct {
@@ -116,7 +134,7 @@ func (s *PSIRTService) Alerts(ctx context.Context, days int, minSeverity string)
 		}
 	}
 	res := PSIRTResult{}
-	res.LookupsSkipped = s.fillFromCVEOrg(ctx, alerts)
+	res.LookupsSkipped = s.fillFromCVEOrg(ctx, alerts, floor)
 
 	products, estateErr := s.products(ctx)
 	res.EstateUnavailable = estateErr != nil
@@ -126,9 +144,11 @@ func (s *PSIRTService) Alerts(ctx context.Context, days int, minSeverity string)
 		if severityRankOf(a.Score) < floor {
 			continue
 		}
-		names := domain.AffectedNames(a.Affected, nil)
+		// The bare names (no vendor) still match whole component names; the vendor:product
+		// pairs also allow a path's last segment (domain.MatchComponents).
+		refs := domain.AffectedRefs(append(append([]string(nil), a.Affected...), a.AffectedRefs...))
 		for _, p := range products {
-			for _, m := range domain.MatchComponents(names, p.comps) {
+			for _, m := range domain.MatchComponents(refs, p.comps) {
 				a.Matches = append(a.Matches, PSIRTMatch{ProductID: p.ref.ID, ProductName: p.ref.Name, Component: m.Component, MatchedOn: m.MatchedOn})
 			}
 		}
@@ -147,23 +167,41 @@ func (s *PSIRTService) Alerts(ctx context.Context, days int, minSeverity string)
 	return res, nil
 }
 
-// fillFromCVEOrg asks CVE.org about the rows NVD left without a score or without affected
-// names: the CNA's record usually names both from day one, NVD's analysis can take days. A
-// higher CVE.org score replaces NVD's (owner A). A failed lookup leaves the row as NVD gave it.
-// It returns how many rows needed a lookup beyond the cap.
-func (s *PSIRTService) fillFromCVEOrg(ctx context.Context, alerts []PSIRTAlert) int {
+// fillFromCVEOrg asks CVE.org about the rows NVD left without a score, or at or above the
+// floor without affected names: the CNA's record usually names both from day one, NVD's
+// analysis can take days. A row NVD scored below the floor is not asked (it is not an alert,
+// and its names would show nowhere). A higher CVE.org score replaces NVD's (owner A). A failed
+// lookup leaves the row as NVD gave it. Answers are reused for PSIRTCVEOrgTTL. It returns how
+// many rows needed a lookup and did not get one: over the cap, or cut off by the budget.
+func (s *PSIRTService) fillFromCVEOrg(ctx context.Context, alerts []PSIRTAlert, floor int) int {
 	if s.cveorg == nil {
 		return 0
 	}
-	// Most of a fresh week is still unanalysed at NVD, so the cap bites. A row that is already
-	// critical or high and only lacks its product names goes first (it is an alert either way,
-	// and the names decide which team it reaches), then the unscored rows.
-	var todo []int
-	for i, a := range alerts {
-		if a.Score == 0 || len(a.Affected) == 0 {
-			todo = append(todo, i)
+	now := s.clock.Now()
+	s.orgMu.Lock()
+	if s.answers == nil {
+		s.answers = map[string]cveorgAnswer{}
+	}
+	for id, a := range s.answers {
+		if now.Sub(a.at) >= PSIRTCVEOrgTTL {
+			delete(s.answers, id)
 		}
 	}
+	// A row that is already critical or high and only lacks its product names goes first (it
+	// is an alert either way, and the names decide which team it reaches), then the unscored.
+	var todo []int
+	for i := range alerts {
+		a := &alerts[i]
+		if a.Score > 0 && (len(a.Affected) > 0 || severityRankOf(a.Score) < floor) {
+			continue
+		}
+		if ans, ok := s.answers[a.CVE]; ok {
+			applyCVEOrg(a, ans)
+			continue
+		}
+		todo = append(todo, i)
+	}
+	s.orgMu.Unlock()
 	sort.SliceStable(todo, func(x, y int) bool { return alerts[todo[x]].Score > alerts[todo[y]].Score })
 	skipped := 0
 	if len(todo) > PSIRTMaxCVEOrgLookups {
@@ -174,12 +212,19 @@ func (s *PSIRTService) fillFromCVEOrg(ctx context.Context, alerts []PSIRTAlert) 
 	defer cancel()
 	jobs := make(chan int)
 	var wg sync.WaitGroup
+	var late atomic.Int64
 	for w := 0; w < psirtLookupWorkers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				s.fillOne(ctx, &alerts[i])
+				if ctx.Err() != nil {
+					late.Add(1)
+					continue
+				}
+				if !s.fillOne(ctx, &alerts[i], now) {
+					late.Add(1)
+				}
 			}
 		}()
 	}
@@ -188,28 +233,43 @@ func (s *PSIRTService) fillFromCVEOrg(ctx context.Context, alerts []PSIRTAlert) 
 	}
 	close(jobs)
 	wg.Wait()
-	return skipped
+	return skipped + int(late.Load())
 }
 
-func (s *PSIRTService) fillOne(ctx context.Context, a *PSIRTAlert) {
+// fillOne reports false only when the budget cut the lookup off, so the row counts as skipped.
+func (s *PSIRTService) fillOne(ctx context.Context, a *PSIRTAlert, now time.Time) bool {
 	id, err := value.NewCVEID(a.CVE)
 	if err != nil {
-		return
+		return true
 	}
 	obs, found, err := s.cveorg.FetchRecord(ctx, id)
-	if err != nil || !found {
-		return
+	if err != nil {
+		return ctx.Err() == nil
 	}
-	best := 0.0
-	for _, r := range obs.Ratings {
-		if r.HasStatedScore && r.StatedScore > best {
-			best = r.StatedScore
+	ans := cveorgAnswer{at: now}
+	if found {
+		for _, r := range obs.Ratings {
+			if r.HasStatedScore && r.StatedScore > ans.score {
+				ans.score = r.StatedScore
+			}
 		}
+		ans.affected = obs.Applicability
 	}
-	if best > a.Score {
-		a.Score, a.Severity, a.ScoreSource = best, string(value.SeverityFromCVSSScore(best)), "cve.org"
+	s.orgMu.Lock()
+	s.answers[a.CVE] = ans
+	s.orgMu.Unlock()
+	applyCVEOrg(a, ans)
+	return true
+}
+
+func applyCVEOrg(a *PSIRTAlert, ans cveorgAnswer) {
+	if ans.score > a.Score {
+		a.Score, a.Severity, a.ScoreSource = ans.score, string(value.SeverityFromCVSSScore(ans.score)), "cve.org"
 	}
-	a.Affected = domain.AffectedNames(a.Affected, obs.Applicability)
+	if len(ans.affected) > 0 {
+		a.Affected = domain.AffectedNames(a.Affected, ans.affected)
+		a.AffectedRefs = append(append([]string(nil), a.AffectedRefs...), ans.affected...)
+	}
 }
 
 // products returns every product with the components of all its releases' latest SBOMs,

@@ -87,7 +87,7 @@ function Components({ a, product, estateUnavailable }: { a: PSIRTAlert; product:
 
 function Table({ rows, product, estateUnavailable }: { rows: PSIRTAlert[]; product: string; estateUnavailable: boolean }) {
   return (
-    <Paged rows={rows}>
+    <Paged rows={rows} size={25}>
       {(page) => (
         <table className="w-full text-left text-[13px]">
           <thead className="text-xs text-ink-2">
@@ -174,8 +174,7 @@ export function PSIRTCard({ feeds, feedsError }: { feeds: FeedHealth | null | un
           <Badge title="read live from NVD and CVE.org when the page opens; nothing is stored">live, not stored</Badge>
         </CardTitle>
         <CardDescription className="max-w-prose">
-          New CVEs the world published, by their original (source) score, and the product components they may hit by name. This comes before the
-          Themis engine: the team assesses each alert, and a gather or a scan brings it into Themis.
+          New CVEs in the world by original score, and the components they may hit by name. Before the Themis engine: the team assesses each one.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

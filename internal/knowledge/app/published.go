@@ -39,6 +39,10 @@ type PublishedCVE struct {
 	Modified   time.Time
 	Weaknesses []string
 	Affected   []string
+	// AffectedRefs are the same names as the source pairs them, "vendor:product" (NVD's CPE
+	// vendor and product). The alert needs the vendor to match a path-shaped component on its
+	// last segment (domain.MatchComponents); the wire keeps showing Affected.
+	AffectedRefs []string
 }
 
 // PublishedSource lists CVEs published since a moment, newest first or not — the service sorts.

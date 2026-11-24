@@ -55,6 +55,48 @@ func AffectedNames(cpeProducts, cnaAffected []string) []string {
 	return out
 }
 
+// AffectedRef is one thing a CVE says it affects: the product (or package) name and, when the
+// source states it, the vendor that ships it. The vendor is what keeps a Go module's last path
+// segment honest: "runtime" alone names a hundred products, "go-openapi:runtime" names one.
+type AffectedRef struct {
+	Vendor  string
+	Product string
+}
+
+// AffectedRefs reads entries in the source's own shape, "vendor:product[:package]" (an NVD CPE
+// vendor and product, a CNA's CVE.org `affected` entry) or a bare "product", into refs: one per
+// product or package, with its vendor. Names are normalized; short names and "n/a" are dropped,
+// and an "n/a" vendor reads as none. The result is distinct and sorted.
+func AffectedRefs(entries []string) []AffectedRef {
+	seen := map[AffectedRef]struct{}{}
+	for _, e := range entries {
+		parts := strings.Split(e, ":")
+		vendor, products := "", parts
+		if len(parts) > 1 {
+			vendor, products = NormalizeProductName(parts[0]), parts[1:]
+			if vendor == "n/a" {
+				vendor = ""
+			}
+		}
+		for _, p := range products {
+			if n := NormalizeProductName(p); len(n) >= minMatchNameLen && n != "n/a" {
+				seen[AffectedRef{Vendor: vendor, Product: n}] = struct{}{}
+			}
+		}
+	}
+	out := make([]AffectedRef, 0, len(seen))
+	for r := range seen {
+		out = append(out, r)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Product != out[j].Product {
+			return out[i].Product < out[j].Product
+		}
+		return out[i].Vendor < out[j].Vendor
+	})
+	return out
+}
+
 // ComponentRef is one component of a product as the match sees it: its name and, for a
 // distro package, the source package it was built from ("openssl-libs" from "openssl").
 type ComponentRef struct {
@@ -68,28 +110,58 @@ type NameMatch struct {
 	MatchedOn string
 }
 
-// MatchComponents returns the components whose name, source package, or last path segment
-// (a Go module or scoped npm name: "golang.org/x/net" -> "net") equals an affected name after
-// normalization. One row per component, sorted by component name; the first affected name in
-// sorted order is the one reported.
-func MatchComponents(affected []string, comps []ComponentRef) []NameMatch {
-	if len(affected) == 0 || len(comps) == 0 {
+// MatchComponents returns the components a CVE may hit. A component matches when its name or
+// its source package equals an affected product after normalization. A path-shaped name (a Go
+// module, a scoped npm package) also matches on its LAST segment, but only when the ref's
+// vendor is one of its other segments ("github.com/go-openapi/runtime" matches
+// "go-openapi:runtime", never a bare or another vendor's "runtime"; a host segment reads
+// without its domain, so "golang.org" fits the vendor "golang"). Measured on the VM
+// 2026-11-24: the last segment alone matched an unrelated vendor's "runtime" at CVSS 10. One row
+// per component, sorted by component name; the first match in sorted order is the one reported.
+func MatchComponents(refs []AffectedRef, comps []ComponentRef) []NameMatch {
+	if len(refs) == 0 || len(comps) == 0 {
 		return nil
 	}
-	want := map[string]struct{}{}
-	for _, a := range affected {
-		if n := NormalizeProductName(a); len(n) >= minMatchNameLen {
-			want[n] = struct{}{}
+	whole := map[string]struct{}{}
+	byLast := map[string][]string{} // product -> vendors that ship it
+	for _, r := range refs {
+		p := NormalizeProductName(r.Product)
+		if len(p) < minMatchNameLen {
+			continue
+		}
+		whole[p] = struct{}{}
+		if v := NormalizeProductName(r.Vendor); v != "" {
+			byLast[p] = append(byLast[p], v)
 		}
 	}
 	found := map[string]string{}
+	keep := func(comp, on string) {
+		if prev, seen := found[comp]; !seen || on < prev {
+			found[comp] = on
+		}
+	}
 	for _, c := range comps {
-		for _, cand := range componentNames(c) {
-			if _, ok := want[cand]; !ok {
-				continue
+		for _, cand := range []string{NormalizeProductName(c.Name), NormalizeProductName(c.Source)} {
+			if _, ok := whole[cand]; ok {
+				keep(c.Name, cand)
 			}
-			if prev, seen := found[c.Name]; !seen || cand < prev {
-				found[c.Name] = cand
+		}
+		segs := strings.Split(c.Name, "/")
+		if len(segs) < 2 {
+			continue
+		}
+		last := NormalizeProductName(segs[len(segs)-1])
+		others := map[string]struct{}{}
+		for _, s := range segs[:len(segs)-1] {
+			n := NormalizeProductName(s)
+			others[n] = struct{}{}
+			if i := strings.Index(n, "."); i > 0 {
+				others[n[:i]] = struct{}{}
+			}
+		}
+		for _, v := range byLast[last] {
+			if _, ok := others[v]; ok {
+				keep(c.Name, v+":"+last)
 			}
 		}
 	}
@@ -99,12 +171,4 @@ func MatchComponents(affected []string, comps []ComponentRef) []NameMatch {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Component < out[j].Component })
 	return out
-}
-
-func componentNames(c ComponentRef) []string {
-	names := []string{NormalizeProductName(c.Name), NormalizeProductName(c.Source)}
-	if i := strings.LastIndex(c.Name, "/"); i >= 0 {
-		names = append(names, NormalizeProductName(c.Name[i+1:]))
-	}
-	return names
 }

@@ -359,7 +359,8 @@ three angles, and two of them proposed fixes that would not have worked.
   Newly published critical/high CVEs in the world (original source score, no Themis score),
   tied to the products whose components they may hit, as the first bucket before the Themis
   engine. Design in EDR-PSIRT-01 revision 2 (PROPOSED); Q1 settled as (a) name match. P1
-  (#242), P2 (#243) merged; P3 (the Overview card) built; P4 VM check open.
+  (#242), P2 (#243), P3 (#244) merged; P4 VM check run 2026-11-24 (one false path match and
+  78% unnamed rows, both fixed in the follow-up); the GUI check of the card is still open.
 
 - [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
   feature). The owner's reference table shows per-release assessment-type markers (five status
