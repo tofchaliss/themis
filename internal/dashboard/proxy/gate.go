@@ -60,12 +60,24 @@ var statelessPosts = map[string]bool{
 	"/api/communication/previews":                                 true,
 }
 
-// isAdminOnly reports the writes only an ADMIN-scope operator may make through the proxy. The
-// proxy forwards with the admin node key (D4), so a node's own admin-only check never sees the
-// operator; the rule must hold here too. A project rename (EDR-KERNEL-01 D5) is one: renaming
-// is an estate decision, not something a product-scoped operator does.
-func isAdminOnly(r *http.Request) bool {
-	return r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/registry/projects/")
+// adminWrites are mutation route prefixes that only an admin operator may use, where the node's
+// own rule is admin-only. The node cannot enforce it for the GUI: it sees the injected node
+// key, never the operator's. The PSIRT bulletin register is admin-only (EDR-PSIRT-01 R2).
+var adminWrites = []string{"/api/knowledge/psirt/bulletins"}
+
+// isAdminWrite also covers a project rename (EDR-KERNEL-01 D5): PATCH on a Registry project.
+// It is matched by METHOD as well as path, because a product-scoped operator may still PUT
+// that project's tags.
+func isAdminWrite(r *http.Request) bool {
+	if r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/registry/projects/") {
+		return true
+	}
+	for _, prefix := range adminWrites {
+		if r.URL.Path == prefix || strings.HasPrefix(r.URL.Path, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // isRead classifies a request for D11: read methods, plus the stateless POSTs.
@@ -97,8 +109,8 @@ func (g Gate) Wrap(next http.Handler) http.Handler {
 			writeProblem(w, http.StatusForbidden, "read-only operator", "this operation records a decision and requires a write-capable key")
 			return
 		}
-		if isAdminOnly(r) && !p.IsAdmin() {
-			writeProblem(w, http.StatusForbidden, "admin scope required", "renaming a project is restricted to admin-scope operators")
+		if isAdminWrite(r) && !p.IsAdmin() {
+			writeProblem(w, http.StatusForbidden, "admin only", "this operation requires the "+auth.ScopeAdmin+" scope")
 			return
 		}
 		if !documentPosts[r.URL.Path] && !g.identityMatches(w, r, p) {

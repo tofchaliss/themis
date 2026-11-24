@@ -90,6 +90,12 @@ export async function apiPost<T>(node: Node, path: string, body?: unknown): Prom
   return { status: r.status, data: text ? (JSON.parse(text) as T) : null };
 }
 
+/** DELETE. A non-2xx is an ApiError carrying the node's problem detail. */
+export async function apiDelete(node: Node, path: string): Promise<void> {
+  const r = await send(node, path, { method: "DELETE" });
+  if (!r.ok) throw new ApiError(r.status, await problemDetail(r));
+}
+
 /** The dashboard's own routes (not a node): /whoami and the admin status. */
 export type WhoAmI = { user: string; scopes?: string[]; can_write: boolean };
 export type AdminStatus = { auth_enabled: boolean; is_default_password?: boolean } | { forbidden: true } | null;
