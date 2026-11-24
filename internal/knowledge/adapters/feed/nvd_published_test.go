@@ -53,9 +53,9 @@ func TestNVDClient_PublishedSince(t *testing.T) {
 	defer srv.Close()
 
 	c := NewNVDClient(srv.URL, "", srv.Client())
-	rows, err := c.PublishedSince(context.Background(), time.Now().Add(-7*24*time.Hour))
-	if err != nil {
-		t.Fatalf("PublishedSince: %v", err)
+	rows, older, err := c.PublishedSince(context.Background(), time.Now().Add(-7*24*time.Hour))
+	if err != nil || older != 0 {
+		t.Fatalf("PublishedSince: %v, older not read %d", err, older)
 	}
 	if len(rows) != 2 {
 		t.Fatalf("rows = %+v, want the two live CVEs (the rejected one dropped)", rows)
@@ -92,13 +92,42 @@ func TestNVDClient_PublishedSince(t *testing.T) {
 
 	// A zero `since` and one older than NVD's maximum span are both bounded to the maximum.
 	queries = nil
-	if _, err := c.PublishedSince(context.Background(), time.Time{}); err != nil || len(queries) == 0 {
+	if _, _, err := c.PublishedSince(context.Background(), time.Time{}); err != nil || len(queries) == 0 {
 		t.Fatalf("zero since: %v / %d queries", err, len(queries))
 	}
 	// A failing server surfaces.
 	srv.Close()
-	if _, err := c.PublishedSince(context.Background(), time.Now()); err == nil {
+	if _, _, err := c.PublishedSince(context.Background(), time.Now()); err == nil {
 		t.Error("an unreachable NVD must surface, not read as nothing published")
+	}
+}
+
+// EDR-PSIRT-01 P4: a window larger than the page budget is read from its NEWEST end. The oldest
+// page is dropped, the read jumps to the last nvdMaxPages-1 pages, and the skipped oldest CVEs
+// are counted.
+func TestNVDClient_PublishedSinceKeepsTheNewest(t *testing.T) {
+	const total = nvdPublishedPageSize*nvdMaxPages + 450
+	var starts []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := r.URL.Query().Get("startIndex")
+		starts = append(starts, start)
+		var n int
+		_, _ = fmt.Sscanf(start, "%d", &n)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"totalResults":%d,"vulnerabilities":[{"cve":{"id":"CVE-2026-%d","published":"2026-11-20T08:00:00.000"}}]}`, total, n)
+	}))
+	defer srv.Close()
+	c := NewNVDClient(srv.URL, "", srv.Client())
+	rows, older, err := c.PublishedSince(context.Background(), time.Now().Add(-30*24*time.Hour))
+	wantOlder := total - nvdPublishedPageSize*(nvdMaxPages-1)
+	if err != nil || older != wantOlder {
+		t.Fatalf("older = %d (%v), want %d", older, err, wantOlder)
+	}
+	if len(starts) < 2 || starts[0] != "0" || starts[1] != fmt.Sprint(wantOlder) {
+		t.Errorf("starts = %v, want 0 then the newest pages from %d", starts, wantOlder)
+	}
+	if len(rows) == 0 || rows[0].CVE != fmt.Sprintf("CVE-2026-%d", wantOlder) {
+		t.Errorf("the oldest page must be dropped: %+v", rows)
 	}
 }
 

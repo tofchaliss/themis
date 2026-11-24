@@ -102,6 +102,7 @@ func (h *Handler) GetPSIRTAlerts(w http.ResponseWriter, r *http.Request, params 
 		Alerts:            make([]gen.PSIRTAlert, 0, len(res.Alerts)),
 		EstateUnavailable: res.EstateUnavailable,
 		LookupsSkipped:    res.LookupsSkipped,
+		OlderNotRead:      res.OlderNotRead,
 		IssueTypeTable:    domain.IssueTypeTableVersion,
 	}
 	for _, a := range res.Alerts {

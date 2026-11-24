@@ -83,6 +83,15 @@ func TestMatchComponents(t *testing.T) {
 	if domain.MatchComponents(nil, comps) != nil || domain.MatchComponents(refs("openssl"), nil) != nil {
 		t.Error("an empty side matches nothing")
 	}
+	// A leading "lib" is not part of the spelling (VM 2026-11-24: "libexpat" vs "expat"); the
+	// source's name is the one reported, and "libc" keeps its prefix.
+	lib := domain.MatchComponents(refs("libexpat", "libc"), []domain.ComponentRef{{Name: "expat-devel", Source: "expat"}, {Name: "c"}, {Name: "libcurl"}})
+	if fmt.Sprint(lib) != "[{expat-devel libexpat}]" {
+		t.Errorf("lib prefix = %v", lib)
+	}
+	if got := domain.MatchComponents(refs("zlib"), []domain.ComponentRef{{Name: "libzlib"}}); fmt.Sprint(got) != "[{libzlib zlib}]" {
+		t.Errorf("lib prefix on the component side = %v", got)
+	}
 	if got := domain.MatchComponents([]domain.AffectedRef{{Product: "ab"}}, comps); len(got) != 0 {
 		t.Errorf("a short ref = %v", got)
 	}

@@ -26,7 +26,7 @@ const hit = {
       product_id: "p2",
       product_name: "other-product",
       component: "libexample-devel",
-      matched_on: "libexample",
+      matched_on: "themis",
     },
   ],
   carded: true,
@@ -98,6 +98,7 @@ describe("PSIRTCard", () => {
     expect(screen.getByText("Memory safety")).toBeInTheDocument();
     expect(screen.getByText("CWE-787")).toBeInTheDocument();
     expect(screen.getByText("libexample")).toBeInTheDocument();
+    expect(screen.getByText("Themis")).toBeInTheDocument();
     expect(screen.getByText(/^updated /)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "in Themis" })).toHaveAttribute("href", "#/cve/CVE-2026-1001");
     expect(screen.getByText("Sources: all current.")).toBeInTheDocument();
@@ -209,6 +210,7 @@ describe("PSIRTCard", () => {
           alerts: [worldOnly],
           estate_unavailable: true,
           lookups_skipped: 3,
+          older_not_read: 7,
           issue_type_table: "1",
         },
       ],
@@ -217,6 +219,7 @@ describe("PSIRTCard", () => {
     expect(await screen.findByText("Products could not be checked")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("The product inventory could not be read");
     expect(screen.getByText(/3 new records were not checked at CVE.org/)).toBeInTheDocument();
+    expect(screen.getByText(/7 older CVEs in this window were not read/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /All world/ }));
     expect(screen.getByText("inventory not read")).toBeInTheDocument();
   });

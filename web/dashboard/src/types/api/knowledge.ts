@@ -252,6 +252,8 @@ export interface components {
             estate_unavailable: boolean;
             /** @description Rows that needed a CVE.org lookup (NVD had no score or no affected names) beyond the per-read cap; those rows are shown as NVD gave them. */
             lookups_skipped: number;
+            /** @description The oldest CVEs of the window that were not read, because the window holds more than the read's page budget. The read keeps the newest, which an alert is about. */
+            older_not_read: number;
             /** @description The version of the CWE-to-issue-type table behind every issue_type. */
             issue_type_table: string;
         };
@@ -285,7 +287,7 @@ export interface components {
             product_id: string;
             product_name: string;
             component: string;
-            /** @description The affected name that matched the component. */
+            /** @description What tied the CVE to the component: "themis" when the Themis engine already filed it against a release of the product (exact, version-aware); otherwise the affected name that matched ("vendor:product" for a match on a path's last segment). */
             matched_on: string;
         };
         RecentFaultline: {

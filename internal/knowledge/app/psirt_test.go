@@ -14,13 +14,25 @@ import (
 )
 
 type psirtWorld struct {
-	rows []app.PublishedCVE
-	err  error
+	rows  []app.PublishedCVE
+	older int
+	err   error
 }
 
-func (w *psirtWorld) LatestPublished(context.Context, int) ([]app.PublishedCVE, error) {
+func (w *psirtWorld) LatestPublished(context.Context, int) ([]app.PublishedCVE, int, error) {
 	out := append([]app.PublishedCVE(nil), w.rows...)
-	return out, w.err
+	return out, w.older, w.err
+}
+
+type psirtEngine struct {
+	m   map[string][]app.EngineMatch
+	err error
+	got []string
+}
+
+func (e *psirtEngine) MatchesByCVE(_ context.Context, cves []string) (map[string][]app.EngineMatch, error) {
+	e.got = append(e.got, cves...)
+	return e.m, e.err
 }
 
 type psirtEstate struct {
@@ -299,5 +311,54 @@ func TestPSIRT_TieOrder(t *testing.T) {
 	}
 	if m := res.Alerts[0].Matches; len(m) != 2 || m[0].ProductID != "p8" || m[1].ProductID != "p9" {
 		t.Errorf("same-name products = %+v", m)
+	}
+}
+
+// EDR-PSIRT-01 P4: a CVE Themis already filed shows the products its own correlation found,
+// marked "themis" and listed first; a name match for the same component is not repeated; a
+// release outside the estate walk is left out; only carded rows are asked about; the source's
+// "older not read" count is passed on.
+func TestPSIRT_EngineMatchesForCardedRows(t *testing.T) {
+	now := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
+	world := &psirtWorld{older: 42, rows: []app.PublishedCVE{
+		{CVE: "CVE-2026-30", Score: 8.2, Published: now, Carded: true, Affected: []string{"libxml2", "openssl"}},
+		{CVE: "CVE-2026-31", Score: 7.5, Published: now, Carded: true},
+		{CVE: "CVE-2026-32", Score: 7.5, Published: now, Affected: []string{"openssl"}},
+		{CVE: "CVE-2026-33", Score: 4.0, Published: now, Carded: true},
+	}}
+	engine := &psirtEngine{m: map[string][]app.EngineMatch{
+		"CVE-2026-30": {{ReleaseID: "r2", Component: "libxml2"}, {ReleaseID: "r1", Component: "libxml2"}, {ReleaseID: "r3", Component: "libxml2"}, {ReleaseID: "r1", Component: "libxml2-utils"}, {ReleaseID: "gone", Component: "x"}},
+		"CVE-2026-31": {{ReleaseID: "gone", Component: "x"}},
+	}}
+	estate, sboms, inv := psirtEstateFixture()
+	svc := app.NewPSIRTService(world, estate, sboms, inv, nil, &movingClock{now: now}).WithEngine(engine)
+	res, err := svc.Alerts(context.Background(), 7, "high")
+	if err != nil || res.OlderNotRead != 42 || res.EstateUnavailable {
+		t.Fatalf("res = %+v, %v", res, err)
+	}
+	if fmt.Sprint(engine.got) != "[CVE-2026-30 CVE-2026-31]" {
+		t.Errorf("asked about %v, want the carded rows at or above the floor", engine.got)
+	}
+	by := map[string][]app.PSIRTMatch{}
+	for _, a := range res.Alerts {
+		by[a.CVE] = a.Matches
+	}
+	if got := fmt.Sprintf("%+v", by["CVE-2026-30"]); got != "[{ProductID:p1 ProductName:product-a Component:libxml2 MatchedOn:themis} {ProductID:p1 ProductName:product-a Component:libxml2-utils MatchedOn:themis} {ProductID:p2 ProductName:product-b Component:libxml2 MatchedOn:themis} {ProductID:p1 ProductName:product-a Component:openssl-libs MatchedOn:openssl}]" {
+		t.Errorf("engine matches = %s", got)
+	}
+	if len(by["CVE-2026-31"]) != 0 || len(by["CVE-2026-32"]) != 1 {
+		t.Errorf("a release gone from the estate adds nothing; an uncarded row keeps its name match: %+v", by)
+	}
+
+	// An engine read that fails says the estate view is incomplete, never "no product hit".
+	failing := app.NewPSIRTService(world, estate, sboms, inv, nil, &movingClock{now: now}).WithEngine(&psirtEngine{err: errors.New("db down")})
+	if res, err := failing.Alerts(context.Background(), 7, "high"); err != nil || !res.EstateUnavailable {
+		t.Errorf("engine down: %+v, %v", res, err)
+	}
+	// Without an estate there is no product to name, so the engine is not asked.
+	unwired := &psirtEngine{}
+	_, _ = app.NewPSIRTService(world, nil, sboms, inv, nil, &movingClock{now: now}).WithEngine(unwired).Alerts(context.Background(), 7, "high")
+	if len(unwired.got) != 0 {
+		t.Errorf("asked without an estate: %v", unwired.got)
 	}
 }

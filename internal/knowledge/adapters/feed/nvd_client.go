@@ -567,13 +567,19 @@ const nvdPublishedPageSize = 200
 // is the watch's; a withdrawn CVE (vulnStatus Rejected) is left out, since there is nothing to
 // gather. Unscored CVEs ARE returned — a fresh CVE often has no score yet, and the panel is
 // about what is new, not what is graded.
-func (c *NVDClient) PublishedSince(ctx context.Context, since time.Time) ([]app.PublishedCVE, error) {
+//
+// NVD returns a window OLDEST first, and the page budget holds nvdPublishedPageSize x
+// nvdMaxPages CVEs. Measured on the VM 2026-11-24 (EDR-PSIRT-01 P4): a busy window ran past
+// it and the newest CVEs, the ones an alert is for, were cut silently (30 days listed fewer
+// rows than 7). So when the first page says the window is larger than the budget, the read
+// jumps to the newest pages, and the oldest CVEs it skips are returned as notRead.
+func (c *NVDClient) PublishedSince(ctx context.Context, since time.Time) ([]app.PublishedCVE, int, error) {
 	now := time.Now().UTC()
 	if since.IsZero() || since.Before(now.Add(-nvdMaxWindow)) {
 		since = now.Add(-nvdMaxWindow)
 	}
 	var out []app.PublishedCVE
-	startIndex := 0
+	startIndex, notRead := 0, 0
 	for page := 0; page < nvdMaxPages; page++ {
 		q := url.Values{}
 		q.Set("pubStartDate", since.UTC().Format(nvdTimeLayout))
@@ -585,8 +591,14 @@ func (c *NVDClient) PublishedSince(ctx context.Context, since time.Time) ([]app.
 			// One retry per page: NVD's resets are transient, and a page that fails twice
 			// is reported rather than papered over.
 			if resp, err = c.get(ctx, q, "nvd published-since (retry)"); err != nil {
-				return nil, err
+				return nil, 0, err
 			}
+		}
+		if page == 0 && resp.TotalResults > nvdPublishedPageSize*nvdMaxPages {
+			// Too large for the budget: drop this oldest page, read the newest ones.
+			notRead = resp.TotalResults - nvdPublishedPageSize*(nvdMaxPages-1)
+			startIndex = notRead
+			continue
 		}
 		for _, v := range resp.Vulnerabilities {
 			if strings.EqualFold(v.CVE.VulnStatus, "Rejected") || v.CVE.ID == "" {
@@ -605,7 +617,7 @@ func (c *NVDClient) PublishedSince(ctx context.Context, since time.Time) ([]app.
 			break
 		}
 	}
-	return out, nil
+	return out, notRead, nil
 }
 
 // fetchKeyword pulls one page of CVEs whose description exactly contains keyword — the

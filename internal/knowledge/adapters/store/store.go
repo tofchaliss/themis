@@ -586,6 +586,34 @@ func (s *Store) AffectedReleases(ctx context.Context, faultlineID string) ([]str
 	return out, rows.Err()
 }
 
+// MatchesByCVE returns, for each given CVE that has a card, the live (not retired) release
+// components the engine matched it to: the PSIRT alert's "already in Themis" products
+// (EDR-PSIRT-01 P4). A component is named by its name, or by its purl when no name was kept.
+func (s *Store) MatchesByCVE(ctx context.Context, cves []string) (map[string][]app.EngineMatch, error) {
+	out := map[string][]app.EngineMatch{}
+	if len(cves) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT f.cve, m.release_id, COALESCE(NULLIF(m.component_name, ''), m.component_purl)
+		  FROM faultline_matches m JOIN faultlines f ON f.id = m.faultline_id
+		 WHERE f.cve = ANY($1) AND m.retired_at IS NULL
+		 ORDER BY f.cve, m.release_id, 3`, cves)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cve string
+		var m app.EngineMatch
+		if err := rows.Scan(&cve, &m.ReleaseID, &m.Component); err != nil {
+			return nil, err
+		}
+		out[cve] = append(out[cve], m)
+	}
+	return out, rows.Err()
+}
+
 // ReconcileStuckStages advances any card that has matches but never reached the
 // Correlated stage — state-based recovery from persisted authoritative state (D11), no
 // workflow replay. It returns how many cards it fixed.
