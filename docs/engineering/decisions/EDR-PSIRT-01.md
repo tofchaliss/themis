@@ -3,7 +3,7 @@
 Status: **PROPOSED — 2026-11-23, revision 2.** The owner answered choices 1-6 and A-C on 2026-11-23.
 The same day the owner approved the Knowledge change, a new read API and this design PR ("let us
 see how it performs, if not we will revert"). Revision 2 follows the owner's reframing at 15:43Z
-(below). Q1 answered 2026-11-24: (a) name match. P1, P2 and P3 built 2026-11-24 (see Realization notes).
+(below). Q1 answered 2026-11-24: (a) name match. P1, P2 and P3 built and the P4 VM check run 2026-11-24 (see Realization notes).
 Date: 2026-11-23
 Author: the design discussion of 2026-11-23 (thread "Add PSIRT product severity view").
 
@@ -215,3 +215,49 @@ Each row: `cve`, `published`, `modified`, `summary`, `original_score`, `original
   the products tab says "Products could not be checked" instead of "no product hit".
   `lookups_skipped` is stated in one line. A Knowledge node without the read (404) says the
   alert is not available on that node.
+
+### P4 (2026-11-24, VM check, owner)
+
+Measured on the test VM (auth on), `GET /psirt/alerts?days=7&min_severity=high`:
+
+| What | Value |
+| --- | --- |
+| Rows (critical or high, 7 days) | 1018 |
+| Rows with affected names (NVD CPE, plus CVE.org for the first 100 looked up) | 219 |
+| Rows with no affected names | 799 |
+| Rows matched to a product | 1 |
+| `lookups_skipped` (over the CVE.org cap of 100) | 1656 |
+| `estate_unavailable` | false (Registry and Evidence read fine) |
+
+Two findings, both fixed in the follow-up PR:
+
+1. **A false alarm from a path's last segment.** A Go module component
+   (`github.com/go-openapi/runtime`) matched another vendor's CPE product `runtime`, at CVSS
+   10. The last segment alone is too loose. **Fix:** the match now keeps each affected name's
+   vendor (`domain.AffectedRef`; NVD's CPE vendor, the CNA's `affected` vendor). A path-shaped
+   component matches on its last segment only when the vendor is one of its other segments
+   (`go-openapi:runtime` matches; a bare or another vendor's `runtime` does not). A host
+   segment reads without its domain, so `golang.org` fits the vendor `golang`. A whole-name or
+   source-package match is unchanged. `matched_on` reads `vendor:product` for a path match.
+2. **Most of a fresh week has no names to match.** 78% of the rows had none, and one read could
+   ask CVE.org about only 100. **Fix:** each CVE.org answer (a "nothing there" included; never
+   an error) is reused for 6 hours (`PSIRTCVEOrgTTL`), so each read asks only about rows not yet
+   answered and the list fills in over a few page views. The cap is now 200 per read, still
+   inside the 20 s budget. A row NVD scored below the floor is no longer looked up, because it
+   is not an alert and its names would show nowhere. A lookup that the budget cuts off now
+   counts in `lookups_skipped`.
+
+The one estate match was the false alarm, so the honest count for that week is no product hit
+among the 219 named rows. The GUI check of the card is still open.
+
+**Overview layout (owner, 2026-11-24).** The Overview is now one compact top row and the PSIRT
+list below it:
+
+- "Find a CVE" with only the box and a small search button;
+- one "Status" card with the four figures (products, feeds healthy, exploit signals, degraded
+  feeds);
+- a smaller "Estate risk" donut;
+- "Quick links" (Releases, Upload an SBOM, Feed health), which replaces the old section at the
+  bottom.
+
+The rest of the page is the PSIRT list, now 25 rows per page.

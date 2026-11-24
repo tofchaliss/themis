@@ -36,6 +36,10 @@ func TestNVDClient_PublishedSince(t *testing.T) {
 			                  {"source":"cna","type":"Secondary","description":[{"lang":"en","value":"NVD-CWE-noinfo"},{"lang":"en","value":"CWE-125"}]}],
 			    "configurations":[{"nodes":[{"cpeMatch":[
 			      {"vulnerable":true,"criteria":"cpe:2.3:a:example:libfoo:*:*:*:*:*:*:*:*"},
+			      {"vulnerable":true,"criteria":"cpe:2.3:a:example:libfoo:2:*:*:*:*:*:*:*"},
+			      {"vulnerable":true,"criteria":"cpe:2.3:a:*:libfoo:*:*:*:*:*:*:*:*"},
+			      {"vulnerable":true,"criteria":"cpe:2.3:a:example:-:*:*:*:*:*:*:*:*"},
+			      {"vulnerable":false,"criteria":"cpe:2.3:a:other:libbar:*:*:*:*:*:*:*:*"},
 			      {"vulnerable":true,"criteria":"cpe:2.3:o:example:someos:1:*:*:*:*:*:*:*"}]}]}],
 			    "metrics":{"cvssMetricV31":[{"type":"Primary","cvssData":{"baseScore":9.8,"baseSeverity":"CRITICAL","vectorString":"CVSS:3.1/x"}}]}}},
 			  {"cve":{"id":"CVE-2026-1001","published":"2026-10-19T08:00:00.000","vulnStatus":"Rejected","descriptions":[{"lang":"en","value":"withdrawn"}]}}
@@ -75,7 +79,10 @@ func TestNVDClient_PublishedSince(t *testing.T) {
 	if got := nvdStatedTime("2026-01-02T03:04:05Z"); !got.Equal(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)) {
 		t.Errorf("RFC 3339 time = %v", got)
 	}
-	if r := rows[1]; !r.Modified.IsZero() || r.Weaknesses != nil || r.Affected != nil {
+	if fmt.Sprint(r0.AffectedRefs) != "[:libfoo example:libfoo]" {
+		t.Errorf("affected refs = %v", r0.AffectedRefs)
+	}
+	if r := rows[1]; !r.Modified.IsZero() || r.Weaknesses != nil || r.Affected != nil || r.AffectedRefs != nil {
 		t.Errorf("a record stating nothing must carry nothing: %+v", r)
 	}
 	if len(queries) != 3 || !containsAll(queries[0], "pubStartDate=", "pubEndDate=", "startIndex=0", "resultsPerPage=200") ||

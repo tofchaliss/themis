@@ -69,7 +69,7 @@ describe("App shell", () => {
   it("routes by hash and hands unbuilt screens to the classic GUI", async () => {
     mockFetch({ ...base, "GET /whoami": [200, { user: "operator", can_write: true }] });
     renderWithQuery(<App />);
-    expect(await screen.findByText("Evidence in, positions out")).toBeInTheDocument();
+    expect(await screen.findByText("PSIRT early alert")).toBeInTheDocument();
     act(() => {
       window.location.hash = "#/estate";
       window.dispatchEvent(new HashChangeEvent("hashchange"));

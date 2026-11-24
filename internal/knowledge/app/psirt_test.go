@@ -94,7 +94,7 @@ func TestPSIRT_AlertsMatchAndFilter(t *testing.T) {
 	now := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
 	world := &psirtWorld{rows: []app.PublishedCVE{
 		{CVE: "CVE-2026-1", Score: 9.8, Severity: "critical", Published: now.Add(-time.Hour), Affected: []string{"openssl"}},
-		{CVE: "CVE-2026-2", Score: 7.5, Severity: "high", Published: now.Add(-2 * time.Hour), Affected: []string{"net", "libxml2"}},
+		{CVE: "CVE-2026-2", Score: 7.5, Severity: "high", Published: now.Add(-2 * time.Hour), Affected: []string{"net", "libxml2"}, AffectedRefs: []string{"golang:net", "xmlsoft:libxml2"}},
 		{CVE: "CVE-2026-3", Score: 7.5, Severity: "high", Published: now.Add(-time.Hour), Affected: []string{"nothing-here"}},
 		{CVE: "CVE-2026-4", Score: 5.0, Severity: "medium", Published: now, Affected: []string{"openssl"}},
 		{CVE: "CVE-2026-5", Score: 2.0, Severity: "low", Published: now, Affected: []string{"openssl"}},
@@ -119,7 +119,7 @@ func TestPSIRT_AlertsMatchAndFilter(t *testing.T) {
 		t.Errorf("flags = %+v", res)
 	}
 	m := res.Alerts[3].Matches
-	if fmt.Sprintf("%+v", m) != "[{ProductID:p1 ProductName:product-a Component:libxml2 MatchedOn:libxml2} {ProductID:p2 ProductName:product-b Component:golang.org/x/net MatchedOn:net}]" {
+	if fmt.Sprintf("%+v", m) != "[{ProductID:p1 ProductName:product-a Component:libxml2 MatchedOn:libxml2} {ProductID:p2 ProductName:product-b Component:golang.org/x/net MatchedOn:golang:net}]" {
 		t.Errorf("matches = %+v", m)
 	}
 	if mm := res.Alerts[0].Matches; len(mm) != 1 || mm[0].Component != "openssl-libs" || mm[0].MatchedOn != "openssl" {
@@ -144,10 +144,11 @@ func TestPSIRT_AlertsMatchAndFilter(t *testing.T) {
 func TestPSIRT_CVEOrgFillsGaps(t *testing.T) {
 	now := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
 	world := &psirtWorld{rows: []app.PublishedCVE{
-		{CVE: "CVE-2026-10", Published: now}, // unscored, unanalysed
+		{CVE: "CVE-2026-10", Published: now},                               // unscored, unanalysed
 		{CVE: "CVE-2026-11", Score: 8.0, Severity: "high", Published: now}, // scored, no names
 		{CVE: "CVE-2026-12", Score: 9.0, Severity: "critical", Published: now, Affected: []string{"libxml2"}},
-		{CVE: "CVE-2026-13", Score: 7.0, Severity: "high", Published: now}, // CVE.org has nothing
+		{CVE: "CVE-2026-13", Score: 7.0, Severity: "high", Published: now},   // CVE.org has nothing
+		{CVE: "CVE-2026-14", Score: 5.0, Severity: "medium", Published: now}, // below the floor: never asked
 		{CVE: "not-a-cve", Score: 7.0, Severity: "high", Published: now},
 	}}
 	org := &psirtCVEOrg{obs: map[string]domain.ObservationInput{
@@ -175,7 +176,25 @@ func TestPSIRT_CVEOrgFillsGaps(t *testing.T) {
 		t.Errorf("nothing found = %+v", a)
 	}
 	if org.calls != 3 {
-		t.Errorf("CVE.org calls = %d, want 3 (the analysed row and the bad id are never asked)", org.calls)
+		t.Errorf("CVE.org calls = %d, want 3 (the analysed row, the row below the floor and the bad id are never asked)", org.calls)
+	}
+	// The answers, a "nothing there" included, are reused within PSIRTCVEOrgTTL, then asked again.
+	clock := &movingClock{now: now}
+	cached := app.NewPSIRTService(world, estate, sboms, inv, org, clock)
+	org.calls = 0
+	for i := 0; i < 2; i++ {
+		res, _ = cached.Alerts(context.Background(), 7, "high")
+	}
+	if org.calls != 3 {
+		t.Errorf("two reads asked CVE.org %d times, want 3", org.calls)
+	}
+	if a := res.Alerts[0]; a.CVE != "CVE-2026-10" || a.ScoreSource != "cve.org" || len(a.Matches) != 1 {
+		t.Errorf("a cached answer still fills the row: %+v", a)
+	}
+	clock.now = now.Add(app.PSIRTCVEOrgTTL)
+	_, _ = cached.Alerts(context.Background(), 7, "high")
+	if org.calls != 6 {
+		t.Errorf("after the TTL: %d calls, want 6", org.calls)
 	}
 
 	// A failing CVE.org leaves every row as NVD gave it.
@@ -194,6 +213,35 @@ func TestPSIRT_CVEOrgFillsGaps(t *testing.T) {
 	res, _ = app.NewPSIRTService(many, estate, sboms, inv, capped, &movingClock{now: now}).Alerts(context.Background(), 7, "high")
 	if res.LookupsSkipped != 3 || capped.calls != app.PSIRTMaxCVEOrgLookups {
 		t.Errorf("cap: skipped %d, calls %d", res.LookupsSkipped, capped.calls)
+	}
+	// The next read asks only about the rows not answered yet, so the list fills in.
+	capSvc := app.NewPSIRTService(many, estate, sboms, inv, capped, &movingClock{now: now})
+	capped.calls = 0
+	_, _ = capSvc.Alerts(context.Background(), 7, "high")
+	res, _ = capSvc.Alerts(context.Background(), 7, "high")
+	if res.LookupsSkipped != 0 || capped.calls != app.PSIRTMaxCVEOrgLookups+3 {
+		t.Errorf("second read: skipped %d, calls %d", res.LookupsSkipped, capped.calls)
+	}
+}
+
+// cancellingCVEOrg ends the read's budget during its own lookup, as a slow CVE.org would.
+type cancellingCVEOrg struct{ cancel context.CancelFunc }
+
+func (c cancellingCVEOrg) FetchRecord(context.Context, value.CVEID) (domain.ObservationInput, bool, error) {
+	c.cancel()
+	return domain.ObservationInput{}, false, context.Canceled
+}
+
+// A lookup the budget cut off counts as skipped and is not remembered as an answer.
+func TestPSIRT_CVEOrgBudgetCountsAsSkipped(t *testing.T) {
+	now := time.Date(2026, 11, 24, 0, 0, 0, 0, time.UTC)
+	world := &psirtWorld{rows: []app.PublishedCVE{{CVE: "CVE-2026-20", Score: 9.0, Published: now}, {CVE: "CVE-2026-21", Score: 9.0, Published: now}}}
+	estate, sboms, inv := psirtEstateFixture()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	res, err := app.NewPSIRTService(world, estate, sboms, inv, cancellingCVEOrg{cancel: cancel}, &movingClock{now: now}).Alerts(ctx, 7, "high")
+	if err != nil || res.LookupsSkipped != 2 || len(res.Alerts) != 2 {
+		t.Errorf("budget: skipped %d, %d rows, %v", res.LookupsSkipped, len(res.Alerts), err)
 	}
 }
 

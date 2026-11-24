@@ -479,6 +479,44 @@ func nvdVulnerableProducts(configs []nvdConfig) []string {
 	return out
 }
 
+// nvdVulnerableVendorProducts is nvdVulnerableProducts with each product's CPE vendor kept,
+// as "vendor:product" (EDR-PSIRT-01: the vendor lets the alert match a Go module's last path
+// segment without matching every other vendor's product of that name).
+func nvdVulnerableVendorProducts(configs []nvdConfig) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, cfg := range configs {
+		for _, node := range cfg.Nodes {
+			for _, m := range node.CPEMatch {
+				if !m.Vulnerable || cpePart(m.Criteria) != "a" {
+					continue
+				}
+				p := cpeProduct(m.Criteria)
+				if p == "" || p == "*" || p == "-" {
+					continue
+				}
+				pair := cpeVendor(m.Criteria) + ":" + p
+				if _, dup := seen[pair]; dup {
+					continue
+				}
+				seen[pair] = struct{}{}
+				out = append(out, pair)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// cpeVendor extracts the vendor from a CPE 2.3 string; "" when it is any/none or absent.
+func cpeVendor(criteria string) string {
+	parts := splitCPE(criteria)
+	if len(parts) < 4 || parts[3] == "*" || parts[3] == "-" {
+		return ""
+	}
+	return parts[3]
+}
+
 // nvdConfigsMatchProduct reports whether any vulnerable CPE match names a product that
 // normalized-equals name — the precision gate that turns a fuzzy keyword hit into a real
 // "this CVE is about this component". Exact normalized equality (not substring) keeps false
@@ -559,7 +597,7 @@ func (c *NVDClient) PublishedSince(ctx context.Context, since time.Time) ([]app.
 				CVE: v.CVE.ID, Published: parseNVDTime(v.CVE.Published),
 				Summary: nvdEnglishDescription(v.CVE), Severity: strings.ToLower(severity), Score: score,
 				Modified: nvdStatedTime(v.CVE.LastModified), Weaknesses: nvdCWEs(v.CVE),
-				Affected: nvdVulnerableProducts(v.CVE.Configurations),
+				Affected: nvdVulnerableProducts(v.CVE.Configurations), AffectedRefs: nvdVulnerableVendorProducts(v.CVE.Configurations),
 			})
 		}
 		startIndex += len(resp.Vulnerabilities)
