@@ -36,25 +36,54 @@ func TestAffectedNames(t *testing.T) {
 	}
 }
 
-// A component matches on its name, its source package, or its last path segment; one row per
-// component, and nothing matches on an empty side.
+// AffectedRefs keeps the vendor beside each product or package; a bare entry has none, and an
+// "n/a" vendor reads as none.
+func TestAffectedRefs(t *testing.T) {
+	got := domain.AffectedRefs([]string{"Go-OpenAPI:runtime", "example:libfoo:libfoo-core", "lonevendor", "n/a:libbar", "acme:ui", "acme:n/a", "example:libfoo"})
+	if fmt.Sprint(got) != "[{ libbar} {example libfoo} {example libfoo-core} { lonevendor} {go-openapi runtime}]" {
+		t.Errorf("AffectedRefs = %v", got)
+	}
+	if got := domain.AffectedRefs(nil); len(got) != 0 {
+		t.Errorf("no input = %v", got)
+	}
+}
+
+func refs(entries ...string) []domain.AffectedRef { return domain.AffectedRefs(entries) }
+
+// A component matches on its name or source package; a path's last segment matches only with
+// the vendor among its other segments; one row per component, nothing on an empty side.
 func TestMatchComponents(t *testing.T) {
 	comps := []domain.ComponentRef{
 		{Name: "openssl-libs", Source: "openssl"},
 		{Name: "golang.org/x/net"},
+		{Name: "github.com/go-openapi/runtime"},
 		{Name: "libxml2", Source: "libxml2"},
 		{Name: "unrelated"},
 	}
-	got := domain.MatchComponents([]string{"openssl", "net", "libxml2", "xy"}, comps)
-	if fmt.Sprint(got) != "[{golang.org/x/net net} {libxml2 libxml2} {openssl-libs openssl}]" {
+	got := domain.MatchComponents(refs("openssl", "golang:net", "xmlsoft:libxml2", "xy", "othervendor:runtime", "runtime"), comps)
+	if fmt.Sprint(got) != "[{golang.org/x/net golang:net} {libxml2 libxml2} {openssl-libs openssl}]" {
 		t.Errorf("MatchComponents = %v", got)
 	}
+	// The VM case (2026-11-24): another vendor's "runtime" never hits the Go module; its own does.
+	if got := domain.MatchComponents(refs("othervendor:runtime"), comps); len(got) != 0 {
+		t.Errorf("another vendor's runtime = %v", got)
+	}
+	if got := domain.MatchComponents(refs("go-openapi:runtime"), comps); fmt.Sprint(got) != "[{github.com/go-openapi/runtime go-openapi:runtime}]" {
+		t.Errorf("its own vendor = %v", got)
+	}
+	// The whole path as the product matches like any name.
+	if got := domain.MatchComponents(refs("golang.org/x/net"), comps); fmt.Sprint(got) != "[{golang.org/x/net golang.org/x/net}]" {
+		t.Errorf("whole path = %v", got)
+	}
 	// Two affected names hit one component: one row, the first name in sorted order reported.
-	two := domain.MatchComponents([]string{"zlib", "zlib-ng"}, []domain.ComponentRef{{Name: "zlib-ng", Source: "zlib"}})
+	two := domain.MatchComponents(refs("zlib", "zlib-ng"), []domain.ComponentRef{{Name: "zlib-ng", Source: "zlib"}})
 	if fmt.Sprint(two) != "[{zlib-ng zlib}]" {
 		t.Errorf("two names = %v", two)
 	}
-	if domain.MatchComponents(nil, comps) != nil || domain.MatchComponents([]string{"openssl"}, nil) != nil {
+	if domain.MatchComponents(nil, comps) != nil || domain.MatchComponents(refs("openssl"), nil) != nil {
 		t.Error("an empty side matches nothing")
+	}
+	if got := domain.MatchComponents([]domain.AffectedRef{{Product: "ab"}}, comps); len(got) != 0 {
+		t.Errorf("a short ref = %v", got)
 	}
 }
