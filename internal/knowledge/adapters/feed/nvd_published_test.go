@@ -30,8 +30,13 @@ func TestNVDClient_PublishedSince(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if start == "0" {
 			_, _ = fmt.Fprint(w, `{"totalResults":3,"vulnerabilities":[
-			  {"cve":{"id":"CVE-2026-1000","published":"2026-10-20T10:00:00.000","vulnStatus":"Analyzed",
+			  {"cve":{"id":"CVE-2026-1000","published":"2026-10-20T10:00:00.000","lastModified":"2026-10-21T11:12:13.456","vulnStatus":"Analyzed",
 			    "descriptions":[{"lang":"es","value":"no"},{"lang":"en","value":"A flaw in foo."}],
+			    "weaknesses":[{"source":"nvd","type":"Primary","description":[{"lang":"en","value":"CWE-787"}]},
+			                  {"source":"cna","type":"Secondary","description":[{"lang":"en","value":"NVD-CWE-noinfo"},{"lang":"en","value":"CWE-125"}]}],
+			    "configurations":[{"nodes":[{"cpeMatch":[
+			      {"vulnerable":true,"criteria":"cpe:2.3:a:example:libfoo:*:*:*:*:*:*:*:*"},
+			      {"vulnerable":true,"criteria":"cpe:2.3:o:example:someos:1:*:*:*:*:*:*:*"}]}]}],
 			    "metrics":{"cvssMetricV31":[{"type":"Primary","cvssData":{"baseScore":9.8,"baseSeverity":"CRITICAL","vectorString":"CVSS:3.1/x"}}]}}},
 			  {"cve":{"id":"CVE-2026-1001","published":"2026-10-19T08:00:00.000","vulnStatus":"Rejected","descriptions":[{"lang":"en","value":"withdrawn"}]}}
 			]}`)
@@ -56,6 +61,22 @@ func TestNVDClient_PublishedSince(t *testing.T) {
 	}
 	if r := rows[1]; r.CVE != "CVE-2026-1002" || r.Severity != "" || r.Score != 0 || r.Summary != "Not scored yet." {
 		t.Errorf("unscored = %+v", r)
+	}
+	// EDR-PSIRT-01 P1: the same record's last change, CWE ids (placeholders dropped, sorted) and
+	// application products (an OS that bundles the flaw is not one). A record that states none
+	// of them carries none: no fetch time posing as "modified".
+	r0 := rows[0]
+	if want := time.Date(2026, 10, 21, 11, 12, 13, 456e6, time.UTC); !r0.Modified.Equal(want) {
+		t.Errorf("modified = %v, want %v", r0.Modified, want)
+	}
+	if fmt.Sprint(r0.Weaknesses) != "[CWE-125 CWE-787]" || fmt.Sprint(r0.Affected) != "[libfoo]" {
+		t.Errorf("weaknesses = %v, affected = %v", r0.Weaknesses, r0.Affected)
+	}
+	if got := nvdStatedTime("2026-01-02T03:04:05Z"); !got.Equal(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)) {
+		t.Errorf("RFC 3339 time = %v", got)
+	}
+	if r := rows[1]; !r.Modified.IsZero() || r.Weaknesses != nil || r.Affected != nil {
+		t.Errorf("a record stating nothing must carry nothing: %+v", r)
 	}
 	if len(queries) != 3 || !containsAll(queries[0], "pubStartDate=", "pubEndDate=", "startIndex=0", "resultsPerPage=200") ||
 		!containsAll(queries[1], "startIndex=0") || !containsAll(queries[2], "startIndex=2") {

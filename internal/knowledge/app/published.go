@@ -32,6 +32,13 @@ type PublishedCVE struct {
 	Severity  string
 	Score     float64
 	Carded    bool
+	// EDR-PSIRT-01 P1: what the PSIRT early alert needs from the same live record. Modified is
+	// the source's last change (zero = not stated); Weaknesses are the CWE ids
+	// (domain.NormalizeCWEs); Affected are the product names the source says carry the flaw
+	// (NVD's CPE products), which the alert matches against component names (Q1, name match).
+	Modified   time.Time
+	Weaknesses []string
+	Affected   []string
 }
 
 // PublishedSource lists CVEs published since a moment, newest first or not — the service sorts.

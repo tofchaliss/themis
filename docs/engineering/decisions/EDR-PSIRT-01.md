@@ -3,7 +3,7 @@
 Status: **PROPOSED — 2026-11-23, revision 2.** The owner answered choices 1-6 and A-C on 2026-11-23.
 The same day the owner approved the Knowledge change, a new read API and this design PR ("let us
 see how it performs, if not we will revert"). Revision 2 follows the owner's reframing at 15:43Z
-(below). Open question: **Q1**.
+(below). Q1 answered 2026-11-24: (a) name match. P1 built 2026-11-24 (see Realization notes).
 Date: 2026-11-23
 Author: the design discussion of 2026-11-23 (thread "Add PSIRT product severity view").
 
@@ -77,7 +77,7 @@ Measured 2026-11-23: `feed_health` keeps `last_success_at`, `last_failure_at` an
 `consecutive_failures` for each source. The stale threshold is set per **tier** (25 h for Tier 1,
 48 h for Tier 2), not per source.
 
-### Q1: how is a world CVE tied to a product before any Finding exists? (OPEN)
+### Q1: how is a world CVE tied to a product before any Finding exists? (SETTLED by the owner 2026-11-24: (a))
 
 - **(a) Name match (recommended).** Match the CVE's affected names against the component names in
   the product's releases, by normalized name, ignoring version. The affected names are NVD's CPE
@@ -146,4 +146,22 @@ Each row: `cve`, `published`, `modified`, `summary`, `original_score`, `original
 | A | Highest source score wins | yes |
 | B | Show the Themis score | **no**: the page is an alert, and the team assesses after it |
 | C | "New in product" filter | **no**: scanned CVEs are already in the engine |
-| Q1 | Tie a world CVE to a product | **open**, recommended (a) name match |
+| Q1 | Tie a world CVE to a product | (a) name match (2026-11-24) |
+
+## Realization notes
+
+### P1 (2026-11-24, owner "yes" to P1)
+
+- The live world read `GET /faultlines/published-recently` now carries, from the same NVD
+  record it already fetched: `modified` (NVD `lastModified`; absent when not stated, never the
+  fetch time), `cwes` (normalized, sorted, NVD placeholders dropped), `issue_type` +
+  `issue_type_table` (the fixed table, version `1`), and `affected_products` (NVD CPE
+  application parts, the same filter as the carrier products, so an OS that bundles a library is
+  not named). Still live, still stores nothing.
+- The CWE table is `domain.IssueType` in `internal/knowledge/domain/weakness.go`, 100% covered.
+  When a CVE has several CWEs the first table row any of them maps to wins (worst type first);
+  an unmapped CWE reads "Other". The CWE id is always on the wire beside the word.
+- Not in P1, moved to P2: the CVE.org `affected` names for records NVD has not analysed yet.
+  They need one CVE.org fetch per fresh critical/high CVE, which belongs behind the alert read's
+  own cache, not on every page view of this read.
+

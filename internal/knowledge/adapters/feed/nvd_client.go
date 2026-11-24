@@ -198,6 +198,24 @@ type nvdLiveCVE struct {
 	} `json:"descriptions"`
 	Metrics        nvdMetrics  `json:"metrics"`
 	Configurations []nvdConfig `json:"configurations"`
+	// Weaknesses are the CWE entries (Primary from NVD, Secondary from the CNA). Delivered on
+	// every record; read since EDR-PSIRT-01 P1 for the PSIRT alert's issue type.
+	Weaknesses []struct {
+		Description []struct {
+			Value string `json:"value"`
+		} `json:"description"`
+	} `json:"weaknesses"`
+}
+
+// nvdCWEs returns the record's CWE ids, normalized (placeholders such as NVD-CWE-noinfo drop).
+func nvdCWEs(cve nvdLiveCVE) []string {
+	var raw []string
+	for _, w := range cve.Weaknesses {
+		for _, d := range w.Description {
+			raw = append(raw, d.Value)
+		}
+	}
+	return domain.NormalizeCWEs(raw...)
 }
 
 type nvdConfig struct {
@@ -540,6 +558,8 @@ func (c *NVDClient) PublishedSince(ctx context.Context, since time.Time) ([]app.
 			out = append(out, app.PublishedCVE{
 				CVE: v.CVE.ID, Published: parseNVDTime(v.CVE.Published),
 				Summary: nvdEnglishDescription(v.CVE), Severity: strings.ToLower(severity), Score: score,
+				Modified: nvdStatedTime(v.CVE.LastModified), Weaknesses: nvdCWEs(v.CVE),
+				Affected: nvdVulnerableProducts(v.CVE.Configurations),
 			})
 		}
 		startIndex += len(resp.Vulnerabilities)
@@ -798,6 +818,19 @@ func parseNVDTime(s string) time.Time {
 		}
 	}
 	return time.Now().UTC()
+}
+
+// nvdStatedTime parses an NVD timestamp, keeping "not stated" as the zero time. Unlike
+// parseNVDTime it never defaults to now: a display date that is really the fetch time would
+// read as a fact the source never stated.
+func nvdStatedTime(s string) time.Time {
+	s = strings.TrimSpace(s)
+	for _, layout := range []string{nvdTimeLayout, time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC()
+		}
+	}
+	return time.Time{}
 }
 
 // ensure the port is satisfied at compile time.

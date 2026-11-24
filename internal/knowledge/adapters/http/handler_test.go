@@ -659,7 +659,8 @@ func publishedServer(t *testing.T, src app.PublishedSource) (*httptest.Server, *
 // source and 502 when the source fails, and a repeat within the cache life asks the source once.
 func TestGetPublishedRecently(t *testing.T) {
 	src := &fakePublishedSrc{rows: []app.PublishedCVE{
-		{CVE: "CVE-2024-1", Published: time.Unix(1_700_000_000, 0).UTC(), Summary: "known", Severity: "high", Score: 7.5},
+		{CVE: "CVE-2024-1", Published: time.Unix(1_700_000_000, 0).UTC(), Summary: "known", Severity: "high", Score: 7.5,
+			Modified: time.Unix(1_700_100_000, 0).UTC(), Weaknesses: []string{"CWE-400", "CWE-78"}, Affected: []string{"libfoo"}},
 		{CVE: "CVE-2026-9", Published: time.Unix(1_700_003_600, 0).UTC(), Summary: "fresh"},
 	}}
 	srv, _ := publishedServer(t, src)
@@ -668,14 +669,27 @@ func TestGetPublishedRecently(t *testing.T) {
 		t.Fatalf("status = %d: %s", status, body)
 	}
 	var rows []struct {
-		Cve       string   `json:"cve"`
-		Carded    bool     `json:"carded"`
-		Summary   *string  `json:"summary"`
-		Severity  *string  `json:"severity"`
-		CvssScore *float32 `json:"cvss_score"`
+		Cve       string     `json:"cve"`
+		Carded    bool       `json:"carded"`
+		Summary   *string    `json:"summary"`
+		Severity  *string    `json:"severity"`
+		CvssScore *float32   `json:"cvss_score"`
+		Modified  *time.Time `json:"modified"`
+		Cwes      []string   `json:"cwes"`
+		IssueType *string    `json:"issue_type"`
+		Table     *string    `json:"issue_type_table"`
+		Affected  []string   `json:"affected_products"`
 	}
 	if err := json.Unmarshal(body, &rows); err != nil {
 		t.Fatal(err)
+	}
+	// EDR-PSIRT-01 P1: the PSIRT fields ride the same row; a row that states none carries none.
+	if r := rows[1]; r.Modified == nil || r.Modified.Unix() != 1_700_100_000 || len(r.Cwes) != 2 || r.IssueType == nil ||
+		*r.IssueType != "Code execution" || r.Table == nil || len(r.Affected) != 1 || r.Affected[0] != "libfoo" {
+		t.Errorf("psirt fields = %+v", r)
+	}
+	if r := rows[0]; r.Modified != nil || r.Cwes != nil || r.IssueType != nil || r.Affected != nil {
+		t.Errorf("a row stating nothing must carry nothing: %+v", r)
 	}
 	if len(rows) != 2 || rows[0].Cve != "CVE-2026-9" || rows[0].Carded || rows[0].Severity != nil || rows[0].CvssScore != nil ||
 		rows[1].Cve != "CVE-2024-1" || !rows[1].Carded || *rows[1].Severity != "high" || *rows[1].CvssScore != 7.5 {
