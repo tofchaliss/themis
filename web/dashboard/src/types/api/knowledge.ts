@@ -69,6 +69,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/psirt/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The PSIRT early alert (EDR-PSIRT-01 P2): CVEs the world published in the last `days` days (default 7, clamped at 30) with an original (source) score at or above `min_severity` (critical | high | medium | low; default high), each with the product components it MAY hit by name match (Q1; version ignored). Read LIVE from NVD, gaps filled from CVE.org, stored nowhere (EDR-KNOWLEDGE-01 D5). No Themis score: the team assesses after the alert and the engine decides. Unscored CVEs are not listed. 503 when no source is wired; 502 when the world source fails. */
+        get: operations["getPSIRTAlerts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/faultlines/{id}": {
         parameters: {
             query?: never;
@@ -228,6 +245,48 @@ export interface components {
             issue_type_table?: string;
             /** @description The application products the source says carry the flaw (NVD CPE application parts). Empty for a record NVD has not analysed yet. The PSIRT alert matches these names against product component names (EDR-PSIRT-01 Q1). */
             affected_products?: string[];
+        };
+        PSIRTAlerts: {
+            alerts: components["schemas"]["PSIRTAlert"][];
+            /** @description The product inventory could not be read (Registry or Evidence unreachable, or not wired). Rows are still listed, but none carries matches, so the page must not read "no product hit". */
+            estate_unavailable: boolean;
+            /** @description Rows that needed a CVE.org lookup (NVD had no score or no affected names) beyond the per-read cap; they are shown as NVD gave them. */
+            lookups_skipped: number;
+            /** @description The version of the CWE-to-issue-type table behind every issue_type. */
+            issue_type_table: string;
+        };
+        PSIRTAlert: {
+            cve: string;
+            /** Format: date-time */
+            published: string;
+            /**
+             * Format: date-time
+             * @description The source's last change; absent when not stated.
+             */
+            modified?: string;
+            summary?: string;
+            /** @description The highest source CVSS Base score seen (owner choice A). */
+            original_score: number;
+            /** @description The CVSS qualitative rating of original_score. */
+            original_severity: string;
+            /** @description Where original_score came from (nvd | cve.org). */
+            score_source: string;
+            cwes?: string[];
+            /** @description Short issue-type word from the fixed CWE table; absent when no CWE is stated. */
+            issue_type?: string;
+            /** @description The normalized affected names the match used (NVD CPE products, CVE.org CNA affected). */
+            affected_products?: string[];
+            /** @description The product components the CVE may hit. Empty means no name matched, never "not affected". */
+            matches: components["schemas"]["PSIRTMatch"][];
+            /** @description Whether the estate already holds a card for this CVE (it is already in the engine). */
+            carded: boolean;
+        };
+        PSIRTMatch: {
+            product_id: string;
+            product_name: string;
+            component: string;
+            /** @description The affected name that matched the component. */
+            matched_on: string;
         };
         RecentFaultline: {
             /**
@@ -569,6 +628,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublishedCVE"][];
+                };
+            };
+            502: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getPSIRTAlerts: {
+        parameters: {
+            query?: {
+                days?: number;
+                min_severity?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PSIRTAlerts"];
                 };
             };
             502: components["responses"]["Problem"];

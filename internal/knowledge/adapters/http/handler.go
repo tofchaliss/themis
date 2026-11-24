@@ -36,6 +36,9 @@ type Handler struct {
 	sanity app.SanityReader
 	// ratings serves GET /faultlines/{id}/ratings (EDR-SCORING-01 S2). nil ⇒ 503.
 	ratings *app.RatingService
+	// psirt serves GET /psirt/alerts (EDR-PSIRT-01 P2). nil ⇒ 503.
+	psirt      *app.PSIRTService
+	psirtCache psirtCache
 }
 
 // WithSanity wires the fan-out guard's flag reader (KN-SANITY-1).
