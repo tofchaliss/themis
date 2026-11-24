@@ -1,0 +1,1 @@
+import{V as e,it as t,rt as n}from"./index-BRuDQ74e.js";t();var r=n();function i({className:t,...n}){return(0,r.jsx)(`div`,{className:e(`animate-pulse rounded-md bg-mono-bg`,t),...n})}export{i as t};

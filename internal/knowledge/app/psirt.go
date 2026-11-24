@@ -27,8 +27,24 @@ type EstateProducts interface {
 
 // latestPublished is the slice of PublishedService the alert reads.
 type latestPublished interface {
-	LatestPublished(ctx context.Context, days int) ([]PublishedCVE, error)
+	LatestPublished(ctx context.Context, days int) ([]PublishedCVE, int, error)
 }
+
+// EngineMatch is one release component the Themis engine has already matched a CVE to.
+type EngineMatch struct {
+	ReleaseID string
+	Component string
+}
+
+// EngineMatches reads what the engine already filed for the given CVEs: their live (not
+// retired) match rows, by CVE. It is Knowledge's own correlation, read from its own store.
+type EngineMatches interface {
+	MatchesByCVE(ctx context.Context, cves []string) (map[string][]EngineMatch, error)
+}
+
+// MatchedOnThemis is PSIRTMatch.MatchedOn for a match the Themis engine made (exact and
+// version-aware), as opposed to a name match.
+const MatchedOnThemis = "themis"
 
 // PSIRTMatch is one product component a world CVE's affected name matched (Q1, name match).
 type PSIRTMatch struct {
@@ -56,6 +72,9 @@ type PSIRTResult struct {
 	EstateUnavailable bool
 	// LookupsSkipped counts rows that needed a CVE.org lookup beyond the per-call cap.
 	LookupsSkipped int
+	// OlderNotRead counts the window's oldest CVEs the world source did not read: its page
+	// budget keeps the newest (EDR-PSIRT-01 P4).
+	OlderNotRead int
 }
 
 // Bounds of one alert read. The CVE.org lookups run only for rows NVD left without a score or
@@ -88,11 +107,14 @@ type PSIRTService struct {
 	sboms     ReleaseSBOMSource
 	inventory InventoryReader
 	cveorg    CVERecordSource // may be nil: no CVE.org gap filling
+	engine    EngineMatches   // may be nil: carded rows get name matches only
 	clock     Clock
 
 	mu       sync.Mutex
 	cachedAt time.Time
 	cached   []productComponents
+	// releaseOf maps a release to its product, from the same walk as cached.
+	releaseOf map[string]ProductRef
 
 	orgMu   sync.Mutex
 	answers map[string]cveorgAnswer
@@ -117,11 +139,18 @@ func NewPSIRTService(published latestPublished, estate EstateProducts, sboms Rel
 	return &PSIRTService{published: published, estate: estate, sboms: sboms, inventory: inventory, cveorg: cveorg, clock: clock}
 }
 
+// WithEngine adds the engine's own matches: a CVE Themis already filed shows the products its
+// correlation found, beside any name match (EDR-PSIRT-01 P4).
+func (s *PSIRTService) WithEngine(e EngineMatches) *PSIRTService {
+	s.engine = e
+	return s
+}
+
 // Alerts lists the CVEs published in the last `days` days whose original score is at least
 // minSeverity ("critical" | "high" | "medium" | "low"; "" = "high"), sorted by score, then
 // newest first, each with the product components it may hit.
 func (s *PSIRTService) Alerts(ctx context.Context, days int, minSeverity string) (PSIRTResult, error) {
-	rows, err := s.published.LatestPublished(ctx, days)
+	rows, notRead, err := s.published.LatestPublished(ctx, days)
 	if err != nil {
 		return PSIRTResult{}, err
 	}
@@ -133,16 +162,20 @@ func (s *PSIRTService) Alerts(ctx context.Context, days int, minSeverity string)
 			alerts[i].ScoreSource = "nvd"
 		}
 	}
-	res := PSIRTResult{}
+	res := PSIRTResult{OlderNotRead: notRead}
 	res.LookupsSkipped = s.fillFromCVEOrg(ctx, alerts, floor)
 
-	products, estateErr := s.products(ctx)
+	products, releaseOf, estateErr := s.products(ctx)
 	res.EstateUnavailable = estateErr != nil
 	kept := alerts[:0]
+	var carded []string
 	for _, a := range alerts {
 		// An unscored row is not an alert at any floor: the alert is about severity.
 		if severityRankOf(a.Score) < floor {
 			continue
+		}
+		if a.Carded {
+			carded = append(carded, a.CVE)
 		}
 		// The bare names (no vendor) still match whole component names; the vendor:product
 		// pairs also allow a path's last segment (domain.MatchComponents).
@@ -153,6 +186,9 @@ func (s *PSIRTService) Alerts(ctx context.Context, days int, minSeverity string)
 			}
 		}
 		kept = append(kept, a)
+	}
+	if err := s.addEngineMatches(ctx, kept, carded, releaseOf); err != nil {
+		res.EstateUnavailable = true
 	}
 	sort.SliceStable(kept, func(i, j int) bool {
 		if kept[i].Score != kept[j].Score {
@@ -165,6 +201,52 @@ func (s *PSIRTService) Alerts(ctx context.Context, days int, minSeverity string)
 	})
 	res.Alerts = kept
 	return res, nil
+}
+
+// addEngineMatches puts the engine's own matches first on each carded row: what Themis already
+// filed is exact and version-aware, so it beats a name match for the same component, which is
+// then not repeated. A release outside the estate walk (removed since) is left out.
+func (s *PSIRTService) addEngineMatches(ctx context.Context, alerts []PSIRTAlert, cves []string, releaseOf map[string]ProductRef) error {
+	if s.engine == nil || len(cves) == 0 || releaseOf == nil {
+		return nil
+	}
+	byCVE, err := s.engine.MatchesByCVE(ctx, cves)
+	if err != nil {
+		return err
+	}
+	for i := range alerts {
+		a := &alerts[i]
+		seen := map[[2]string]struct{}{}
+		var engine []PSIRTMatch
+		for _, m := range byCVE[a.CVE] {
+			ref, ok := releaseOf[m.ReleaseID]
+			if !ok {
+				continue
+			}
+			key := [2]string{ref.ID, m.Component}
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			engine = append(engine, PSIRTMatch{ProductID: ref.ID, ProductName: ref.Name, Component: m.Component, MatchedOn: MatchedOnThemis})
+		}
+		if len(engine) == 0 {
+			continue
+		}
+		sort.Slice(engine, func(x, y int) bool {
+			if engine[x].ProductName != engine[y].ProductName {
+				return engine[x].ProductName < engine[y].ProductName
+			}
+			return engine[x].Component < engine[y].Component
+		})
+		for _, m := range a.Matches {
+			if _, dup := seen[[2]string{m.ProductID, m.Component}]; !dup {
+				engine = append(engine, m)
+			}
+		}
+		a.Matches = engine
+	}
+	return nil
 }
 
 // fillFromCVEOrg asks CVE.org about the rows NVD left without a score, or at or above the
@@ -275,19 +357,19 @@ func applyCVEOrg(a *PSIRTAlert, ans cveorgAnswer) {
 // products returns every product with the components of all its releases' latest SBOMs,
 // reused for PSIRTEstateTTL. Any failure is an error: a partial estate would silently read as
 // "no product matched".
-func (s *PSIRTService) products(ctx context.Context) ([]productComponents, error) {
+func (s *PSIRTService) products(ctx context.Context) ([]productComponents, map[string]ProductRef, error) {
 	if s.estate == nil || s.sboms == nil || s.inventory == nil {
-		return nil, errEstateUnwired
+		return nil, nil, errEstateUnwired
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.clock.Now()
 	if s.cached != nil && now.Sub(s.cachedAt) < PSIRTEstateTTL {
-		return s.cached, nil
+		return s.cached, s.releaseOf, nil
 	}
 	releases, err := s.estate.ReleaseProducts(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	byProduct := map[string]*productComponents{}
 	seen := map[string]map[domain.ComponentRef]struct{}{}
@@ -300,7 +382,7 @@ func (s *PSIRTService) products(ctx context.Context) ([]productComponents, error
 		ref := releases[releaseID]
 		evidenceID, found, err := s.sboms.SBOMForRelease(ctx, releaseID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		pc := byProduct[ref.ID]
 		if pc == nil {
@@ -312,7 +394,7 @@ func (s *PSIRTService) products(ctx context.Context) ([]productComponents, error
 		}
 		inv, err := s.inventory.GetInventory(ctx, evidenceID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, c := range inv.Components {
 			ref := domain.ComponentRef{Name: strings.TrimSpace(c.Name), Source: strings.TrimSpace(c.Source)}
@@ -335,8 +417,8 @@ func (s *PSIRTService) products(ctx context.Context) ([]productComponents, error
 		}
 		return out[i].ref.ID < out[j].ref.ID
 	})
-	s.cached, s.cachedAt = out, now
-	return out, nil
+	s.cached, s.cachedAt, s.releaseOf = out, now, releases
+	return out, releases, nil
 }
 
 var errEstateUnwired = errors.New("psirt: no estate source wired on this node")

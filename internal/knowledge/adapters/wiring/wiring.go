@@ -344,7 +344,7 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 	if strings.TrimSpace(psirt.RegistryURL) != "" {
 		estate = registry.NewClient(psirt.RegistryURL, psirt.HTTP).WithAPIKey(readAPIKey)
 	}
-	psirtSvc := app.NewPSIRTService(published, estate, evClient, evClient, feed.NewCVEOrgClient(psirt.CVEOrgURL, psirt.HTTP), sysClock{})
+	psirtSvc := app.NewPSIRTService(published, estate, evClient, evClient, feed.NewCVEOrgClient(psirt.CVEOrgURL, psirt.HTTP), sysClock{}).WithEngine(st)
 	kn := Knowledge{
 		Handler:     knhttp.NewHandler(read, health).WithGather(gather).WithPublished(published).WithPSIRT(psirtSvc).WithScanner(scanSvc).WithSanity(st).WithRatings(ratings).Router(),
 		Store:       st,

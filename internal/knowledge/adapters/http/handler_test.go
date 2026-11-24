@@ -635,9 +635,9 @@ type fakePublishedSrc struct {
 	err   error
 }
 
-func (f *fakePublishedSrc) PublishedSince(context.Context, time.Time) ([]app.PublishedCVE, error) {
+func (f *fakePublishedSrc) PublishedSince(context.Context, time.Time) ([]app.PublishedCVE, int, error) {
 	f.calls++
-	return f.rows, f.err
+	return f.rows, 0, f.err
 }
 
 func publishedServer(t *testing.T, src app.PublishedSource) (*httptest.Server, *fakePublishedSrc) {

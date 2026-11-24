@@ -47,7 +47,9 @@ type PublishedCVE struct {
 
 // PublishedSource lists CVEs published since a moment, newest first or not — the service sorts.
 type PublishedSource interface {
-	PublishedSince(ctx context.Context, since time.Time) ([]PublishedCVE, error)
+	// PublishedSince also returns how many of the window's OLDEST CVEs it did not read (its
+	// page budget keeps the newest; EDR-PSIRT-01 P4).
+	PublishedSince(ctx context.Context, since time.Time) ([]PublishedCVE, int, error)
 }
 
 // PublishedService serves the read.
@@ -66,10 +68,11 @@ func NewPublishedService(src PublishedSource, repo Repository, clock Clock) *Pub
 func (s *PublishedService) Enabled() bool { return s != nil && s.src != nil }
 
 // LatestPublished returns the CVEs published in the last `days` days (default 7, clamped to
-// 30), newest first, each marked Carded when the estate holds a card for it.
-func (s *PublishedService) LatestPublished(ctx context.Context, days int) ([]PublishedCVE, error) {
+// 30), newest first, each marked Carded when the estate holds a card for it, and how many of
+// the window's oldest CVEs the source did not read.
+func (s *PublishedService) LatestPublished(ctx context.Context, days int) ([]PublishedCVE, int, error) {
 	if !s.Enabled() {
-		return nil, ErrPublishedUnavailable
+		return nil, 0, ErrPublishedUnavailable
 	}
 	if days <= 0 {
 		days = PublishedDefaultDays
@@ -78,14 +81,14 @@ func (s *PublishedService) LatestPublished(ctx context.Context, days int) ([]Pub
 		days = PublishedMaxDays
 	}
 	since := s.clock.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
-	rows, err := s.src.PublishedSince(ctx, since)
+	rows, notRead, err := s.src.PublishedSince(ctx, since)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	for i := range rows {
 		_, found, err := s.repo.GetByCVE(ctx, rows[i].CVE)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		rows[i].Carded = found
 	}
@@ -95,5 +98,5 @@ func (s *PublishedService) LatestPublished(ctx context.Context, days int) ([]Pub
 		}
 		return rows[i].CVE < rows[j].CVE
 	})
-	return rows, nil
+	return rows, notRead, nil
 }

@@ -856,6 +856,45 @@ func TestAffectedReleasesAndReconcile(t *testing.T) {
 	}
 }
 
+// EDR-PSIRT-01 P4: what the engine already filed for a CVE, by CVE: live rows only, named by the
+// component name or, when none was kept, by the purl; an unknown CVE and an empty ask read empty.
+func TestMatchesByCVE(t *testing.T) {
+	pool := newPool(t)
+	ctx := context.Background()
+	st := store.New(pool)
+
+	f, _, err := service(pool).FoldProposal(ctx, cveID(t, "CVE-2024-13"), vulnFacts(t, "nvd", value.SeverityHigh))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []app.Match{
+		{ReleaseID: "rel-a", Component: app.InventoryComponent{PURL: "pkg:rpm/redhat/expat@2.5", Name: "expat"}},
+		{ReleaseID: "rel-b", Component: app.InventoryComponent{PURL: "pkg:deb/debian/expat@2.5"}},
+		{ReleaseID: "rel-c", Component: app.InventoryComponent{PURL: "pkg:rpm/redhat/expat-devel@2.5", Name: "expat-devel"}},
+	} {
+		m.FaultlineID, m.CVE, m.OccurredAt = f.ID(), "CVE-2024-13", time.Now().UTC()
+		if _, err := st.RecordMatch(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := pool.Exec(ctx, "UPDATE faultline_matches SET retired_at = now() WHERE release_id = 'rel-c'"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := st.MatchesByCVE(ctx, []string{"CVE-2024-13", "CVE-2024-99"})
+	if err != nil || fmt.Sprint(got) != "map[CVE-2024-13:[{rel-a expat} {rel-b pkg:deb/debian/expat@2.5}]]" {
+		t.Errorf("MatchesByCVE = %v, %v", got, err)
+	}
+	if none, err := st.MatchesByCVE(ctx, nil); err != nil || len(none) != 0 {
+		t.Errorf("empty ask = %v, %v", none, err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := st.MatchesByCVE(cancelled, []string{"CVE-2024-13"}); err == nil {
+		t.Error("a failed query must surface")
+	}
+}
+
 func TestMigration_DownUp(t *testing.T) {
 	if testDSN == "" {
 		t.Skip("no database")

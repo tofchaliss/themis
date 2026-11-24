@@ -77,8 +77,20 @@ function Components({ a, product, estateUnavailable }: { a: PSIRTAlert; product:
   return (
     <ul className="flex flex-col gap-0.5">
       {matches.map((m) => (
-        <li key={`${m.product_id}/${m.component}`} title={`matched on the affected name "${m.matched_on}" (name only, version ignored)`}>
+        <li
+          key={`${m.product_id}/${m.component}`}
+          title={
+            m.matched_on === "themis"
+              ? "already filed by the Themis engine against a release of this product (exact, version-aware)"
+              : `matched on the affected name "${m.matched_on}" (name only, version ignored)`
+          }
+        >
           <span className="font-medium">{m.product_name || m.product_id}</span> · <span className="font-mono text-xs">{m.component}</span>
+          {m.matched_on === "themis" && (
+            <Badge tone="good" className="ml-1">
+              Themis
+            </Badge>
+          )}
         </li>
       ))}
     </ul>
@@ -228,6 +240,11 @@ export function PSIRTCard({ feeds, feedsError }: { feeds: FeedHealth | null | un
           <div role="alert" className="flex items-center gap-2 rounded-lg border border-warn/50 bg-warn/10 px-3 py-1.5 text-xs">
             <AlertTriangle className="size-3.5 text-warn" aria-hidden />
             The product inventory could not be read, so no row can say which product it hits. Use All world until it is back.
+          </div>
+        )}
+        {!!q.data?.older_not_read && (
+          <div className="text-xs text-ink-2">
+            {q.data.older_not_read} older CVEs in this window were not read (the window is larger than one read); the newest are all here.
           </div>
         )}
         {!!q.data?.lookups_skipped && (
