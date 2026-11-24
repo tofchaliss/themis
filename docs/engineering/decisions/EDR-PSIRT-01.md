@@ -165,3 +165,31 @@ Each row: `cve`, `published`, `modified`, `summary`, `original_score`, `original
   They need one CVE.org fetch per fresh critical/high CVE, which belongs behind the alert read's
   own cache, not on every page view of this read.
 
+### P2 (2026-11-24, owner "start p2")
+
+- `GET /api/v1/psirt/alerts?days=7&min_severity=high` (Knowledge). It reads the same live
+  world list as `published-recently`, keeps rows whose original score is at or above the floor
+  (critical | high | medium | low, default high; an unscored row is never an alert), and sorts
+  by score, then newest, then CVE id. No Themis score is on the wire.
+- **CVE.org gap filling.** A row NVD left without a score or without affected names gets one
+  CVE.org lookup: the CNA's `affected` vendor/product/package names join the match, and a
+  higher CVE.org score replaces NVD's (choice A; `score_source` says which). Rows that are
+  already critical or high go first. At most 100 lookups per read, 4 at a time, all within a 20 s
+  budget; the rest are counted in `lookups_skipped`. A failed lookup leaves the row as NVD gave
+  it. No enable flag: like `published-recently` it runs only on a page view, never on a schedule.
+- **Name match** (`domain.AffectedNames`, `domain.MatchComponents`, 100% covered). Both sides
+  are lower-cased with `_` and spaces read as `-`. A component matches on its name, its source
+  package (`openssl-libs` from `openssl`) or the last path segment (`golang.org/x/net` -> `net`).
+  Names shorter than 3 characters never match. Version is ignored.
+- **Estate.** Registry is read through a new client seam (`adapters/registry`,
+  `THEMIS_REGISTRY_URL`, default `:8082`, with `THEMIS_API_KEY`), and each release's newest SBOM
+  inventory through the existing Evidence client. The walk is reused for 15 minutes. If any hop
+  fails, the rows are still listed with `estate_unavailable: true`, so the page never reads "no
+  product hit" when it could not look.
+- The handler keeps one answer per (window, floor) for 5 minutes, like `published-recently`.
+- **Known limits of a name match** (accepted with Q1): a CPE product spelled differently from the
+  package (`http_server` vs `httpd`, `linux_kernel` vs `kernel`) does not match. A generic name
+  can match an unrelated component. Both are visible on the row (`matched_on`), and the "All
+  world" tab (P3) still lists every row. An alias table is a possible later step, if the VM check
+  shows it is needed.
+

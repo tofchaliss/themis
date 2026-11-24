@@ -40,6 +40,7 @@ declare -a infra_pkgs=(
 	knowledge/adapters/feed
 	knowledge/adapters/store
 	knowledge/adapters/evidence
+	knowledge/adapters/registry
 	knowledge/adapters/inbound
 	knowledge/adapters/vex
 	knowledge/adapters/http

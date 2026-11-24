@@ -90,6 +90,7 @@ type config struct {
 	redhatPollInterval time.Duration // THEMIS_REDHAT_POLL_INTERVAL — Go duration between Red Hat sweeps (default 12h; falls back to 12h if unparseable).
 
 	cveorgEnabled      bool          // THEMIS_CVEORG_ENABLED=1 — enable the scheduled CVE.org feed (CNA + ADP CVSS ratings of already-carded CVEs, recorded as source ratings only; EDR-SCORING-01 S2; default off).
+	registryURL        string        // THEMIS_REGISTRY_URL — Registry read-API base URL: names the products for the PSIRT early alert's name match (EDR-PSIRT-01 P2; default "http://localhost:8082"; empty ⇒ the alert lists world CVEs with estate_unavailable set). Reads with THEMIS_API_KEY.
 	cveorgURL          string        // THEMIS_CVEORG_URL — CVE Services API base URL (empty → the public cveawg.mitre.org/api default; no API key needed).
 	cveorgPollInterval time.Duration // THEMIS_CVEORG_POLL_INTERVAL — Go duration between CVE.org sweeps (default 24h; falls back to 24h if unparseable).
 
@@ -163,6 +164,7 @@ func loadConfig() config {
 
 		cveorgEnabled:      os.Getenv("THEMIS_CVEORG_ENABLED") == "1",
 		cveorgURL:          os.Getenv("THEMIS_CVEORG_URL"),
+		registryURL:        envDefault("THEMIS_REGISTRY_URL", "http://localhost:8082"),
 		cveorgPollInterval: parseDurationDefault(os.Getenv("THEMIS_CVEORG_POLL_INTERVAL"), 24*time.Hour),
 
 		alpineEnabled:      os.Getenv("THEMIS_ALPINE_ENABLED") == "1",
@@ -279,6 +281,10 @@ func main() {
 		Enabled: cfg.cveorgEnabled,
 		BaseURL: cfg.cveorgURL,
 		HTTP:    &http.Client{Timeout: 30 * time.Second},
+	}, wiring.PSIRTConfig{
+		RegistryURL: cfg.registryURL,
+		CVEOrgURL:   cfg.cveorgURL,
+		HTTP:        &http.Client{Timeout: 30 * time.Second},
 	})
 
 	// Whether the Evidence read seam carries a credential is the difference between a working

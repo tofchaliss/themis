@@ -400,7 +400,7 @@ func newPipeline(t *testing.T, opt options) *pipeline {
 	// API is served too, because Governance reads the assessment projection from it.
 	knPool := mustPool(t, dsnFor(opt.pgPort, "knowledge"))
 	t.Cleanup(knPool.Close)
-	kn := knwiring.Wire(knPool, evidenceSrv.URL, osv.URL, keys.knowledge, eventbus.NewPublisher(busPool), knwiring.NVDConfig{}, knwiring.SignalsConfig{}, knwiring.RedHatConfig{}, knwiring.AlpineConfig{}, knwiring.RockyConfig{}, knwiring.VexfeedConfig{}, knwiring.RediscoveryConfig{}, knwiring.VerdictConfig{}, knwiring.CVEOrgConfig{})
+	kn := knwiring.Wire(knPool, evidenceSrv.URL, osv.URL, keys.knowledge, eventbus.NewPublisher(busPool), knwiring.NVDConfig{}, knwiring.SignalsConfig{}, knwiring.RedHatConfig{}, knwiring.AlpineConfig{}, knwiring.RockyConfig{}, knwiring.VexfeedConfig{}, knwiring.RediscoveryConfig{}, knwiring.VerdictConfig{}, knwiring.CVEOrgConfig{}, knwiring.PSIRTConfig{})
 	knReader := kninbound.Subscription.NewReader(busPool, log, knstore.NewInboxConsumer(knPool, kn.Consumer))
 	knowledgeSrv := httptest.NewServer(mount(kn.Handler, authn))
 	t.Cleanup(knowledgeSrv.Close)

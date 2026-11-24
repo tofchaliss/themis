@@ -112,6 +112,39 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /psirt/alerts:
+    get:
+      operationId: getPSIRTAlerts
+      summary: >
+        The PSIRT early alert (EDR-PSIRT-01 P2): CVEs the world published in the last `days` days
+        (default 7, clamped at 30) with an original (source) score at or above `min_severity`
+        (critical | high | medium | low; default high), each with the product components it MAY
+        hit by name match (Q1; version ignored). Read LIVE from NVD, gaps filled from CVE.org,
+        stored nowhere (EDR-KNOWLEDGE-01 D5). No Themis score: the team assesses after the alert
+        and the engine decides. Unscored CVEs are not listed. 503 when no source is wired; 502
+        when the world source fails.
+      parameters:
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: min_severity
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PSIRTAlerts'
+        '502':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /faultlines/{id}:
     get:
       operationId: getFaultlineById
@@ -368,6 +401,85 @@ components:
             The application products the source says carry the flaw (NVD CPE application parts).
             Empty for a record NVD has not analysed yet. The PSIRT alert matches these names
             against product component names (EDR-PSIRT-01 Q1).
+    PSIRTAlerts:
+      type: object
+      required: [alerts, estate_unavailable, lookups_skipped, issue_type_table]
+      properties:
+        alerts:
+          type: array
+          items:
+            $ref: '#/components/schemas/PSIRTAlert'
+        estate_unavailable:
+          type: boolean
+          description: >-
+            The product inventory could not be read (Registry or Evidence unreachable, or not
+            wired). Rows are still listed, but none carries matches, so the page must not read
+            "no product hit".
+        lookups_skipped:
+          type: integer
+          description: >-
+            Rows that needed a CVE.org lookup (NVD had no score or no affected names) beyond the
+            per-read cap; those rows are shown as NVD gave them.
+        issue_type_table:
+          type: string
+          description: The version of the CWE-to-issue-type table behind every issue_type.
+    PSIRTAlert:
+      type: object
+      required: [cve, published, original_score, original_severity, score_source, carded, matches]
+      properties:
+        cve:
+          type: string
+        published:
+          type: string
+          format: date-time
+        modified:
+          type: string
+          format: date-time
+          description: The source's last change; absent when not stated.
+        summary:
+          type: string
+        original_score:
+          type: number
+          description: The highest source CVSS Base score seen (owner choice A).
+        original_severity:
+          type: string
+          description: The CVSS qualitative rating of original_score.
+        score_source:
+          type: string
+          description: Where original_score came from (nvd | cve.org).
+        cwes:
+          type: array
+          items:
+            type: string
+        issue_type:
+          type: string
+          description: Short issue-type word from the fixed CWE table; absent when no CWE is stated.
+        affected_products:
+          type: array
+          items:
+            type: string
+          description: The normalized affected names the match used (NVD CPE products, CVE.org CNA affected).
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/PSIRTMatch'
+          description: The product components the CVE may hit. Empty means no name matched, never "not affected".
+        carded:
+          type: boolean
+          description: Whether the estate already holds a card for this CVE (it is already in the engine).
+    PSIRTMatch:
+      type: object
+      required: [product_id, product_name, component, matched_on]
+      properties:
+        product_id:
+          type: string
+        product_name:
+          type: string
+        component:
+          type: string
+        matched_on:
+          type: string
+          description: The affected name that matched the component.
     RecentFaultline:
       type: object
       required: [created_at, card]

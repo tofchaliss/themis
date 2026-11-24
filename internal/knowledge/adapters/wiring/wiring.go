@@ -7,6 +7,7 @@ package wiring
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 	"github.com/themis-project/themis/internal/knowledge/adapters/feed"
 	knhttp "github.com/themis-project/themis/internal/knowledge/adapters/http"
 	"github.com/themis-project/themis/internal/knowledge/adapters/inbound"
+	"github.com/themis-project/themis/internal/knowledge/adapters/registry"
 	"github.com/themis-project/themis/internal/knowledge/adapters/store"
 	"github.com/themis-project/themis/internal/knowledge/adapters/vex"
 	"github.com/themis-project/themis/internal/knowledge/app"
@@ -183,6 +185,16 @@ type CVEOrgConfig struct {
 	HTTP    *http.Client // optional; nil → http.DefaultClient
 }
 
+// PSIRTConfig configures the PSIRT early alert (EDR-PSIRT-01 P2). The alert is explicit like the
+// latest-published read (a page view, never a schedule), so it has no enable flag. RegistryURL is
+// the product source for the name match: empty ⇒ the alert lists the world rows with
+// estate_unavailable set, never a silent "no product hit".
+type PSIRTConfig struct {
+	RegistryURL string
+	CVEOrgURL   string       // "" → the public CVE Services API (fills gaps NVD has not analysed yet)
+	HTTP        *http.Client // optional; nil → http.DefaultClient
+}
+
 // RockyConfig configures the optional Rocky errata feeds (GUI-5, EDR-VEX-01 D11; KN-MODULE-4).
 // One flag arms two sweeps over the same Apollo client, because they are one Rocky knowledge
 // source in two shapes:
@@ -253,7 +265,7 @@ type VerdictConfig struct {
 // unauthenticated reads, the auth-off dev case), outbox publisher, and NVD-watch config.
 // Reconciliation precedence ranks NVD over OSV (the authoritative source wins ties — D-FEED-2
 // source tiers), so NVD's watch Proposals become the reconciled headline on cards OSV created.
-func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, rocky RockyConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig, verdict VerdictConfig, cveorg CVEOrgConfig) Knowledge {
+func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pub store.Publisher, nvd NVDConfig, signals SignalsConfig, redhat RedHatConfig, alpine AlpineConfig, rocky RockyConfig, vexfeed VexfeedConfig, rediscovery RediscoveryConfig, verdict VerdictConfig, cveorg CVEOrgConfig, psirt PSIRTConfig) Knowledge {
 	st := store.New(pool)
 	read := app.NewReadService(st, st).WithRecent(st).WithAdvisory(st)
 	// Precedence ranks distro-authoritative Red Hat first, then NVD, then OSV (D-FEED-2 tiers;
@@ -325,8 +337,16 @@ func Wire(pool *pgxpool.Pool, evidenceBaseURL, osvBaseURL, readAPIKey string, pu
 	// The live latest-published read (GUI-16 layer 2) is explicit like the gather — a button
 	// press, never a schedule — so it needs no enable flag either, and it stores nothing.
 	published := app.NewPublishedService(feed.NewNVDClient(nvd.BaseURL, nvd.APIKey, nvd.HTTP), st, sysClock{})
+	// The PSIRT early alert (EDR-PSIRT-01 P2) reads that same world list, fills NVD's gaps from
+	// CVE.org, and name-matches it against the products' components: Registry names the
+	// products, the same Evidence client supplies each release's SBOM inventory.
+	var estate app.EstateProducts
+	if strings.TrimSpace(psirt.RegistryURL) != "" {
+		estate = registry.NewClient(psirt.RegistryURL, psirt.HTTP).WithAPIKey(readAPIKey)
+	}
+	psirtSvc := app.NewPSIRTService(published, estate, evClient, evClient, feed.NewCVEOrgClient(psirt.CVEOrgURL, psirt.HTTP), sysClock{})
 	kn := Knowledge{
-		Handler:     knhttp.NewHandler(read, health).WithGather(gather).WithPublished(published).WithScanner(scanSvc).WithSanity(st).WithRatings(ratings).Router(),
+		Handler:     knhttp.NewHandler(read, health).WithGather(gather).WithPublished(published).WithPSIRT(psirtSvc).WithScanner(scanSvc).WithSanity(st).WithRatings(ratings).Router(),
 		Store:       st,
 		Consumer:    inbound.NewConsumer(app.NewCoordinator(corr, vexSvc).WithScanner(scanSvc)),
 		Correlation: corr,
