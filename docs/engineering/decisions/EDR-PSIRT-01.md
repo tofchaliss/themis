@@ -3,7 +3,7 @@
 Status: **PROPOSED — 2026-11-23, revision 2.** The owner answered choices 1-6 and A-C on 2026-11-23.
 The same day the owner approved the Knowledge change, a new read API and this design PR ("let us
 see how it performs, if not we will revert"). Revision 2 follows the owner's reframing at 15:43Z
-(below). Q1 answered 2026-11-24: (a) name match. P1 built 2026-11-24 (see Realization notes).
+(below). Q1 answered 2026-11-24: (a) name match. P1, P2 and P3 built 2026-11-24 (see Realization notes).
 Date: 2026-11-23
 Author: the design discussion of 2026-11-23 (thread "Add PSIRT product severity view").
 
@@ -193,3 +193,25 @@ Each row: `cve`, `published`, `modified`, `summary`, `original_score`, `original
   world" tab (P3) still lists every row. An alias table is a possible later step, if the VM check
   shows it is needed.
 
+### P3 (2026-11-24, owner "yes" to P3)
+
+- The **PSIRT early alert** card sits on the new GUI's Overview (`/next/`), under the hero row
+  (`web/dashboard/src/components/psirt-card.tsx`). It reads `GET /psirt/alerts` when the page
+  opens and reuses the answer for 5 minutes, the same as Knowledge's own cache.
+- Controls: **Critical and High** (default) or **Critical only**; a **1 / 7 / 30 day** window
+  (default 7); **Our products** (rows with at least one name match, default) or **All world**
+  (every row); and a **product picker** on the products tab, built from the products the rows
+  matched.
+- Columns: original score with its severity and source (`nvd` | `cve.org`), CVE (links to the
+  NVD record, with the summary on hover), issue type with the CWE ids under it, published and
+  updated (relative, exact time on hover), product and component (the matched name on hover;
+  "not known" when nothing matched), and **In Themis** (a link to the CVE page when the estate
+  holds a card, else "not yet"). No Themis score anywhere.
+- **Source health beside the list**, from `GET /feeds`: a source whose status is `stale` or
+  `degraded` is "behind" (informational feeds never are). The strip names them. An empty list
+  with a source behind, or with unreadable source health, reads "No new issues, but N sources
+  are behind" and never an all clear.
+- `estate_unavailable` shows a warning and "inventory not read" in place of "not known", and
+  the products tab says "Products could not be checked" instead of "no product hit".
+  `lookups_skipped` is stated in one line. A Knowledge node without the read (404) says the
+  alert is not available on that node.

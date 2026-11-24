@@ -358,8 +358,8 @@ three angles, and two of them proposed fixes that would not have worked.
 - [ ] **PSIRT early alert on the Overview** (id `GUI-PSIRT-1`, owner 2026-11-23, feature).
   Newly published critical/high CVEs in the world (original source score, no Themis score),
   tied to the products whose components they may hit, as the first bucket before the Themis
-  engine. Design in EDR-PSIRT-01 revision 2 (PROPOSED); Q1 (how to tie a world CVE to a
-  product) open; steps P1-P4 wait for the owner's go.
+  engine. Design in EDR-PSIRT-01 revision 2 (PROPOSED); Q1 settled as (a) name match. P1
+  (#242), P2 (#243) merged; P3 (the Overview card) built; P4 VM check open.
 
 - [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
   feature). The owner's reference table shows per-release assessment-type markers (five status

@@ -194,3 +194,17 @@ export const useCardReleases = (id: string | undefined) =>
 
 export const useCardRatings = (id: string | undefined) =>
   useQuery({ queryKey: ["card-ratings", id], enabled: !!id, queryFn: () => apiGet<SourceRatings>("knowledge", `/faultlines/${enc(id ?? "")}/ratings`) });
+
+export type PSIRTAlerts = Knowledge["schemas"]["PSIRTAlerts"];
+export type PSIRTAlert = Knowledge["schemas"]["PSIRTAlert"];
+
+/** The PSIRT early alert (EDR-PSIRT-01 P3): CVEs the world published in the last `days`
+ * days at or above `floor`, each with the product components it may hit. Live at Knowledge
+ * (cached there 5 minutes), so it is not re-asked more often than that. null = the node has
+ * no alert read (an older Knowledge). */
+export const usePSIRTAlerts = (days: number, floor: "critical" | "high") =>
+  useQuery({
+    queryKey: ["psirt-alerts", days, floor],
+    staleTime: 5 * 60_000,
+    queryFn: () => apiGet<PSIRTAlerts>("knowledge", `/psirt/alerts?days=${days}&min_severity=${floor}`),
+  });

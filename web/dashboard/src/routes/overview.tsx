@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Donut } from "@/components/donut";
 import { bandSlices } from "@/components/bands";
 import { Empty, ErrorPanel } from "@/components/states";
+import { PSIRTCard } from "@/components/psirt-card";
 import { useEstateSweep, useFeeds, useProducts } from "@/lib/queries";
 import { asArray } from "@/lib/utils";
 
@@ -110,6 +111,8 @@ export function Overview() {
           </CardContent>
         </Card>
       </div>
+
+      <PSIRTCard feeds={feeds.data} feedsError={feeds.isError} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile loading={products.isPending} value={products.data ? String(products.data.length) : "—"} label="Products" note="registered in the estate" />
