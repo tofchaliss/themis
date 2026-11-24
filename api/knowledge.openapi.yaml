@@ -419,7 +419,7 @@ components:
           type: integer
           description: >-
             Rows that needed a CVE.org lookup (NVD had no score or no affected names) beyond the
-            per-read cap; they are shown as NVD gave them.
+            per-read cap; those rows are shown as NVD gave them.
         issue_type_table:
           type: string
           description: The version of the CWE-to-issue-type table behind every issue_type.

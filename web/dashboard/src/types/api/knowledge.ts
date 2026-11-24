@@ -250,7 +250,7 @@ export interface components {
             alerts: components["schemas"]["PSIRTAlert"][];
             /** @description The product inventory could not be read (Registry or Evidence unreachable, or not wired). Rows are still listed, but none carries matches, so the page must not read "no product hit". */
             estate_unavailable: boolean;
-            /** @description Rows that needed a CVE.org lookup (NVD had no score or no affected names) beyond the per-read cap; they are shown as NVD gave them. */
+            /** @description Rows that needed a CVE.org lookup (NVD had no score or no affected names) beyond the per-read cap; those rows are shown as NVD gave them. */
             lookups_skipped: number;
             /** @description The version of the CWE-to-issue-type table behind every issue_type. */
             issue_type_table: string;
