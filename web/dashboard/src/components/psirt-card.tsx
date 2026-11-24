@@ -13,12 +13,13 @@ import { SeverityCell } from "@/components/finding-bits";
 import { Paged } from "@/components/pager";
 import { Empty, ErrorPanel } from "@/components/states";
 import { ago, when } from "@/components/when";
-import { usePSIRTAlerts, type FeedHealth, type PSIRTAlert } from "@/lib/queries";
+import { BulletinForm, BulletinTable, canEditBulletins, type BulletinDraft } from "@/components/bulletins";
+import { useBulletins, usePSIRTAlerts, useWhoAmI, type Bulletin, type FeedHealth, type PSIRTAlert } from "@/lib/queries";
 import { asArray } from "@/lib/utils";
 
 export const PSIRT_WINDOWS = [1, 7, 30] as const;
 type Floor = "critical" | "high";
-type Tab = "products" | "world";
+type Tab = "products" | "world" | "bulletins";
 
 const cveHash = (cve: string) => `#/cve/${encodeURIComponent(cve)}`;
 const nvdURL = (cve: string) => `https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cve)}`;
@@ -97,7 +98,38 @@ function Components({ a, product, estateUnavailable }: { a: PSIRTAlert; product:
   );
 }
 
-function Table({ rows, product, estateUnavailable }: { rows: PSIRTAlert[]; product: string; estateUnavailable: boolean }) {
+function BulletinCell({ a, onAdd }: { a: PSIRTAlert; onAdd?: (cve: string) => void }) {
+  const b = a.bulletin;
+  if (b) {
+    return b.bulletin_url ? (
+      <a className="font-mono text-xs text-accent" href={b.bulletin_url} target="_blank" rel="noreferrer" title={b.title}>
+        {b.bulletin_id}
+      </a>
+    ) : (
+      <span className="font-mono text-xs" title={b.title}>
+        {b.bulletin_id}
+      </span>
+    );
+  }
+  if (!onAdd) return <span className="text-xs text-muted">none</span>;
+  return (
+    <Button size="sm" variant="outline" onClick={() => onAdd(a.cve)} aria-label={`Add a bulletin for ${a.cve}`}>
+      Add
+    </Button>
+  );
+}
+
+function Table({
+  rows,
+  product,
+  estateUnavailable,
+  onAdd,
+}: {
+  rows: PSIRTAlert[];
+  product: string;
+  estateUnavailable: boolean;
+  onAdd?: (cve: string) => void;
+}) {
   return (
     <Paged rows={rows} size={25}>
       {(page) => (
@@ -110,6 +142,7 @@ function Table({ rows, product, estateUnavailable }: { rows: PSIRTAlert[]; produ
               <th className="py-2 pr-3 font-medium">Published / updated</th>
               <th className="py-2 pr-3 font-medium">Product · component</th>
               <th className="py-2 pr-3 font-medium">In Themis</th>
+              <th className="py-2 pr-3 font-medium">Bulletin</th>
             </tr>
           </thead>
           <tbody>
@@ -149,6 +182,9 @@ function Table({ rows, product, estateUnavailable }: { rows: PSIRTAlert[]; produ
                     <span className="text-xs text-muted">not yet</span>
                   )}
                 </td>
+                <td className="py-2 pr-3">
+                  <BulletinCell a={a} onAdd={onAdd} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -163,7 +199,11 @@ export function PSIRTCard({ feeds, feedsError }: { feeds: FeedHealth | null | un
   const [floor, setFloor] = useState<Floor>("high");
   const [tab, setTab] = useState<Tab>("products");
   const [product, setProduct] = useState("");
+  const [draft, setDraft] = useState<BulletinDraft | null>(null);
   const q = usePSIRTAlerts(days, floor);
+  const bq = useBulletins();
+  const canEdit = canEditBulletins(useWhoAmI().data);
+  const bulletins = useMemo(() => asArray<Bulletin>(bq.data), [bq.data]);
   const alerts = useMemo(() => asArray<PSIRTAlert>(q.data?.alerts), [q.data]);
   const matched = useMemo(() => alerts.filter((a) => asArray(a.matches).length > 0), [alerts]);
   const products = useMemo(() => {
@@ -217,6 +257,14 @@ export function PSIRTCard({ feeds, feedsError }: { feeds: FeedHealth | null | un
             <Button size="sm" variant={tab === "world" ? "default" : "outline"} aria-pressed={tab === "world"} onClick={() => setTab("world")}>
               All world{q.data ? ` (${alerts.length})` : ""}
             </Button>
+            <Button
+              size="sm"
+              variant={tab === "bulletins" ? "default" : "outline"}
+              aria-pressed={tab === "bulletins"}
+              onClick={() => setTab("bulletins")}
+            >
+              Bulletins{bq.data ? ` (${bulletins.length})` : ""}
+            </Button>
           </span>
           {tab === "products" && products.length > 0 && (
             <>
@@ -232,6 +280,11 @@ export function PSIRTCard({ feeds, feedsError }: { feeds: FeedHealth | null | un
                 ))}
               </Select>
             </>
+          )}
+          {tab === "bulletins" && canEdit && bq.data !== null && (
+            <Button size="sm" variant="outline" className="ml-auto" onClick={() => setDraft({})}>
+              Add a bulletin
+            </Button>
           )}
         </div>
 
@@ -253,7 +306,19 @@ export function PSIRTCard({ feeds, feedsError }: { feeds: FeedHealth | null | un
           </div>
         )}
 
-        {q.isError ? (
+        {tab === "bulletins" ? (
+          bq.isError ? (
+            <ErrorPanel error={bq.error} />
+          ) : bq.isPending ? (
+            <Skeleton className="h-32 w-full" />
+          ) : bq.data === null ? (
+            <Empty title="The bulletin register is not available">This Knowledge node has no bulletin register yet. Update it to the current build.</Empty>
+          ) : bulletins.length === 0 ? (
+            <Empty title="No bulletin yet">{canEdit ? "Add the first one with Add a bulletin." : "An admin adds bulletins here."}</Empty>
+          ) : (
+            <BulletinTable rows={bulletins} alerts={alerts} canEdit={canEdit} onEdit={(bulletin) => setDraft({ bulletin })} />
+          )
+        ) : q.isError ? (
           <ErrorPanel error={q.error} />
         ) : q.isPending ? (
           <Skeleton className="h-32 w-full" />
@@ -274,8 +339,14 @@ export function PSIRTCard({ feeds, feedsError }: { feeds: FeedHealth | null | un
             <Empty title={`No ${floorWord} CVE published in the last ${days === 1 ? "day" : `${days} days`}`} />
           )
         ) : (
-          <Table rows={rows} product={tab === "products" ? pick : ""} estateUnavailable={estateUnavailable} />
+          <Table
+            rows={rows}
+            product={tab === "products" ? pick : ""}
+            estateUnavailable={estateUnavailable}
+            onAdd={canEdit && bq.data ? (cve) => setDraft({ cve }) : undefined}
+          />
         )}
+        {draft && <BulletinForm key={draft.bulletin?.id ?? draft.cve ?? "new"} draft={draft} onClose={() => setDraft(null)} />}
       </CardContent>
     </Card>
   );

@@ -145,6 +145,127 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /psirt/bulletins:
+    get:
+      operationId: listBulletins
+      summary: >
+        The PSIRT bulletin register (EDR-PSIRT-01 revision 3): every live bulletin, newest report
+        date first. A bulletin is what an admin wrote about an issue (an id, a title, links, a
+        note, at most one CVE), so storing it keeps EDR-KNOWLEDGE-01 D5. 503 when no register is
+        wired on this node.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Bulletin'
+        '503':
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createBulletin
+      summary: >
+        Add a bulletin (admin only, R2). The report date defaults to today. 400 on invalid input,
+        403 for a non-admin key, 409 when a live bulletin already has this bulletin ID or CVE.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulletinInput'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bulletin'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /psirt/bulletins/{id}:
+    put:
+      operationId: updateBulletin
+      summary: >
+        Replace a bulletin's fields (admin only). An absent report date keeps the one it had.
+        The change is kept in the bulletin's history.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulletinInput'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bulletin'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: removeBulletin
+      summary: >
+        Remove a bulletin from the register (admin only). It is a tombstone: its history stays
+        readable.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Removed.
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /psirt/bulletins/{id}/history:
+    get:
+      operationId: getBulletinHistory
+      summary: Every change of one bulletin, oldest first, a removed one included.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BulletinChange'
+        '503':
+          $ref: '#/components/responses/Problem'
   /faultlines/{id}:
     get:
       operationId: getFaultlineById
@@ -472,6 +593,97 @@ components:
         carded:
           type: boolean
           description: Whether the estate already holds a card for this CVE (it is already in the engine).
+        bulletin:
+          $ref: '#/components/schemas/BulletinRef'
+    BulletinInput:
+      type: object
+      required: [bulletin_id, title]
+      properties:
+        bulletin_id:
+          type: string
+          description: The team's bulletin number (at most 64 characters).
+        title:
+          type: string
+          description: At most 300 characters.
+        bulletin_url:
+          type: string
+          description: The bulletin's page (an absolute http or https link), or empty.
+        alert_url:
+          type: string
+          description: The TSN or alert page (an absolute http or https link), or empty.
+        note:
+          type: string
+          description: Free text, at most 4000 characters.
+        cve:
+          type: string
+          description: The one CVE the bulletin is about, or empty for a risk with no CVE.
+        report_date:
+          type: string
+          format: date
+          description: The day it was reported; absent means today on a create, unchanged on an edit.
+    Bulletin:
+      type: object
+      required: [id, bulletin_id, title, bulletin_url, alert_url, note, cve, report_date, type,
+        created_at, created_by, updated_at, updated_by]
+      properties:
+        id:
+          type: string
+        bulletin_id:
+          type: string
+        title:
+          type: string
+        bulletin_url:
+          type: string
+        alert_url:
+          type: string
+        note:
+          type: string
+        cve:
+          type: string
+        report_date:
+          type: string
+          format: date
+        type:
+          type: string
+          description: Derived (R6), never typed. Vulnerability when a CVE is given, Risk when not.
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          type: string
+    BulletinChange:
+      type: object
+      required: [at, actor, action]
+      properties:
+        at:
+          type: string
+          format: date-time
+        actor:
+          type: string
+        action:
+          type: string
+          description: created | updated | removed.
+        before:
+          $ref: '#/components/schemas/Bulletin'
+        after:
+          $ref: '#/components/schemas/Bulletin'
+    BulletinRef:
+      type: object
+      required: [id, bulletin_id, title, bulletin_url]
+      properties:
+        id:
+          type: string
+        bulletin_id:
+          type: string
+        title:
+          type: string
+        bulletin_url:
+          type: string
     PSIRTMatch:
       type: object
       required: [product_id, product_name, component, matched_on]

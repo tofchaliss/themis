@@ -100,7 +100,7 @@ func truncate(t *testing.T, pool *pgxpool.Pool) {
 	// correlated_releases is truncated with the rest so the KN-RECOR-1 ledger does not leak
 	// between tests: left standing, it lets a re-discovery sweep in one test drain releases
 	// another test had stamped — the sweep then counts work nobody in that test asked for.
-	if _, err := pool.Exec(context.Background(), "TRUNCATE processed_events, knowledge_watch_state, faultline_matches, knowledge_outbox, faultline_proposals, faultlines, feed_health, correlated_releases, assessment_links, rating_validations, source_rating_events, source_ratings, rating_observation_seen, rating_observations RESTART IDENTITY CASCADE"); err != nil {
+	if _, err := pool.Exec(context.Background(), "TRUNCATE processed_events, knowledge_watch_state, faultline_matches, knowledge_outbox, faultline_proposals, faultlines, feed_health, correlated_releases, assessment_links, rating_validations, source_rating_events, source_ratings, rating_observation_seen, rating_observations, psirt_bulletin_history, psirt_bulletins RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }

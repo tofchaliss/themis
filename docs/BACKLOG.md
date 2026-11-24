@@ -361,8 +361,15 @@ three angles, and two of them proposed fixes that would not have worked.
   engine. Design in EDR-PSIRT-01 revision 2 (PROPOSED); Q1 settled as (a) name match. P1
   (#242), P2 (#243), P3 (#244) merged; P4 VM check run 2026-11-24 (one false path match and
   78% unnamed rows, both fixed in #245); second round 2026-11-24 (newest CVEs cut off, CVEs
-  already in Themis without products, libexpat vs expat) fixed in the follow-up. Next: the
-  bulletin register format with admin-entered links (design first).
+  already in Themis without products, libexpat vs expat) fixed in #247. The bulletin register
+  (EDR-PSIRT-01 revision 3, design #248): B1 (Knowledge table, history, API) and B2 (Bulletins
+  tab, Bulletin column, admin form) built 2026-11-24. Next: B3 VM check.
+
+- [ ] **Bulletin history names the dashboard key, not the GUI user** (id
+  `PSIRT-BULLETIN-ACTOR-1`, 2026-11-24). A bulletin changed in the GUI is recorded with the
+  dashboard's node key as its actor, like every GUI write (EDR-GUI-01 D4). Fix with key
+  pass-through, or a verified operator name sent by the proxy. Also open: a GUI view of a
+  bulletin's history, and product-scoped editing (EDR-PSIRT-01 R2).
 
 - [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
   feature). The owner's reference table shows per-release assessment-type markers (five status

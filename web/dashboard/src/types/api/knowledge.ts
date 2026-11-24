@@ -86,6 +86,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/psirt/bulletins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The PSIRT bulletin register (EDR-PSIRT-01 revision 3): every live bulletin, newest report date first. A bulletin is what an admin wrote about an issue (an id, a title, links, a note, at most one CVE), so storing it keeps EDR-KNOWLEDGE-01 D5. 503 when no register is wired on this node. */
+        get: operations["listBulletins"];
+        put?: never;
+        /** Add a bulletin (admin only, R2). The report date defaults to today. 400 on invalid input, 403 for a non-admin key, 409 when a live bulletin already has this bulletin ID or CVE. */
+        post: operations["createBulletin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/psirt/bulletins/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace a bulletin's fields (admin only). An absent report date keeps the one it had. The change is kept in the bulletin's history. */
+        put: operations["updateBulletin"];
+        post?: never;
+        /** Remove a bulletin from the register (admin only). It is a tombstone: its history stays readable. */
+        delete: operations["removeBulletin"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/psirt/bulletins/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every change of one bulletin, oldest first, a removed one included. */
+        get: operations["getBulletinHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/faultlines/{id}": {
         parameters: {
             query?: never;
@@ -282,6 +335,60 @@ export interface components {
             matches: components["schemas"]["PSIRTMatch"][];
             /** @description Whether the estate already holds a card for this CVE (it is already in the engine). */
             carded: boolean;
+            bulletin?: components["schemas"]["BulletinRef"];
+        };
+        BulletinInput: {
+            /** @description The team's bulletin number (at most 64 characters). */
+            bulletin_id: string;
+            /** @description At most 300 characters. */
+            title: string;
+            /** @description The bulletin's page (an absolute http or https link), or empty. */
+            bulletin_url?: string;
+            /** @description The TSN or alert page (an absolute http or https link), or empty. */
+            alert_url?: string;
+            /** @description Free text, at most 4000 characters. */
+            note?: string;
+            /** @description The one CVE the bulletin is about, or empty for a risk with no CVE. */
+            cve?: string;
+            /**
+             * Format: date
+             * @description The day it was reported; absent means today on a create, unchanged on an edit.
+             */
+            report_date?: string;
+        };
+        Bulletin: {
+            id: string;
+            bulletin_id: string;
+            title: string;
+            bulletin_url: string;
+            alert_url: string;
+            note: string;
+            cve: string;
+            /** Format: date */
+            report_date: string;
+            /** @description Derived (R6), never typed. Vulnerability when a CVE is given, Risk when not. */
+            type: string;
+            /** Format: date-time */
+            created_at: string;
+            created_by: string;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by: string;
+        };
+        BulletinChange: {
+            /** Format: date-time */
+            at: string;
+            actor: string;
+            /** @description created | updated | removed. */
+            action: string;
+            before?: components["schemas"]["Bulletin"];
+            after?: components["schemas"]["Bulletin"];
+        };
+        BulletinRef: {
+            id: string;
+            bulletin_id: string;
+            title: string;
+            bulletin_url: string;
         };
         PSIRTMatch: {
             product_id: string;
@@ -658,6 +765,132 @@ export interface operations {
                 };
             };
             502: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listBulletins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Bulletin"][];
+                };
+            };
+            503: components["responses"]["Problem"];
+        };
+    };
+    createBulletin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulletinInput"];
+            };
+        };
+        responses: {
+            /** @description Created. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Bulletin"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    updateBulletin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulletinInput"];
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Bulletin"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    removeBulletin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getBulletinHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulletinChange"][];
+                };
+            };
             503: components["responses"]["Problem"];
         };
     };

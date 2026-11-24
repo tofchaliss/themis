@@ -18,8 +18,9 @@ import (
 )
 
 var (
-	adminOp = auth.Principal{KeyID: "k-1", Name: "alice", Scopes: []string{"admin"}}
-	readOp  = auth.Principal{KeyID: "k-2", Name: "bob", Scopes: []string{"read"}}
+	adminOp   = auth.Principal{KeyID: "k-1", Name: "alice", Scopes: []string{"admin"}}
+	readOp    = auth.Principal{KeyID: "k-2", Name: "bob", Scopes: []string{"read"}}
+	productOp = auth.Principal{KeyID: "k-3", Name: "carol", Scopes: []string{"product:p1"}}
 )
 
 // gateFor wires a Gate whose session and reverify outcomes are scripted, in front of a
@@ -76,6 +77,14 @@ func TestGate_ScopeMatrix(t *testing.T) {
 			"/api/governance/findings/f-1/proposals/p-1/accept", http.StatusForbidden},
 		{"admin writes", adminOp, http.MethodPost,
 			"/api/governance/findings/f-1/proposals/p-1/accept", http.StatusOK},
+		// EDR-PSIRT-01 R2: the bulletin register is admin-only, and the node sees only the
+		// injected key, so the gate is where a product-scoped operator is refused.
+		{"product op CANNOT add a bulletin", productOp, http.MethodPost, "/api/knowledge/psirt/bulletins", http.StatusForbidden},
+		{"product op CANNOT remove a bulletin", productOp, http.MethodDelete, "/api/knowledge/psirt/bulletins/b-1", http.StatusForbidden},
+		{"product op reads bulletins", productOp, http.MethodGet, "/api/knowledge/psirt/bulletins", http.StatusOK},
+		{"product op still writes elsewhere", productOp, http.MethodPost, "/api/knowledge/psirt/bulletins-other", http.StatusOK},
+		{"admin adds a bulletin", adminOp, http.MethodPost, "/api/knowledge/psirt/bulletins", http.StatusOK},
+		{"admin edits a bulletin", adminOp, http.MethodPut, "/api/knowledge/psirt/bulletins/b-1", http.StatusOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

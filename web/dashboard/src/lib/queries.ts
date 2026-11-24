@@ -208,3 +208,11 @@ export const usePSIRTAlerts = (days: number, floor: "critical" | "high") =>
     staleTime: 5 * 60_000,
     queryFn: () => apiGet<PSIRTAlerts>("knowledge", `/psirt/alerts?days=${days}&min_severity=${floor}`),
   });
+
+export type Bulletin = Knowledge["schemas"]["Bulletin"];
+export type BulletinInput = Knowledge["schemas"]["BulletinInput"];
+
+/** The PSIRT bulletin register (EDR-PSIRT-01 revision 3), newest report date first. null = the
+ * node has no register (an older Knowledge). */
+export const useBulletins = () =>
+  useQuery({ queryKey: ["psirt-bulletins"], queryFn: () => apiGet<Bulletin[]>("knowledge", "/psirt/bulletins") });

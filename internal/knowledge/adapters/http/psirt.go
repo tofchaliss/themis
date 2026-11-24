@@ -105,6 +105,7 @@ func (h *Handler) GetPSIRTAlerts(w http.ResponseWriter, r *http.Request, params 
 		OlderNotRead:      res.OlderNotRead,
 		IssueTypeTable:    domain.IssueTypeTableVersion,
 	}
+	byCVE := h.bulletinsByCVE(r.Context())
 	for _, a := range res.Alerts {
 		item := gen.PSIRTAlert{
 			Cve: a.CVE, Published: a.Published, Carded: a.Carded,
@@ -129,6 +130,9 @@ func (h *Handler) GetPSIRTAlerts(w http.ResponseWriter, r *http.Request, params 
 		}
 		for _, m := range a.Matches {
 			item.Matches = append(item.Matches, gen.PSIRTMatch{ProductId: m.ProductID, ProductName: m.ProductName, Component: m.Component, MatchedOn: m.MatchedOn})
+		}
+		if ref, ok := byCVE[a.CVE]; ok {
+			item.Bulletin = &ref
 		}
 		out.Alerts = append(out.Alerts, item)
 	}
