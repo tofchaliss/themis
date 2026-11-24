@@ -131,7 +131,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Rename a project. Admin key only.
+         * @description Changes the project's NAME and nothing else (EDR-KERNEL-01 D5). Every other context refers to a project by its id and reads the name live from Registry, so findings, decisions, watches and tickets keep pointing at the same project. The name stays unique per product, case folded: a name another project of the same product already carries is `409`, and nothing changes. A change of case only (`alpha` → `Alpha`) is allowed. A CI job that finds-or-creates the project by name must be changed to the new name, or its next upload registers a new project under the old one.
+         */
+        patch: operations["renameProject"];
         trace?: never;
     };
     "/products/{id}": {
@@ -379,6 +383,9 @@ export interface components {
         };
         RegisterProjectRequest: {
             product_id: string;
+            name: string;
+        };
+        RenameProjectRequest: {
             name: string;
         };
         RegisterReleaseRequest: {
@@ -787,6 +794,52 @@ export interface operations {
                 };
             };
             404: components["responses"]["Problem"];
+        };
+    };
+    renameProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameProjectRequest"];
+            };
+        };
+        responses: {
+            /** @description Renamed (or the name was already this one); the project as it is now. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectView"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            /** @description A key that is not admin. Renaming is an estate decision, not a CI bot's. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            /** @description Another project of the same product already has this name (case folded). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     getProduct: {

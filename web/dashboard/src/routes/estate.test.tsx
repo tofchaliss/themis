@@ -57,6 +57,47 @@ describe("Estate", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Save tags" })).toBeDisabled());
   });
 
+  it("renames a project for an admin and shows the new name", async () => {
+    const calls = mockFetch({
+      ...estate,
+      "GET /whoami": [200, { user: "operator", can_write: true, scopes: ["admin"] }],
+      "PATCH /api/registry/projects/j1-bbbbbbbb": (b) => [200, { id: "j1-bbbbbbbb", product_id: "p1-aaaaaaaa", name: (b as { name: string }).name.trim() }],
+    });
+    renderWithQuery(<Estate />);
+    fireEvent.click(await screen.findByRole("button", { name: /example-product/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /project-a/ }));
+    const input = await screen.findByLabelText("New project name");
+    const btn = screen.getByRole("button", { name: "Rename" });
+    expect(btn).toBeDisabled();
+    fireEvent.change(input, { target: { value: " project-b " } });
+    fireEvent.click(btn);
+    expect(await screen.findByText("renamed")).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ name: "project-b" });
+    expect(await screen.findByText(/Rename project project-b/)).toBeInTheDocument();
+  });
+
+  it("shows the Registry's rename refusal", async () => {
+    mockFetch({
+      ...estate,
+      "PATCH /api/registry/projects/j1-bbbbbbbb": [409, { detail: "another project of this product already has this name" }],
+    });
+    renderWithQuery(<Estate />);
+    fireEvent.click(await screen.findByRole("button", { name: /example-product/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /project-a/ }));
+    fireEvent.change(await screen.findByLabelText("New project name"), { target: { value: "project-b" } });
+    fireEvent.click(screen.getByRole("button", { name: "Rename" }));
+    expect(await screen.findByText(/not renamed: another project/)).toBeInTheDocument();
+  });
+
+  it("disables renaming for a key that is not admin", async () => {
+    mockFetch({ ...estate, "GET /whoami": [200, { user: "ci", can_write: true, scopes: ["product:p1-aaaaaaaa"] }] });
+    renderWithQuery(<Estate />);
+    fireEvent.click(await screen.findByRole("button", { name: /example-product/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /project-a/ }));
+    fireEvent.change(await screen.findByLabelText("New project name"), { target: { value: "project-b" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Rename" })).toBeDisabled());
+  });
+
   it("filters by tag and explains an empty result", async () => {
     mockFetch({ ...estate, "GET /api/registry/products?tag=env%3Aprod": [200, []] });
     renderWithQuery(<Estate />);

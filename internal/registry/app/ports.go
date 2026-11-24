@@ -28,6 +28,10 @@ type Repository interface {
 	GetProject(ctx context.Context, id domain.ProjectID) (domain.Project, error)
 	GetProduct(ctx context.Context, id domain.ProductID) (domain.Product, error)
 	ListReleases(ctx context.Context, project domain.ProjectID) ([]domain.Release, error)
+	// RenameProject sets one project's name (EDR-KERNEL-01 D5). The unique index on
+	// (product_id, lower(name)) decides a clash: another project of the same product already
+	// carrying the name is ErrProjectNameTaken, and nothing changes.
+	RenameProject(ctx context.Context, id domain.ProjectID, name string) error
 	// ListProducts / ListProjects complete the product→project→release traversal a human has
 	// (DASH-1). Without them a posture is reachable only by a caller that already holds the UUID
 	// `POST /releases` printed.

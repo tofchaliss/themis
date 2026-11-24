@@ -1,6 +1,7 @@
 // The estate cascade: products → projects → releases, with the tag filter and the tag editor
 // (EDR-REMEDIATION-01 D7: tags are filters only). A release opens its posture, which is still
-// a classic-GUI screen until EDR-GUI-02 step G2.
+// a classic-GUI screen until EDR-GUI-02 step G2. An admin can correct a project's name
+// (EDR-KERNEL-01 D5): only the name changes, everything keyed to the project stays.
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
@@ -8,8 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Empty, ErrorPanel, Loading } from "@/components/states";
-import { apiPut, ApiError } from "@/lib/api";
-import { useProducts, useProjects, useReleases, useTags, useWhoAmI, type TagKind, type TagSet } from "@/lib/queries";
+import { apiPatch, apiPut, ApiError } from "@/lib/api";
+import { useProducts, useProjects, useReleases, useTags, useWhoAmI, type Project, type TagKind, type TagSet } from "@/lib/queries";
 import { releaseHash } from "@/lib/router";
 import { cn } from "@/lib/utils";
 
@@ -124,6 +125,58 @@ function TagEditor({ target, canWrite }: { target: Target; canWrite: boolean }) 
             </span>
           </form>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RenameProject({ project, canRename, onRenamed }: { project: { id: string; name: string }; canRename: boolean; onRenamed: (name: string) => void }) {
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState(project.name);
+  const save = useMutation({
+    mutationFn: (name: string) => apiPatch<Project>("registry", `/projects/${encodeURIComponent(project.id)}`, { name }),
+    onSuccess: (p) => {
+      void qc.invalidateQueries({ queryKey: ["projects"] });
+      onRenamed(p.name ?? draft.trim());
+    },
+  });
+  const name = draft.trim();
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    save.mutate(name);
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Rename project {project.name}</CardTitle>
+        <CardDescription>
+          Only the name changes. Findings, decisions, watches and tickets stay with this project. Change the name in every CI job that uploads
+          to it too, or its next upload creates a new project with the old name. Needs an admin key.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={submit} className="flex flex-wrap items-center gap-2">
+          <label htmlFor="rename-project-input" className="sr-only">
+            New project name
+          </label>
+          <Input id="rename-project-input" className="w-80" value={draft} onChange={(e) => setDraft(e.target.value)} autoComplete="off" />
+          <Button
+            type="submit"
+            disabled={!canRename || save.isPending || name === "" || name === project.name}
+            title={canRename ? undefined : "Renaming needs an admin key"}
+          >
+            Rename
+          </Button>
+          <span className="text-ink-2" role="status">
+            {save.isPending
+              ? "renaming…"
+              : save.isError
+                ? `not renamed: ${save.error instanceof ApiError ? save.error.message : "request failed"}`
+                : save.isSuccess
+                  ? "renamed"
+                  : ""}
+          </span>
+        </form>
       </CardContent>
     </Card>
   );
@@ -279,6 +332,17 @@ export function Estate() {
       </div>
 
       {target && <TagEditor key={`${target.kind}:${target.id}`} target={target} canWrite={who.data?.can_write !== false} />}
+      {target?.kind === "project" && project && (
+        <RenameProject
+          key={project.id}
+          project={project}
+          canRename={who.data?.scopes ? who.data.scopes.includes("admin") : who.data?.can_write !== false}
+          onRenamed={(name) => {
+            setProject({ id: project.id, name });
+            setTarget({ kind: "project", id: project.id, name });
+          }}
+        />
+      )}
     </div>
   );
 }

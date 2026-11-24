@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/themis-project/themis/internal/platform/auth"
 )
@@ -59,6 +60,14 @@ var statelessPosts = map[string]bool{
 	"/api/communication/previews":                                 true,
 }
 
+// isAdminOnly reports the writes only an ADMIN-scope operator may make through the proxy. The
+// proxy forwards with the admin node key (D4), so a node's own admin-only check never sees the
+// operator; the rule must hold here too. A project rename (EDR-KERNEL-01 D5) is one: renaming
+// is an estate decision, not something a product-scoped operator does.
+func isAdminOnly(r *http.Request) bool {
+	return r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/registry/projects/")
+}
+
 // isRead classifies a request for D11: read methods, plus the stateless POSTs.
 func isRead(r *http.Request) bool {
 	switch r.Method {
@@ -86,6 +95,10 @@ func (g Gate) Wrap(next http.Handler) http.Handler {
 		}
 		if !p.AuthorizeWrite() {
 			writeProblem(w, http.StatusForbidden, "read-only operator", "this operation records a decision and requires a write-capable key")
+			return
+		}
+		if isAdminOnly(r) && !p.IsAdmin() {
+			writeProblem(w, http.StatusForbidden, "admin scope required", "renaming a project is restricted to admin-scope operators")
 			return
 		}
 		if !documentPosts[r.URL.Path] && !g.identityMatches(w, r, p) {

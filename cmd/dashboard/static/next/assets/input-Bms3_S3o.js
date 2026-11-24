@@ -1,1 +1,0 @@
-import{V as e,it as t,rt as n}from"./index-DbWdk1ga.js";t();var r=n();function i({className:t,...n}){return(0,r.jsx)(`input`,{className:e(`h-8 rounded-lg border border-line bg-card px-2.5 text-[13px] text-ink placeholder:text-muted focus-visible:outline-2 focus-visible:outline-accent`,t),...n})}export{i as t};

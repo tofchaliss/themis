@@ -56,6 +56,25 @@ func TestNewProject(t *testing.T) {
 	}
 }
 
+// A rename changes the name only: the id and the owning product stay, and the new name is
+// validated like a new project's (EDR-KERNEL-01 D5).
+func TestProjectRename(t *testing.T) {
+	p, _ := domain.NewProject("proj-1", "prod-1", "api")
+	r, err := p.Rename("  api-gateway  ")
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if r.ID() != "proj-1" || r.ProductID() != "prod-1" || r.Name() != "api-gateway" {
+		t.Errorf("renamed = %+v", r)
+	}
+	if p.Name() != "api" {
+		t.Errorf("the original value changed: %q", p.Name())
+	}
+	if _, err := p.Rename("   "); err == nil {
+		t.Error("an empty name must be refused")
+	}
+}
+
 func TestNewCustomer(t *testing.T) {
 	c, err := domain.NewCustomer("cust-1", "  Acme  ")
 	if err != nil {

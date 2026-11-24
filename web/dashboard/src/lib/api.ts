@@ -74,6 +74,13 @@ export async function apiPut<T>(node: Node, path: string, body: unknown): Promis
   return (await r.json()) as T;
 }
 
+/** PATCH a JSON body and read the JSON answer; a non-2xx is an ApiError with its detail. */
+export async function apiPatch<T>(node: Node, path: string, body: unknown): Promise<T> {
+  const r = await send(node, path, { method: "PATCH", body: JSON.stringify(body) });
+  if (!r.ok) throw new ApiError(r.status, await problemDetail(r));
+  return (await r.json()) as T;
+}
+
 /** POST a JSON body. Returns the status and the parsed JSON (null when there is none); a
  * non-2xx is an ApiError carrying the node's problem detail. */
 export async function apiPost<T>(node: Node, path: string, body?: unknown): Promise<{ status: number; data: T | null }> {

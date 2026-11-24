@@ -42,6 +42,20 @@ type fakeRepo struct {
 	tags     map[string][]string // "kind/id" → own tags (EDR-REMEDIATION-01 D7)
 	tagsErr  error
 	tagsErr2 error
+
+	renameErr error // RenameProject's injected answer (EDR-KERNEL-01 D5)
+}
+
+func (r *fakeRepo) RenameProject(_ context.Context, id domain.ProjectID, name string) error {
+	if r.renameErr != nil {
+		return r.renameErr
+	}
+	p, err := domain.NewProject(id, r.projectObjs[string(id)].ProductID(), name)
+	if err != nil {
+		return err
+	}
+	r.projectObjs[string(id)] = p
+	return nil
 }
 
 func (r *fakeRepo) SetTags(_ context.Context, kind domain.TagEntity, id string, tags []string) error {
