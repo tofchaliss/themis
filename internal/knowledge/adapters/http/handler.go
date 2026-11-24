@@ -39,6 +39,8 @@ type Handler struct {
 	// psirt serves GET /psirt/alerts (EDR-PSIRT-01 P2). nil ⇒ 503.
 	psirt      *app.PSIRTService
 	psirtCache psirtCache
+	// bulletins serves the PSIRT bulletin register (EDR-PSIRT-01 revision 3). nil ⇒ 503.
+	bulletins *app.BulletinService
 }
 
 // WithSanity wires the fan-out guard's flag reader (KN-SANITY-1).

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/themis-project/themis/internal/platform/auth"
 )
@@ -59,6 +60,20 @@ var statelessPosts = map[string]bool{
 	"/api/communication/previews":                                 true,
 }
 
+// adminWrites are mutation route prefixes that only an admin operator may use, where the node's
+// own rule is admin-only. The node cannot enforce it for the GUI: it sees the injected node
+// key, never the operator's. The PSIRT bulletin register is admin-only (EDR-PSIRT-01 R2).
+var adminWrites = []string{"/api/knowledge/psirt/bulletins"}
+
+func isAdminWrite(path string) bool {
+	for _, prefix := range adminWrites {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // isRead classifies a request for D11: read methods, plus the stateless POSTs.
 func isRead(r *http.Request) bool {
 	switch r.Method {
@@ -86,6 +101,10 @@ func (g Gate) Wrap(next http.Handler) http.Handler {
 		}
 		if !p.AuthorizeWrite() {
 			writeProblem(w, http.StatusForbidden, "read-only operator", "this operation records a decision and requires a write-capable key")
+			return
+		}
+		if isAdminWrite(r.URL.Path) && !p.IsAdmin() {
+			writeProblem(w, http.StatusForbidden, "admin only", "this operation requires the "+auth.ScopeAdmin+" scope")
 			return
 		}
 		if !documentPosts[r.URL.Path] && !g.identityMatches(w, r, p) {

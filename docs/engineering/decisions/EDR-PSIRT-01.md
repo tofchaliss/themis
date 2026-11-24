@@ -1,6 +1,6 @@
 # EDR-PSIRT-01 — PSIRT early alert on the Overview: newly published critical and high CVEs per product
 
-Status: **PROPOSED — 2026-11-23, revision 2; revision 3 (bulletin register) proposed 2026-11-24.** The owner answered choices 1-6 and A-C on 2026-11-23.
+Status: **PROPOSED — 2026-11-23, revision 2; revision 3 (bulletin register) proposed 2026-11-24, B1 and B2 built the same day.** The owner answered choices 1-6 and A-C on 2026-11-23.
 The same day the owner approved the Knowledge change, a new read API and this design PR ("let us
 see how it performs, if not we will revert"). Revision 2 follows the owner's reframing at 15:43Z
 (below). Q1 answered 2026-11-24: (a) name match. P1, P2 and P3 built and the P4 VM check run 2026-11-24 (see Realization notes).
@@ -361,3 +361,43 @@ Three causes, all fixed:
 3. **Spelling: "libexpat" vs "expat".** **Fix:** a leading `lib` is not part of the spelling on
    either side, unless fewer than 3 characters remain (`libc` keeps it). The source's name is
    the one reported in `matched_on`.
+
+### B1 and B2 (2026-11-24, owner "Go B1 and B2")
+
+**B1, Knowledge.**
+
+1. **Domain** (`domain/bulletin.go`): `BulletinInput`, `Bulletin`, `NormalizeBulletin` and the
+   one edit rule `CanEditBulletin`. Limits: bulletin ID 64 characters, title 300, note 4000,
+   each link 2000. A link must be an absolute `http` or `https` URL. The CVE is stored in its
+   canonical spelling. The report date is a day.
+2. **Store** (migration `000014`): `psirt_bulletins` and `psirt_bulletin_history`. Two partial
+   unique indexes keep one **live** bulletin per bulletin ID and per CVE. A removal sets
+   `removed_at`. Every write and its history row commit in one transaction. The history keeps
+   the whole bulletin before and after as JSON with the API's keys.
+3. **API**: the five routes of this revision, plus `bulletin` on each `GET /psirt/alerts` row.
+   The join runs after the alert cache, so a new bulletin shows on the next read. A register
+   that cannot be read leaves the rows without a bulletin and does not fail the alert.
+4. **Who may write.** Knowledge refuses a key that is not `admin` with 403. With auth off on
+   the node, every caller may write and the history records `unauthenticated`.
+
+**B2, GUI.**
+
+1. A **Bulletins** tab on the PSIRT card, with the columns of this revision. "Technology area"
+   and "CVE updated" come from the live alert read, so they show only while the CVE is in the
+   chosen window.
+2. A **Bulletin** column on the two alert tabs: the bulletin ID as a link, or **Add** for an
+   admin, which opens the form with the CVE filled in.
+3. One form to add, edit and remove. Remove asks once more before it acts.
+
+**Two things found while building.**
+
+1. **The dashboard gate had to learn "admin only".** The dashboard sends the node's own key for
+   every GUI request, so Knowledge cannot tell a product-scoped GUI user from an admin. The
+   proxy gate (`internal/dashboard/proxy`) now refuses a bulletin write from a session that is
+   not `admin`. A direct API call is refused by Knowledge itself.
+2. **The history names the key, not the GUI user.** For a change made in the GUI, the actor is
+   the dashboard's node key, the same as every other GUI write today (EDR-GUI-01 D4, until
+   key pass-through). Tracked as `PSIRT-BULLETIN-ACTOR-1`.
+
+**Not built:** a GUI view of a bulletin's history (the API has it), and product-scoped editing
+(R2, later).
