@@ -118,18 +118,23 @@ type NameMatch struct {
 // without its domain, so "golang.org" fits the vendor "golang"). Measured on the VM
 // 2026-11-24: the last segment alone matched an unrelated vendor's "runtime" at CVSS 10. One row
 // per component, sorted by component name; the first match in sorted order is the one reported.
+//
+// A leading "lib" is not part of the spelling on either side (VM 2026-11-24: the source said
+// "libexpat", the component is "expat"), unless what remains is shorter than a match name.
 func MatchComponents(refs []AffectedRef, comps []ComponentRef) []NameMatch {
 	if len(refs) == 0 || len(comps) == 0 {
 		return nil
 	}
-	whole := map[string]struct{}{}
+	whole := map[string]string{}    // spelling key -> the affected name reported
 	byLast := map[string][]string{} // product -> vendors that ship it
 	for _, r := range refs {
 		p := NormalizeProductName(r.Product)
 		if len(p) < minMatchNameLen {
 			continue
 		}
-		whole[p] = struct{}{}
+		if prev, ok := whole[nameKey(p)]; !ok || p < prev {
+			whole[nameKey(p)] = p
+		}
 		if v := NormalizeProductName(r.Vendor); v != "" {
 			byLast[p] = append(byLast[p], v)
 		}
@@ -142,8 +147,8 @@ func MatchComponents(refs []AffectedRef, comps []ComponentRef) []NameMatch {
 	}
 	for _, c := range comps {
 		for _, cand := range []string{NormalizeProductName(c.Name), NormalizeProductName(c.Source)} {
-			if _, ok := whole[cand]; ok {
-				keep(c.Name, cand)
+			if on, ok := whole[nameKey(cand)]; ok && cand != "" {
+				keep(c.Name, on)
 			}
 		}
 		segs := strings.Split(c.Name, "/")
@@ -171,4 +176,14 @@ func MatchComponents(refs []AffectedRef, comps []ComponentRef) []NameMatch {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Component < out[j].Component })
 	return out
+}
+
+// nameKey is the spelling two names are compared in: the normalized name without a leading
+// "lib" when at least minMatchNameLen characters remain ("libexpat" and "expat" read alike;
+// "libc" stays "libc").
+func nameKey(n string) string {
+	if rest, ok := strings.CutPrefix(n, "lib"); ok && len(rest) >= minMatchNameLen {
+		return rest
+	}
+	return n
 }

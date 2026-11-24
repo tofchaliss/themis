@@ -403,7 +403,7 @@ components:
             against product component names (EDR-PSIRT-01 Q1).
     PSIRTAlerts:
       type: object
-      required: [alerts, estate_unavailable, lookups_skipped, issue_type_table]
+      required: [alerts, estate_unavailable, lookups_skipped, older_not_read, issue_type_table]
       properties:
         alerts:
           type: array
@@ -420,6 +420,11 @@ components:
           description: >-
             Rows that needed a CVE.org lookup (NVD had no score or no affected names) beyond the
             per-read cap; those rows are shown as NVD gave them.
+        older_not_read:
+          type: integer
+          description: >-
+            The oldest CVEs of the window that were not read, because the window holds more
+            than the read's page budget. The read keeps the newest, which an alert is about.
         issue_type_table:
           type: string
           description: The version of the CWE-to-issue-type table behind every issue_type.
@@ -479,7 +484,10 @@ components:
           type: string
         matched_on:
           type: string
-          description: The affected name that matched the component.
+          description: >-
+            What tied the CVE to the component: "themis" when the Themis engine already filed it
+            against a release of the product (exact, version-aware); otherwise the affected name
+            that matched ("vendor:product" for a match on a path's last segment).
     RecentFaultline:
       type: object
       required: [created_at, card]

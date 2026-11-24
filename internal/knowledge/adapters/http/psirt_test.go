@@ -21,7 +21,9 @@ func (psirtEstate) ReleaseProducts(context.Context) (map[string]app.ProductRef, 
 
 type psirtSBOMs struct{}
 
-func (psirtSBOMs) SBOMForRelease(context.Context, string) (string, bool, error) { return "e1", true, nil }
+func (psirtSBOMs) SBOMForRelease(context.Context, string) (string, bool, error) {
+	return "e1", true, nil
+}
 
 type psirtInv struct{}
 

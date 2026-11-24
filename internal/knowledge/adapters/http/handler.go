@@ -139,7 +139,7 @@ func (h *Handler) GetPublishedRecently(w http.ResponseWriter, r *http.Request, p
 	rows, hit := h.publishedCache.get(days)
 	if !hit {
 		var err error
-		rows, err = h.published.LatestPublished(r.Context(), days)
+		rows, _, err = h.published.LatestPublished(r.Context(), days)
 		if err != nil {
 			writeProblem(w, http.StatusBadGateway, "cannot read the latest published CVEs", err.Error())
 			return

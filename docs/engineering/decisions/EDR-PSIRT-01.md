@@ -261,3 +261,33 @@ list below it:
   bottom.
 
 The rest of the page is the PSIRT list, now 25 rows per page.
+
+### P4 second round (2026-11-24, owner "yes" to fix 2)
+
+Measured after the first fixes, `days=30&min_severity=high`:
+
+| What | Value |
+| --- | --- |
+| Rows | 806 (fewer than the 7-day window's 1018) |
+| Rows already in Themis (`carded`) | 6 |
+| Of those, matched to a product | 0 |
+| Carded rows naming `libexpat`, where the component is `expat` | 2 |
+| Carded rows with no names yet | 4 |
+
+Three causes, all fixed:
+
+1. **The newest CVEs were cut off.** NVD returns a window oldest first, and the read's page
+   budget is 10 x 200 CVEs. A busy window ran past it, and the read dropped the newest CVEs,
+   the ones an alert exists for. That is why 30 days listed fewer rows than 7. **Fix:** when the
+   first page says the window is larger than the budget, the read drops that oldest page and
+   jumps to the newest pages. The CVEs it skips are counted as `older_not_read` (a new field of
+   `GET /psirt/alerts`), and the card says so.
+2. **A CVE already in Themis did not show its products.** **Fix:** for a carded row, the alert
+   reads Knowledge's own live match rows (`MatchesByCVE`: `faultline_matches` joined to
+   `faultlines`, retired rows left out), maps each release to its product through the same
+   estate walk, and lists those first with `matched_on: "themis"`. That is exact and
+   version-aware. A name match for the same component is not repeated. If the engine read
+   fails, `estate_unavailable` is set.
+3. **Spelling: "libexpat" vs "expat".** **Fix:** a leading `lib` is not part of the spelling on
+   either side, unless fewer than 3 characters remain (`libc` keeps it). The source's name is
+   the one reported in `matched_on`.

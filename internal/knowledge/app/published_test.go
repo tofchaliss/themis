@@ -14,12 +14,13 @@ import (
 type fakePublished struct {
 	since time.Time
 	rows  []app.PublishedCVE
+	older int
 	err   error
 }
 
-func (f *fakePublished) PublishedSince(_ context.Context, since time.Time) ([]app.PublishedCVE, error) {
+func (f *fakePublished) PublishedSince(_ context.Context, since time.Time) ([]app.PublishedCVE, int, error) {
 	f.since = since
-	return f.rows, f.err
+	return f.rows, f.older, f.err
 }
 
 // GUI-16 layer 2: the window defaults to 7 days and is clamped at 30; rows come back newest
@@ -37,14 +38,14 @@ func TestPublishedService_LatestPublished(t *testing.T) {
 		{CVE: "CVE-2026-1", Published: now.Add(-48 * time.Hour)},
 		{CVE: "CVE-2026-2", Published: now.Add(-2 * time.Hour)},
 		{CVE: "CVE-2026-3", Published: now.Add(-2 * time.Hour)},
-	}}
+	}, older: 4}
 	svc := app.NewPublishedService(src, repo, fixedClock{})
 	if !svc.Enabled() {
 		t.Fatal("a wired source must report enabled")
 	}
-	rows, err := svc.LatestPublished(ctx, 0)
-	if err != nil {
-		t.Fatalf("read: %v", err)
+	rows, older, err := svc.LatestPublished(ctx, 0)
+	if err != nil || older != 4 {
+		t.Fatalf("read: %v, older not read %d", err, older)
 	}
 	if !src.since.Equal(now.Add(-7 * 24 * time.Hour)) {
 		t.Errorf("default window asked since %v, want 7 days back", src.since)
@@ -58,23 +59,23 @@ func TestPublishedService_LatestPublished(t *testing.T) {
 	if n := len(repo.cards); n != 1 {
 		t.Errorf("the read created %d cards; it must persist nothing", n-1)
 	}
-	if _, err := svc.LatestPublished(ctx, 400); err != nil || !src.since.Equal(now.Add(-30*24*time.Hour)) {
+	if _, _, err := svc.LatestPublished(ctx, 400); err != nil || !src.since.Equal(now.Add(-30*24*time.Hour)) {
 		t.Errorf("clamp: since %v err %v", src.since, err)
 	}
 	src.err = errors.New("nvd down")
-	if _, err := svc.LatestPublished(ctx, 7); err == nil {
+	if _, _, err := svc.LatestPublished(ctx, 7); err == nil {
 		t.Error("a source failure must surface")
 	}
 	src.err = nil
 	repo.getErr = errors.New("db down")
-	if _, err := svc.LatestPublished(ctx, 7); err == nil {
+	if _, _, err := svc.LatestPublished(ctx, 7); err == nil {
 		t.Error("a repository failure must surface")
 	}
 	var none *app.PublishedService
 	if none.Enabled() {
 		t.Error("nil service is not enabled")
 	}
-	if _, err := app.NewPublishedService(nil, repo, fixedClock{}).LatestPublished(ctx, 7); !errors.Is(err, app.ErrPublishedUnavailable) {
+	if _, _, err := app.NewPublishedService(nil, repo, fixedClock{}).LatestPublished(ctx, 7); !errors.Is(err, app.ErrPublishedUnavailable) {
 		t.Errorf("unwired: %v", err)
 	}
 }
