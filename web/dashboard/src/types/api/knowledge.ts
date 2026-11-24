@@ -215,6 +215,19 @@ export interface components {
             cvss_score?: number;
             /** @description Whether the estate already holds a card for this CVE. */
             carded: boolean;
+            /**
+             * Format: date-time
+             * @description When the source last changed its record (NVD lastModified). Absent when the source states none; never the time Themis fetched it (EDR-PSIRT-01 P1).
+             */
+            modified?: string;
+            /** @description The CWE ids the source states for the flaw, normalized ("CWE-787"), sorted by number. NVD placeholders such as NVD-CWE-noinfo are not CWE ids and are left out. */
+            cwes?: string[];
+            /** @description A short issue-type word from Themis's fixed CWE table (EDR-PSIRT-01 choice 6, table version in issue_type_table), for example "Code execution" or "Denial of service"; "Other" for CWEs the table does not map. Absent when the source states no CWE. A display label only: nothing decides on it. Always show the cwes beside it. */
+            issue_type?: string;
+            /** @description The version of the CWE-to-issue-type table that produced issue_type. */
+            issue_type_table?: string;
+            /** @description The application products the source says carry the flaw (NVD CPE application parts). Empty for a record NVD has not analysed yet. The PSIRT alert matches these names against product component names (EDR-PSIRT-01 Q1). */
+            affected_products?: string[];
         };
         RecentFaultline: {
             /**

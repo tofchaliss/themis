@@ -155,6 +155,20 @@ func (h *Handler) GetPublishedRecently(w http.ResponseWriter, r *http.Request, p
 		if p.Score > 0 {
 			item.CvssScore = f32ptr(p.Score)
 		}
+		if !p.Modified.IsZero() {
+			m := p.Modified
+			item.Modified = &m
+		}
+		if len(p.Weaknesses) > 0 {
+			cwes := append([]string(nil), p.Weaknesses...)
+			item.Cwes = &cwes
+			item.IssueType = strptr(domain.IssueType(cwes))
+			item.IssueTypeTable = strptr(domain.IssueTypeTableVersion)
+		}
+		if len(p.Affected) > 0 {
+			aff := append([]string(nil), p.Affected...)
+			item.AffectedProducts = &aff
+		}
 		out = append(out, item)
 	}
 	writeJSON(w, http.StatusOK, out)
