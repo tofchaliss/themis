@@ -309,6 +309,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/findings/{id}/severity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The severity of one Finding as a person decides it (EDR-SCORING-01 section 7.1): the original score and vector, the owner-set severity in force (if any) and the history of every owner-set severity. Read scope. */
+        get: operations["getFindingSeverity"];
+        /** Set the owner-set severity of one Finding (OS1-OS4). Admin only. The body gives a reason and exactly one of a level or a changed CVSS 3.0 / 3.1 vector; Themis computes the score either way. From the moment it is saved the owner-set score is what priority, the remediation deadline and the lists read; the original is kept beside it. `apply_to` sets the same on other Findings of the same CVE in the same product, all or nothing; one that already has an owner-set severity is replaced (its record stays in the history). */
+        put: operations["setFindingSeverity"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/findings/{id}/severity/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove the owner-set severity of one Finding (OS2). Admin only. The original score counts again; the record stays in the history. 404 when there is none to remove. */
+        post: operations["removeFindingSeverity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/findings/{id}/severity/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Compute what a level or a changed vector would give on this Finding. Records nothing. Read scope. */
+        post: operations["previewFindingSeverity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/findings/{id}/severity/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The pick list of an owner-set severity (OS3): every other Finding of the same CVE in the same product, with the owner-set severity it carries now. Never another product. 503 when no Registry seam is configured. */
+        get: operations["getFindingSeverityTargets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/findings/{id}/score": {
         parameters: {
             query?: never;
@@ -684,6 +753,104 @@ export interface components {
             /** @description Plain-language premise of the verdict (e.g. "vendor fix 0:39.2.0-9.el8_10 present"), stated by Knowledge and rendered verbatim - a clearance nobody can read the reason for is one nobody can audit. */
             verdict_reason?: string;
         };
+        /** @description One owner-set severity (EDR-SCORING-01 section 7.1). */
+        OwnerSeverity: {
+            /**
+             * @description How it was given - a picked level, or changed CVSS metric values.
+             * @enum {string}
+             */
+            kind: "level" | "vector";
+            /**
+             * @description The picked level, or the CVSS rating of the computed score for a vector.
+             * @enum {string}
+             */
+            level: "none" | "low" | "medium" | "high" | "critical";
+            /** @description The changed vector; absent for a level (a level has no vector). */
+            vector?: string;
+            /**
+             * Format: double
+             * @description The score Themis computed (0.0 - 10.0).
+             */
+            score: number;
+            /**
+             * Format: double
+             * @description The original score when this was set; absent when there was none.
+             */
+            original_score?: number;
+            reason: string;
+            set_by: string;
+            /** Format: date-time */
+            set_at: string;
+            /** @description The Finding whose form this was set on, when it came through the pick list. */
+            picked_from?: string;
+            /**
+             * Format: date-time
+             * @description History only - when it stopped being in force.
+             */
+            ended_at?: string;
+            ended_by?: string;
+            /** @enum {string} */
+            end_cause?: "replaced" | "removed";
+        };
+        FindingSeverity: {
+            finding_id: string;
+            cve: string;
+            /**
+             * Format: double
+             * @description The original score (source Base), unchanged by any owner-set severity.
+             */
+            original_score?: number;
+            original_severity?: string;
+            /** @description The vector Themis selected for the original, where one exists. The form for changed metrics starts from it. */
+            original_vector?: string;
+            owner?: components["schemas"]["OwnerSeverity"];
+            history: components["schemas"]["OwnerSeverity"][];
+        };
+        SetSeverityRequest: {
+            actor_id: string;
+            /** @description Required - why this severity is right for the product. */
+            reason: string;
+            /** @description none | low | medium | high | critical. The score is the original moved into the level's band by the shortest way. Give this or `vector`, not both. */
+            level?: string;
+            /** @description A CVSS 3.0 / 3.1 vector with the changed metric values. The calculator scores it. */
+            vector?: string;
+            /** @description Other Finding ids to set the same severity on (GET .../severity/targets lists them). Each must be a Finding of the same CVE in the same product, or the whole request is refused (400) and nothing is recorded. */
+            apply_to?: string[];
+        };
+        SetSeverityResult: {
+            /** @description How many Findings got the severity, this one included. */
+            applied: number;
+            /** @description How many of them already had an owner-set severity. */
+            replaced: number;
+            severity: components["schemas"]["FindingSeverity"];
+        };
+        SeverityPreview: {
+            /** @enum {string} */
+            kind: "level" | "vector";
+            level: string;
+            /** Format: double */
+            score: number;
+            vector?: string;
+            /** Format: double */
+            original_score?: number;
+        };
+        SeverityTarget: {
+            finding_id: string;
+            release_id: string;
+            product_id?: string;
+            project_id?: string;
+            product_name?: string;
+            project_name?: string;
+            version?: string;
+            owner?: components["schemas"]["OwnerSeverity"];
+        };
+        SeverityTargets: {
+            finding_id: string;
+            count: number;
+            /** @description How many of the targets carry an owner-set severity now. */
+            with_owner_severity: number;
+            targets: components["schemas"]["SeverityTarget"][];
+        };
         FindingScore: {
             finding_id: string;
             cve: string;
@@ -986,6 +1153,8 @@ export interface components {
             expert_severity?: string;
             /** @description final or provisional when expert_score is set (EDR-SCORING-01 D5). */
             expert_status?: string;
+            /** @description The owner-set severity in force (EDR-SCORING-01 section 7.1); absent when none. While it is set, base_score and both priorities are computed from its score, and original_score still shows what the source said. */
+            owner_severity?: components["schemas"]["OwnerSeverity"];
             /** @description The assessment roll-up state (scored | no_components | no_carrier | no_open_occurrences | unavailable); absent when no assessment is stored. */
             score_state?: string;
             faultline_id?: string;
@@ -1688,6 +1857,153 @@ export interface operations {
             };
             404: components["responses"]["Problem"];
             500: components["responses"]["Problem"];
+        };
+    };
+    getFindingSeverity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["FindingId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingSeverity"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    setFindingSeverity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["FindingId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSeverityRequest"];
+            };
+        };
+        responses: {
+            /** @description Saved. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetSeverityResult"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    removeFindingSeverity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["FindingId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    actor_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Removed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingSeverity"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    previewFindingSeverity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["FindingId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    level?: string;
+                    vector?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeverityPreview"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getFindingSeverityTargets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["FindingId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SeverityTargets"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
         };
     };
     getFindingScore: {

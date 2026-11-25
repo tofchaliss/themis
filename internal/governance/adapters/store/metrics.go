@@ -15,7 +15,9 @@ var _ app.MetricsReader = (*Store)(nil)
 // Position at or after it, and the stage stop.
 func (s *Store) MetricsFindings(ctx context.Context) ([]app.MetricsRow, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT f.id, f.release_id, f.created_at, f.stage, f.sla_bucket, f.absent_since, f.stage_stopped_at,
+		SELECT f.id, f.release_id, f.created_at, f.stage,
+		       CASE WHEN f.owner_base_score IS NOT NULL THEN f.owner_sla_bucket ELSE f.sla_bucket END,
+		       f.absent_since, f.stage_stopped_at,
 		       (SELECT min(p.established_at) FROM finding_positions p
 		         WHERE p.finding_id = f.id AND p.actor_kind = 'human'),
 		       (SELECT min(p.established_at) FROM finding_positions p

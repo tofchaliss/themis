@@ -400,6 +400,10 @@ three angles, and two of them proposed fixes that would not have worked.
   lead later; copies along with a decision; a later change of the original flags it for
   review. Steps V0 (docs) to V4 (VM check), each on the owner's go. The level rule
   (OS1 item 2) was settled by the owner on 2026-11-25.
+  **V1 (Governance) and V2 (GUI) built 2026-11-25**: governance migration 000027, the
+  `/findings/{id}/severity` routes, the read columns priority and deadline use, the "Severity"
+  card on the decision page; see the realization note in section 7.1. Open: V3 (review flag,
+  severity copies along with a decision), V4 (VM check), an event when a severity is set.
 
 - [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
   feature). The owner's reference table shows per-release assessment-type markers (five status

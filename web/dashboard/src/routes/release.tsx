@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { bandSlices, severitySlices } from "@/components/bands";
 import { Donut } from "@/components/donut";
 import {
+  countingSeverity,
   BandBadge,
   ExpertSeverity,
   FixCell,
@@ -58,7 +59,7 @@ function Summary({ all, breached }: { all: PostureEntry[]; breached: number }) {
             <figcaption className="text-xs font-medium text-ink-2" title="Themis's CVSS score after the assessment">
               Expert severity
             </figcaption>
-            <Donut compact label="findings by expert severity" slices={severitySlices(all.map((p) => p.expert_severity))} total={all.length} />
+            <Donut compact label="findings by expert severity" slices={severitySlices(all.map(countingSeverity))} total={all.length} />
           </figure>
         </div>
       )}
