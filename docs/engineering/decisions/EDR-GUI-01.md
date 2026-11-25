@@ -182,6 +182,10 @@ request — so without a proxy-side gate, a read-scoped operator's restriction i
 NOWHERE (the nodes only ever see the node key until v2 pass-through). The proxy is the one
 place that knows both who is asking (the session) and what they ask (the route), so it enforces:
 
+- **Amendment (owner, 2026-11-25, EDR-GUI-02 D15):** read scope also passes exactly
+  `POST /api/governance/findings/{id}/recommend`, the ask for an AI position. It records an
+  advisory proposal on inferred evidence, changes no Position, and no rule can accept it. Every
+  other recording route, and the direct Gateway invoke of `recommend_position`, stays refused.
 - **read scope** passes `GET`s and the two Information-capability invokes
   (`plan_remediation`, `explain_vulnerability` — `POST` in shape, but they write nothing and
   propose no stance, T7);

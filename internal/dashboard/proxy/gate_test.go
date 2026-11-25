@@ -77,6 +77,18 @@ func TestGate_ScopeMatrix(t *testing.T) {
 			"/api/governance/findings/f-1/proposals/p-1/accept", http.StatusForbidden},
 		{"admin writes", adminOp, http.MethodPost,
 			"/api/governance/findings/f-1/proposals/p-1/accept", http.StatusOK},
+		// EDR-GUI-02 D15 (owner, 2026-11-25): a read operator may ASK the AI through Governance's
+		// own route. The ask records an advisory proposal only; deciding stays a write.
+		{"read op asks the AI for a position", readOp, http.MethodPost,
+			"/api/governance/findings/f-1/recommend", http.StatusOK},
+		{"read op CANNOT raise a proposal", readOp, http.MethodPost,
+			"/api/governance/findings/f-1/proposals", http.StatusForbidden},
+		{"read op CANNOT reach a deeper path through the ask", readOp, http.MethodPost,
+			"/api/governance/findings/f-1/proposals/p-1/recommend", http.StatusForbidden},
+		{"read op CANNOT ask with no finding", readOp, http.MethodPost,
+			"/api/governance/findings//recommend", http.StatusForbidden},
+		{"read op CANNOT delete through the ask path", readOp, http.MethodDelete,
+			"/api/governance/findings/f-1/recommend", http.StatusForbidden},
 		// EDR-PSIRT-01 R2: the bulletin register is admin-only, and the node sees only the
 		// injected key, so the gate is where a product-scoped operator is refused.
 		{"product op CANNOT add a bulletin", productOp, http.MethodPost, "/api/knowledge/psirt/bulletins", http.StatusForbidden},
