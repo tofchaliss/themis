@@ -80,13 +80,33 @@ func isAdminWrite(r *http.Request) bool {
 	return false
 }
 
-// isRead classifies a request for D11: read methods, plus the stateless POSTs.
+// isAdvisoryAsk reports the one recording POST a read-scoped operator may send (owner rule,
+// 2026-11-25, EDR-GUI-02 D15): asking the AI for a position on one Finding,
+// POST /api/governance/findings/{id}/recommend. It records an ADVISORY proposal on inferred
+// evidence, which no rule can accept and which changes no Position: the Finding stays exactly
+// as open as it was until a write-capable person decides. Accepting, rejecting and raising a
+// proposal stay writes. The direct Gateway invoke of recommend_position stays refused: this
+// route is the one Governance owns and audits.
+func isAdvisoryAsk(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	const prefix, suffix = "/api/governance/findings/", "/recommend"
+	p := r.URL.Path
+	if !strings.HasPrefix(p, prefix) || !strings.HasSuffix(p, suffix) {
+		return false
+	}
+	id := p[len(prefix) : len(p)-len(suffix)]
+	return id != "" && !strings.Contains(id, "/")
+}
+
+// isRead classifies a request for D11: read methods, the stateless POSTs, and the advisory ask.
 func isRead(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return true
 	}
-	return statelessPosts[r.URL.Path]
+	return statelessPosts[r.URL.Path] || isAdvisoryAsk(r)
 }
 
 // Wrap enforces, in order: a session exists (401), the scope covers the route class

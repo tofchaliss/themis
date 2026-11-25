@@ -316,6 +316,37 @@ shows a warning first**. Mockups: `gui-reference/mockup-decide-*.png`.
    states only the effects that are true at the time it is built (in shadow, priority and SLA
    do not move, and the dialog says so).
 
+### D15 — The decision page can ask the AI, on a button (owner, 2026-11-24, revised 2026-11-25)
+
+The new GUI had no way to ask the AI for a position: the old drawer's "Recommend a position"
+button was never carried over. The owner's rule, as revised on 2026-11-25:
+
+1. An **AI recommendation** box sits above "Your decision", with an **Ask the AI** button.
+   The AI is **never asked on opening** the page. A low-severity or plainly affected Finding
+   costs no model call. The rule is the same for every user and every Finding.
+2. The button calls `POST /findings/{id}/recommend`, which records an advisory proposal. The
+   form **stays usable** while the AI works.
+3. The answer is shown in the box. It goes into the form only on **Use this in the form**.
+   When the form already holds a decision or a rationale, the page asks first ("Do you want
+   to proceed?"). "No" keeps the person's values.
+4. **Record decision** on an unchanged AI fill **accepts the AI's proposal** in the person's
+   name (one audit trail: the AI proposed, the person accepted). A changed form is the
+   person's own proposal, raised and accepted as before; the AI's proposal stays under
+   "Proposals waiting".
+5. A no-answer shows its reason (`X-Themis-AI-Reason`), never a blank box. **Ask the AI again**
+   retries.
+6. A **read-only** user may ask too (owner, 2026-11-25) and reads the answer. Recording a
+   decision, accepting, rejecting and raising a proposal stay blocked for that user. The
+   dashboard gate lets a read session send exactly `POST /api/governance/findings/{id}/recommend`.
+   This narrows EDR-GUI-01 D11 for one route: the ask records an advisory proposal, changes no
+   Position, and no rule can accept it. The direct Gateway invoke of `recommend_position` stays
+   refused for a read session.
+
+The AI still only proposes. Its proposal is `inferred` and no rule can accept it.
+
+The first build (2026-11-24) asked on opening and held the form until the answer. The owner
+withdrew that the next day: it spent a model call on Findings that need none.
+
 ## Visual reference
 
 `docs/engineering/gui-reference/` holds the owner's screenshot of today's finding drawer and
