@@ -1,6 +1,6 @@
 # EDR-SYNC-01 — One decision, chosen scope: a CVE assessment applied across the projects of a product
 
-Status: **ACCEPTED — 2026-11-03 (owner merged PR #222; "go s1" the same day). S1 built 2026-11-03, see Realization notes.**
+Status: **ACCEPTED — 2026-11-03 (owner merged PR #222; "go s1" the same day). S1 built 2026-11-03, see Realization notes. Revision 2 (copy to picked releases) PROPOSED 2026-11-25.**
 Date: 2026-11-03
 Author: the design discussion of 2026-11-03 (thread "Nessus report intake"); owner picked
 "scope at decision time" over "auto copy" and "proposals only" the same day.
@@ -147,6 +147,84 @@ with the owner's own case (two projects of one product, same version, same CVE: 
 scope `product` on A → B shows the Position within a sweep, recorded against the same person,
 with the "applied from" line; a third project's later upload gets it at evaluation). Beta-period
 change: each step ships only on the owner's explicit go.
+
+## Revision 2: copy a decision to the releases the person picks (owner, 2026-11-25, PROPOSED)
+
+The owner asked for the assessment of one CVE to be **copied** to other releases that have the
+same CVE, with the targets **selectable**, and never to another product. Revision 1 offered
+three fixed scopes and a standing rule. Revision 2 replaces the picker with a pick list and
+makes the copy a one-time act.
+
+### Owner answers (2026-11-25)
+
+| # | Question | Answer |
+| --- | --- | --- |
+| C1 | How are targets chosen | a list to pick projects from, with "select all projects" and "select all in product" |
+| C2 | A target that already has its own decision | it can be picked; the person is told it will be updated |
+| C3 | One-time copy, or keep following the source | one-time copy |
+| C4 | Does the owner-set severity copy along | yes |
+| C5 | Releases uploaded later | as today: roll-forward proposes, a person accepts |
+
+### D9 — The decision names its copy targets
+
+`DecisionRequest` gains `copy_to`: a list of Finding ids. The decision is recorded on its own
+Finding first, then copied to each listed Finding. A listed Finding is refused (the whole
+request is a 400, nothing is recorded) when it is not a Finding of the **same Faultline** in the
+**same product**. "Never another product" is checked by Governance, not only by the GUI.
+
+`scope` (revision 1) stays in the API and behaves as before, for callers that use it. The GUI
+stops sending it and sends `copy_to` instead. `scope` and `copy_to` together are a 400.
+
+### D10 — The pick list shows every sibling, and says what will happen to each
+
+`GET /findings/{id}/scope-targets?scope=product&all=true` lists **every** Finding of the
+Faultline in the product, grouped by project, each with:
+
+- the project name and release version;
+- `level`: `artifact` or `component` (can be copied), or `vulnerability` (cannot: D2 holds, a
+  decision about one component says nothing about another);
+- its current decision, if it has one: stance, who decided, when.
+
+The GUI shows projects with a tick each, the releases under them, **Select all projects** and
+**Select all in product**. A target with its own decision is shown with that decision and the
+line "will be replaced by this decision". A `vulnerability`-level target is listed greyed with
+the reason and has no tick. Before recording, the page states the count: "also copies to N
+findings in M projects; K of them have a decision that will be replaced".
+
+### D11 — A copy is one-time, in the person's name, and may replace a decision
+
+For each target Governance raises a proposal `copied:<target>:<source>:v<n>` with the person as
+proposer and accepts it at once, as D3 does: same stance, same rationale plus one line naming
+the source ("copied from release <version> of project <name>"), the same review date, owner,
+treatment and proof, and `PropagatedFrom` for the audit.
+
+Three differences from a revision 1 scoped decision:
+
+1. **One-time.** The copy is done once. It does not apply to Findings born later, and a later
+   change of the source does not follow to the copies. Each copy is a decision of its own.
+2. **It may replace.** On a target that already has a decision, the copy adds the next Position
+   version. Positions are append-only, so the earlier decision stays in the history. This
+   overrides D5's "a local decision wins" for targets the person **picked by hand**, and only
+   for those.
+3. **Not a source.** A copied Position is never copied or propagated further by itself.
+
+It runs on the release-evaluation worker like D4, so the accept returns at once and the copies
+land within a minute. A failed target stays pending and is retried; it is never dropped.
+
+### D12 — The owner-set severity copies along (C4)
+
+When the source Finding carries an owner-set severity (EDR-SCORING-01 section 7.1, OS1-OS6),
+the copy sets the same severity on each target, with the same reason and the same person
+(OS5 there). This part waits for the severity steps V1-V2; D9-D11 do not.
+
+### Steps (each on the owner's go)
+
+- **C0** this revision (docs only).
+- **C1** Governance: `copy_to` on the decision, the `all=true` preview, the one-time copy on
+  the worker, a migration for the pending copy targets, tests.
+- **C2** GUI: the pick list on the decision page in place of "Applies to".
+- **C3** VM check.
+- **C4** severity copies along, after EDR-SCORING-01 S6.
 
 ## Realization notes
 
