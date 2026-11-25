@@ -382,6 +382,21 @@ three angles, and two of them proposed fixes that would not have worked.
   Fixed, with a seconds counter while the AI works. Open: re-check on the VM; the drawer's AI
   explanation still hides without a word when the AI is off (`GUI-AI-DRAWER-OFF-1`).
 
+- [ ] **Copy a decision to picked releases** (id `GOV-COPY-1`, owner 2026-11-25, feature).
+  One CVE decision copied once to the projects and releases the person picks, in the same
+  product only; a target with its own decision may be picked and is replaced with a notice.
+  Design in EDR-SYNC-01 revision 2 (PROPOSED, D9-D12). Steps C1 (Governance), C2 (GUI), C3
+  (VM), C4 (severity copies along, after the owner-set severity).
+
+- [ ] **Owner-set severity** (id `GOV-SEVERITY-OWNER-1`, owner 2026-11-25, feature). The
+  product owner decides the severity that counts for the product, whatever the original score
+  says. Design: EDR-SCORING-01 section 7.1 (OS1-OS6, PROPOSED 2026-11-25), the first part of
+  step S6. The owner sets a level or changes CVSS metric values, Themis computes the score
+  either way; any release under the product from a pick list; admin now, product security
+  lead later; copies along with a decision; a later change of the original flags it for
+  review. Steps V0 (docs) to V4 (VM check), each on the owner's go. The level rule
+  (OS1 item 2) was settled by the owner on 2026-11-25.
+
 - [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
   feature). The owner's reference table shows per-release assessment-type markers (five status
   dots next to the AUTO / MANUAL column). Deferred: the Vulnerabilities dropdown (EDR-GUI-02 D13)
