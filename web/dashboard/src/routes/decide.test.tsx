@@ -13,7 +13,7 @@ const assessment = {
     components: [{ name: "openssl", claim_class: "carrier" }],
     current_position: { version: 2, stance: "affected" },
     proposals: [
-      { id: "p-ai", stance: "not_affected", proposer_kind: "ai", status: "pending", evidence_trust: "inferred", rationale: "Not reachable." },
+      { id: "p-ai", stance: "not_affected", proposer_kind: "ai", status: "proposed", evidence_trust: "inferred", rationale: "Not reachable." },
       { id: "p-old", stance: "affected", proposer_kind: "human", status: "accepted" },
     ],
   },
@@ -201,7 +201,7 @@ describe("Decision page", () => {
 
 const RECOMMEND = "POST /api/governance/findings/f1/recommend";
 const ASSESS = "GET /api/governance/findings/f1/assessment";
-const aiProposal = { id: "p-ai", stance: "not_affected", proposer_kind: "ai", status: "pending", evidence_trust: "inferred", rationale: "Not reachable." };
+const aiProposal = { id: "p-ai", stance: "not_affected", proposer_kind: "ai", status: "proposed", evidence_trust: "inferred", rationale: "Not reachable." };
 const undecided = (proposals: unknown[]) => ({ ...assessment, finding: { ...assessment.finding, current_position: undefined, proposals } });
 
 /** An undecided finding with no AI proposal; the proposal appears once the AI was asked. */
@@ -267,6 +267,7 @@ describe("Decision page: the AI recommendation", () => {
     render();
     fireEvent.click(await screen.findByRole("button", { name: "Ask the AI" }));
     expect(await screen.findByRole("status", { name: "Asking the AI" })).toBeInTheDocument();
+    expect(screen.getByText("0 s")).toBeInTheDocument();
     expect(screen.getByLabelText(/Rationale/)).toBeEnabled();
     fireEvent.click(screen.getByLabelText(/^Affected/));
     fireEvent.change(screen.getByLabelText(/Rationale/), { target: { value: "mine" } });
@@ -331,6 +332,13 @@ describe("Decision page: the AI recommendation", () => {
     expect(screen.queryByRole("button", { name: "Use this in the form" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Record decision" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
+  });
+
+  it("says so when the recorded proposal cannot be read back", async () => {
+    mockFetch({ ...base, [ASSESS]: [200, undecided([])], [RECOMMEND]: [201, { proposal_id: "p-ai" }] });
+    render();
+    fireEvent.click(await screen.findByRole("button", { name: "Ask the AI" }));
+    expect(await screen.findByText(/could not read it back/)).toBeInTheDocument();
   });
 
   it("ignores a stance it does not know", async () => {
