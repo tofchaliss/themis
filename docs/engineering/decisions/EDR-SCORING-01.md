@@ -727,9 +727,9 @@ person keeps it, changes it or removes it (item 7).
 - **V3** The review flag (OS6) and the copy with a decision (EDR-SYNC-01 C4).
 - **V4** VM check.
 
-**Open for the owner:** the level rule in OS1 item 2. The other simple choice is one fixed
-number per level (for example the middle of the band). Moving the original into the band keeps
-more of what the source said, so that is the proposal.
+**Settled by the owner (2026-11-25):** the level rule of OS1 item 2 is the one written there:
+the original score moved into the picked band by the shortest way. One fixed number per level
+was the other choice and was not taken.
 
 ---
 

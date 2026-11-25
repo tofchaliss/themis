@@ -394,8 +394,8 @@ three angles, and two of them proposed fixes that would not have worked.
   step S6. The owner sets a level or changes CVSS metric values, Themis computes the score
   either way; any release under the product from a pick list; admin now, product security
   lead later; copies along with a decision; a later change of the original flags it for
-  review. Steps V0 (docs) to V4 (VM check), each on the owner's go. Open: the level rule
-  (OS1 item 2).
+  review. Steps V0 (docs) to V4 (VM check), each on the owner's go. The level rule
+  (OS1 item 2) was settled by the owner on 2026-11-25.
 
 - [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
   feature). The owner's reference table shows per-release assessment-type markers (five status
