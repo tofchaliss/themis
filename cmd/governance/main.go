@@ -303,21 +303,25 @@ func main() {
 	// reaches the Findings it covers. It applies the person's own decision; it decides nothing.
 	switch {
 	case gov.Scope == nil:
-		logger.Warn("scope sweep DISABLED (no Registry seam) — a decision taken with scope project/product stays pending until THEMIS_REGISTRY_URL is set")
+		logger.Warn("scope sweep DISABLED (no Registry seam) — a decision taken with scope project/product stays pending until THEMIS_REGISTRY_URL is set, and a decision cannot be copied")
 	case cfg.scopeSweepInterval > 0:
 		sc := logger.Component("scope")
 		go gov.Scope.RunEvery(ctx, cfg.scopeSweepInterval, func(res app.ScopeResult, err error) {
 			if err != nil {
-				sc.Error("scope sweep failed", observability.Err(err), observability.Int("decisions", res.Decisions), observability.Int("applied", res.Applied))
+				sc.Error("scope sweep failed", observability.Err(err), observability.Int("decisions", res.Decisions), observability.Int("applied", res.Applied), observability.Int("copies", res.Copies), observability.Int("copied", res.Copied))
 				return
 			}
 			if res.Decisions > 0 {
 				sc.Info("scope sweep", observability.Int("decisions", res.Decisions), observability.Int("applied", res.Applied))
 			}
+			if res.Copies > 0 {
+				// EDR-SYNC-01 D11: the one-time copies of a decision to the Findings the person picked.
+				sc.Info("decision copy", observability.Int("decisions", res.Copies), observability.Int("copied", res.Copied))
+			}
 		})
 		logger.Info("scope sweep enabled", observability.String("interval", cfg.scopeSweepInterval.String()))
 	default:
-		logger.Warn("scope sweep DISABLED (THEMIS_SCOPE_SWEEP_INTERVAL=0) — scoped decisions reach Findings born later only")
+		logger.Warn("scope sweep DISABLED (THEMIS_SCOPE_SWEEP_INTERVAL=0) — scoped decisions reach Findings born later only, and decision copies stay pending")
 	}
 	if gov.Evaluations != nil {
 		go gov.Evaluations.Run(ctx)

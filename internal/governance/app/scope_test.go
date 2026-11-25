@@ -40,10 +40,14 @@ type scopeQueue struct {
 	marked  map[string]bool
 	listErr error
 	markErr error
+	// copies made (EDR-SYNC-01 D11) and the failures of that half
+	copied      map[string]bool
+	copyListErr error
+	copyMarkErr error
 }
 
 func newScopeQueue(repo *fakeRepo) *scopeQueue {
-	return &scopeQueue{repo: repo, marked: map[string]bool{}}
+	return &scopeQueue{repo: repo, marked: map[string]bool{}, copied: map[string]bool{}}
 }
 
 func (q *scopeQueue) PendingScopedPositions(_ context.Context, limit int) ([]app.ScopedPosition, error) {
@@ -70,6 +74,31 @@ func (q *scopeQueue) MarkScopeApplied(_ context.Context, id domain.FindingID, ve
 		return q.markErr
 	}
 	q.marked[string(id)+"/"+itoa(version)] = true
+	return nil
+}
+
+// The copy half of the queue: a direct Position naming copy targets is pending until marked.
+func (q *scopeQueue) PendingCopyPositions(_ context.Context, limit int) ([]app.ScopedPosition, error) {
+	if q.copyListErr != nil {
+		return nil, q.copyListErr
+	}
+	var out []app.ScopedPosition
+	for _, id := range q.repo.order {
+		f := q.repo.byID[id]
+		for _, pos := range f.Positions() {
+			if pos.IsCopySource() && !q.copied[string(id)+"/"+itoa(pos.Version())] && len(out) < limit {
+				out = append(out, app.ScopedPosition{FindingID: id, Version: pos.Version()})
+			}
+		}
+	}
+	return out, nil
+}
+
+func (q *scopeQueue) MarkCopyApplied(_ context.Context, id domain.FindingID, version int) error {
+	if q.copyMarkErr != nil {
+		return q.copyMarkErr
+	}
+	q.copied[string(id)+"/"+itoa(version)] = true
 	return nil
 }
 

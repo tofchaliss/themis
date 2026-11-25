@@ -382,6 +382,25 @@ three angles, and two of them proposed fixes that would not have worked.
   Fixed, with a seconds counter while the AI works. Open: re-check on the VM; the drawer's AI
   explanation still hides without a word when the AI is off (`GUI-AI-DRAWER-OFF-1`).
 
+- [ ] **Copy a decision to picked releases** (id `GOV-COPY-1`, owner 2026-11-25, feature).
+  One CVE decision copied once to the projects and releases the person picks, in the same
+  product only; a target with its own decision may be picked and is replaced with a notice.
+  Design in EDR-SYNC-01 revision 2 (D9-D12). **C1 (Governance) built 2026-11-25**: `copy_to`
+  on the decision, the pick list (`scope-targets?scope=product&all=true`), the one-time copy
+  on the scope sweep, governance migration 000026; see the C1 realization note; VM check PASS 2026-11-25. **C2 (GUI) built
+  2026-11-25**: "Copy to" pick list on the decision page in place of "Applies to", asks before
+  a decision is replaced. Open: C3 (VM check of a real copy from the GUI), C4 (severity copies
+  along, after the owner-set severity), a link from a copy to its source.
+
+- [ ] **Owner-set severity** (id `GOV-SEVERITY-OWNER-1`, owner 2026-11-25, feature). The
+  product owner decides the severity that counts for the product, whatever the original score
+  says. Design: EDR-SCORING-01 section 7.1 (OS1-OS6, PROPOSED 2026-11-25), the first part of
+  step S6. The owner sets a level or changes CVSS metric values, Themis computes the score
+  either way; any release under the product from a pick list; admin now, product security
+  lead later; copies along with a decision; a later change of the original flags it for
+  review. Steps V0 (docs) to V4 (VM check), each on the owner's go. The level rule
+  (OS1 item 2) was settled by the owner on 2026-11-25.
+
 - [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
   feature). The owner's reference table shows per-release assessment-type markers (five status
   dots next to the AUTO / MANUAL column). Deferred: the Vulnerabilities dropdown (EDR-GUI-02 D13)

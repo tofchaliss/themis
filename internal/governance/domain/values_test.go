@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -66,7 +67,7 @@ func TestReconstitutePosition(t *testing.T) {
 	if pos.Version() != 2 || pos.Stance() != domain.StanceMitigated || pos.Rationale() != "fixed upstream" {
 		t.Errorf("position = %+v", pos)
 	}
-	if pos.Actor() != actor || pos.Inputs() != in || !pos.EstablishedAt().Equal(epoch) {
+	if pos.Actor() != actor || !reflect.DeepEqual(pos.Inputs(), in) || !pos.EstablishedAt().Equal(epoch) {
 		t.Errorf("position provenance = %+v / %+v / %v", pos.Actor(), pos.Inputs(), pos.EstablishedAt())
 	}
 	if pos.IsZero() {

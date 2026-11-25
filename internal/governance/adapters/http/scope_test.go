@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	govhttp "github.com/themis-project/themis/internal/governance/adapters/http"
@@ -51,6 +52,10 @@ func (noPending) PendingScopedPositions(context.Context, int) ([]app.ScopedPosit
 	return nil, nil
 }
 func (noPending) MarkScopeApplied(context.Context, domain.FindingID, int) error { return nil }
+func (noPending) PendingCopyPositions(context.Context, int) ([]app.ScopedPosition, error) {
+	return nil, nil
+}
+func (noPending) MarkCopyApplied(context.Context, domain.FindingID, int) error { return nil }
 
 func withPURL(t *testing.T, f domain.Finding, purl string) domain.Finding {
 	t.Helper()
@@ -190,5 +195,140 @@ func TestGetScopeTargets(t *testing.T) {
 	bare := newSrv(nil)
 	if status, _ := do(t, http.MethodGet, bare.URL+"/findings/src/scope-targets?scope=product", nil); status != http.StatusServiceUnavailable {
 		t.Errorf("no seam status = %d, want 503", status)
+	}
+}
+
+// copyServer is the estate of the copy tests: product P1 with projects A (rel-a1, rel-a2) and B
+// (rel-b1), product OTHER with project C. The source has one proposal waiting.
+func copyServer(t *testing.T, owners app.ReleaseOwnerResolver, seam bool) (*fakeRepo, *httptest.Server) {
+	t.Helper()
+	repo := newRepo()
+	src := withPURL(t, identified(t, "src", "rel-a1", "fl-1", "CVE-1"), "pkg:rpm/rocky/libtiff@1")
+	p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceNotAffected, "x", fixedClock{}.Now(), value.TrustAsserted)
+	_ = src.RaiseProposal(p)
+	repo.seed(src)
+	repo.seed(withPURL(t, identified(t, "a2", "rel-a2", "fl-1", "CVE-1"), "pkg:rpm/rocky/libtiff@2"))
+	b1 := withPURL(t, identified(t, "b1", "rel-b1", "fl-1", "CVE-1"), "pkg:rpm/rocky/libtiff@1")
+	q, _ := domain.NewGovernanceProposal("q1", human, domain.StanceAffected, "we ship it", fixedClock{}.Now(), value.TrustAsserted)
+	_ = b1.RaiseProposal(q)
+	if _, err := b1.AcceptProposal("q1", human, fixedClock{}.Now()); err != nil {
+		t.Fatal(err)
+	}
+	repo.seed(b1)
+	repo.seed(withPURL(t, identified(t, "b1-other", "rel-b1", "fl-1", "CVE-1"), "pkg:rpm/rocky/httpd@1"))
+	repo.seed(withPURL(t, identified(t, "c1", "rel-c1", "fl-1", "CVE-1"), "pkg:rpm/rocky/libtiff@1"))
+	write := app.NewFindingService(repo, &seqIDs{}, fixedClock{})
+	h := govhttp.NewHandler(write, app.NewReadService(repo, fakeProjection{}, nil, 0))
+	if seam {
+		h = h.WithScopePropagation(app.NewScopePropagation(write, noPending{}, stubUndecided{repo}, owners))
+	}
+	srv := httptest.NewServer(h.Router())
+	t.Cleanup(srv.Close)
+	return repo, srv
+}
+
+func copyOwners() stubOwners {
+	return stubOwners{
+		owners: map[string][2]string{"rel-a1": {"P1", "A"}, "rel-a2": {"P1", "A"}, "rel-b1": {"P1", "B"}, "rel-c1": {"OTHER", "C"}},
+		names:  map[string][3]string{"rel-a2": {"Product One", "alpha", "1.1"}, "rel-b1": {"Product One", "beta", "1.0"}},
+	}
+}
+
+// The decision names its copy targets (EDR-SYNC-01 D9). Every pick is judged before anything is
+// recorded: another product's Finding, or a pick together with a wide scope, is a 400 and the
+// source stays undecided; with no Registry seam it is a 503, with Registry down a 500. A valid
+// pick records the decision with its targets.
+func TestAcceptProposal_CopyTo(t *testing.T) {
+	const accept = "/findings/src/proposals/p1/accept"
+	undecided := func(repo *fakeRepo, why string) {
+		t.Helper()
+		if _, decided := repo.byID["src"].CurrentPosition(); decided {
+			t.Fatalf("%s: the decision was recorded", why)
+		}
+	}
+	repo, srv := copyServer(t, copyOwners(), true)
+	if status, body := do(t, http.MethodPost, srv.URL+accept,
+		map[string]any{"actor_id": "alice", "copy_to": []string{"a2", "c1"}}); status != http.StatusBadRequest || !strings.Contains(string(body), "c1") {
+		t.Fatalf("another product = %d %s, want 400 naming c1", status, body)
+	}
+	undecided(repo, "another product")
+	if status, body := do(t, http.MethodPost, srv.URL+accept,
+		map[string]any{"actor_id": "alice", "copy_to": []string{"b1-other"}}); status != http.StatusBadRequest {
+		t.Fatalf("another component = %d %s", status, body)
+	}
+	undecided(repo, "another component")
+	if status, body := do(t, http.MethodPost, srv.URL+accept,
+		map[string]any{"actor_id": "alice", "scope": "product", "copy_to": []string{"a2"}}); status != http.StatusBadRequest {
+		t.Fatalf("scope and copy = %d %s", status, body)
+	}
+	undecided(repo, "scope and copy")
+	if status, body := do(t, http.MethodPost, srv.URL+accept,
+		map[string]any{"actor_id": "alice", "copy_to": []string{"a2", "b1"}}); status != http.StatusNoContent {
+		t.Fatalf("valid pick = %d %s", status, body)
+	}
+	pos, ok := repo.byID["src"].CurrentPosition()
+	if got := pos.CopyTo(); !ok || len(got) != 2 || got[0] != "a2" || got[1] != "b1" || !pos.IsCopySource() {
+		t.Fatalf("recorded targets = %v %v", got, ok)
+	}
+
+	repo, bare := copyServer(t, nil, false)
+	if status, _ := do(t, http.MethodPost, bare.URL+accept,
+		map[string]any{"actor_id": "alice", "copy_to": []string{"a2"}}); status != http.StatusServiceUnavailable {
+		t.Errorf("no seam = %d, want 503", status)
+	}
+	undecided(repo, "no seam")
+	// without targets the same node decides as before
+	if status, _ := do(t, http.MethodPost, bare.URL+accept, map[string]any{"actor_id": "alice"}); status != http.StatusNoContent {
+		t.Errorf("plain accept without a seam = %d", status)
+	}
+	repo, down := copyServer(t, stubOwners{err: errors.New("registry down")}, true)
+	if status, _ := do(t, http.MethodPost, down.URL+accept,
+		map[string]any{"actor_id": "alice", "copy_to": []string{"a2"}}); status != http.StatusInternalServerError {
+		t.Errorf("registry outage = %d, want 500", status)
+	}
+	undecided(repo, "registry outage")
+}
+
+// The pick list (D10): all=true lists every other Finding of the CVE in the product with its
+// level and the decision it carries, and counts what can be copied to and what would be
+// replaced. It needs scope product; a Registry failure is an error, never a shorter list.
+func TestGetScopeTargets_All(t *testing.T) {
+	_, srv := copyServer(t, copyOwners(), true)
+	status, body := do(t, http.MethodGet, srv.URL+"/findings/src/scope-targets?scope=product&all=true", nil)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var view struct {
+		Count, Projects, Copyable, Decided int
+		Targets                            []map[string]any
+	}
+	if err := json.Unmarshal(body, &view); err != nil {
+		t.Fatal(err)
+	}
+	if view.Count != 3 || view.Projects != 2 || view.Copyable != 2 || view.Decided != 1 || len(view.Targets) != 3 {
+		t.Fatalf("view = %+v", view)
+	}
+	a2, b1, other := view.Targets[0], view.Targets[1], view.Targets[2]
+	if a2["finding_id"] != "a2" || a2["level"] != "component" || a2["decision"] != nil || a2["project_name"] != "alpha" || a2["version"] != "1.1" {
+		t.Errorf("a2 = %v", a2)
+	}
+	d, _ := b1["decision"].(map[string]any)
+	if b1["finding_id"] != "b1" || b1["level"] != "artifact" || d["stance"] != "affected" || d["decided_by_id"] != "alice" ||
+		d["decided_by_kind"] != "human" || d["decided_at"] == nil {
+		t.Errorf("b1 = %v", b1)
+	}
+	if other["finding_id"] != "b1-other" || other["level"] != "vulnerability" {
+		t.Errorf("other component = %v", other)
+	}
+	if status, _ := do(t, http.MethodGet, srv.URL+"/findings/src/scope-targets?scope=project&all=true", nil); status != http.StatusBadRequest {
+		t.Errorf("all with scope project = %d, want 400", status)
+	}
+	// all=false is the revision 1 preview: undecided, same component only
+	if status, body := do(t, http.MethodGet, srv.URL+"/findings/src/scope-targets?scope=product&all=false", nil); status != http.StatusOK || !strings.Contains(string(body), `"count":1`) {
+		t.Errorf("all=false = %d %s", status, body)
+	}
+	_, down := copyServer(t, stubOwners{err: errors.New("registry down")}, true)
+	if status, _ := do(t, http.MethodGet, down.URL+"/findings/src/scope-targets?scope=product&all=true", nil); status != http.StatusInternalServerError {
+		t.Errorf("registry outage = %d, want 500", status)
 	}
 }

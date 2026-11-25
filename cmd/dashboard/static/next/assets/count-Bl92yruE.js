@@ -1,1 +1,0 @@
-import{W as e,st as t}from"./index-B_z6hobc.js";var n=t();function r({value:t,label:r,note:i,tone:a}){return(0,n.jsxs)(`div`,{title:i,className:`min-w-[72px]`,children:[(0,n.jsx)(`div`,{className:e(`text-xl leading-tight font-semibold tabular-nums`,a),children:t}),(0,n.jsx)(`div`,{className:`text-xs text-ink-2`,children:r})]})}export{r as t};

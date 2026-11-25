@@ -2,7 +2,7 @@
 
 Status: **ACCEPTED — 2026-11-21 (owner merged PR #229).** Domain model accepted by the owner on 2026-11-19 after review rounds v1 to v4.9.7
 (decision of 2026-11-19: selection details and ingestion details SETTLED, O1-O7 closed, lifecycle and
-integration items left OPEN for this record, section 10.3). S1 built 2026-11-21 (kernel calculator). S2 built 2026-11-21 (Knowledge source truth; realization notes in 12.1). S3 built 2026-11-21 (Registry requirements; 12.2). S4 built 2026-11-21 (Governance assessment in shadow; 12.3). S5 built 2026-11-21 (read-only GUI: the Finding drawer's "How Themis got this score" panel and the CVE page's source ratings, one row per assessment; VM check pending).
+integration items left OPEN for this record, section 10.3). S1 built 2026-11-21 (kernel calculator). S2 built 2026-11-21 (Knowledge source truth; realization notes in 12.1). S3 built 2026-11-21 (Registry requirements; 12.2). S4 built 2026-11-21 (Governance assessment in shadow; 12.3). S5 built 2026-11-21 (read-only GUI: the Finding drawer's "How Themis got this score" panel and the CVE page's source ratings, one row per assessment; VM check pending). Owner-set severity (section 7.1, OS1-OS6) PROPOSED 2026-11-25: the first part of S6, design only.
 Date: 2026-11-20
 Author: the CVSS scoring design discussion of 2026-11-17 to 2026-11-19.
 
@@ -651,6 +651,85 @@ Every record: id, kind, previous effective assessment, new values, computed scor
 7. When its premise changes (source corrected or withdrawn, new vendor rating), a governed change is flagged for review, never altered.
 8. Permission `security.score.override`, checked by the Governance API on every create and remove; the GUI is not the boundary; actor on every record (R-O10).
 9. Two-person approval: later.
+
+### 7.1 Owner-set severity (owner, 2026-11-25, PROPOSED; first part of step S6)
+
+The owner's ask: "even if Themis identifies Critical for the original score, it is the product
+owner who decides what should be the correct severity, identifying the impact on the product.
+This should be configurable." This section says how the "Vector override" row above is built,
+and adds a second, simpler way to do it. Nothing in items 1-9 above is removed; where this
+section is narrower or different, it says so.
+
+**The owner's answers (2026-11-25):**
+
+| # | Question | Answer |
+| --- | --- | --- |
+| V1 | What does the owner set? | Either a severity level, or changed CVSS metric values. In both cases Themis computes the score |
+| V2 | Where does it apply? | Any release listed under the product, picked from a list |
+| V3 | Who may set it? | The admin now; the product security lead (PSL) later |
+| V4 | Does it copy with a decision? | Yes, it copies along (EDR-SYNC-01 D12) |
+| V5 | The world score changes later | Flag it for review |
+
+**OS1. Two ways in, one result.** An owner-set severity is one governed change on one Finding
+(one CVE in one release). The person gives a reason (required) and one of:
+
+1. **Changed metrics.** The person changes CVSS metric values on the vector Themis selected
+   (for example privileges required to Low, availability to None). The kernel calculator of
+   section 4.2 computes the score from the changed vector. The record keeps the changed vector.
+2. **A level.** The person picks None, Low, Medium, High or Critical. Themis computes the score
+   as **the original score moved into the picked band by the shortest way**: a score above the
+   band becomes the top of the band, a score below it becomes the bottom, a score already inside
+   stays. The bands are the CVSS ones (Low 0.1-3.9, Medium 4.0-6.9, High 7.0-8.9, Critical
+   9.0-10.0; None is 0.0). The record keeps the picked level and no vector, and says so: a
+   level-only score is never shown with a vector it was not computed from.
+
+Either way the Finding then shows two numbers side by side: the **original** score with its
+source, unchanged, and the **owner-set** score with the level, the person, the time and the
+reason. The original is never hidden or rewritten (same rule as the table above: source
+records stay).
+
+**OS2. It counts.** The owner-set score is the Finding's severity for priority, the remediation
+deadline and the lists, from the moment it is saved. This does not wait for the shadow exit of
+9.1: shadow covers what Themis calculates on its own, and this is a person's decision with a
+name on it. Removing the owner-set severity brings the original back (item 1); history stays.
+
+**OS3. Where: a pick list, same as the copy.** The form lists every release under the same
+product that has the same CVE (the list of EDR-SYNC-01 D10), with "Select all projects" and
+"Select all in product". Never another product. A picked release that already has an owner-set
+severity is marked "will be replaced" and the count is shown before saving. This is narrower
+than item 4 above for this one kind: an explicit pick by the person may replace, a wider scope
+that the person did not pick release by release still may not. The compatibility checks of item
+3 stay for changed metrics (same CVE, CVSS version the calculator supports); a level needs only
+the same CVE.
+
+**OS4. Who.** Admin only for now, checked by the Governance API (item 8) and by the dashboard
+gate, because a node only sees the dashboard's own key (the rule already used for the bulletin
+register). The product security lead role comes with GUI users and roles and
+product-scoped rights; the permission name stays `security.score.override`.
+
+**OS5. It travels with the decision.** When a decision is copied (EDR-SYNC-01 D11), the
+owner-set severity of the source goes to each target with the same reason and person (D12
+there). A later upload is handled as today: roll-forward proposes the decision; the owner-set
+severity is offered with it and is not applied on its own.
+
+**OS6. Flag, never change.** When the original changes after the owner set a severity (a new
+or corrected source rating, a withdrawn one, a different selected source), the Finding is
+flagged "severity to review" with what changed. The owner-set severity stays in force until a
+person keeps it, changes it or removes it (item 7).
+
+**Steps (each on the owner's go):**
+
+- **V0** this section (docs only).
+- **V1** Governance: the record, the two inputs and the level rule, the API (set, remove,
+  history), admin check, the effect on priority and deadline, a migration, tests.
+- **V2** GUI: "Set severity" on the decision page with the two ways, a preview of the computed
+  score before saving, the pick list, both numbers on the Finding.
+- **V3** The review flag (OS6) and the copy with a decision (EDR-SYNC-01 C4).
+- **V4** VM check.
+
+**Settled by the owner (2026-11-25):** the level rule of OS1 item 2 is the one written there:
+the original score moved into the picked band by the shortest way. One fixed number per level
+was the other choice and was not taken.
 
 ---
 

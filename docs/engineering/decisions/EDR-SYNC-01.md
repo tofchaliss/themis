@@ -1,6 +1,6 @@
 # EDR-SYNC-01 — One decision, chosen scope: a CVE assessment applied across the projects of a product
 
-Status: **ACCEPTED — 2026-11-03 (owner merged PR #222; "go s1" the same day). S1 built 2026-11-03, see Realization notes.**
+Status: **ACCEPTED — 2026-11-03 (owner merged PR #222; "go s1" the same day). S1 built 2026-11-03, see Realization notes. Revision 2 (copy to picked releases) accepted by the owner 2026-11-25 (PR #252 merged, "go" the same day); steps C1 and C2 built 2026-11-25, C1 VM check PASS, see Realization notes.**
 Date: 2026-11-03
 Author: the design discussion of 2026-11-03 (thread "Nessus report intake"); owner picked
 "scope at decision time" over "auto copy" and "proposals only" the same day.
@@ -148,6 +148,84 @@ scope `product` on A → B shows the Position within a sweep, recorded against t
 with the "applied from" line; a third project's later upload gets it at evaluation). Beta-period
 change: each step ships only on the owner's explicit go.
 
+## Revision 2: copy a decision to the releases the person picks (owner, 2026-11-25, PROPOSED)
+
+The owner asked for the assessment of one CVE to be **copied** to other releases that have the
+same CVE, with the targets **selectable**, and never to another product. Revision 1 offered
+three fixed scopes and a standing rule. Revision 2 replaces the picker with a pick list and
+makes the copy a one-time act.
+
+### Owner answers (2026-11-25)
+
+| # | Question | Answer |
+| --- | --- | --- |
+| C1 | How are targets chosen | a list to pick projects from, with "select all projects" and "select all in product" |
+| C2 | A target that already has its own decision | it can be picked; the person is told it will be updated |
+| C3 | One-time copy, or keep following the source | one-time copy |
+| C4 | Does the owner-set severity copy along | yes |
+| C5 | Releases uploaded later | as today: roll-forward proposes, a person accepts |
+
+### D9 — The decision names its copy targets
+
+`DecisionRequest` gains `copy_to`: a list of Finding ids. The decision is recorded on its own
+Finding first, then copied to each listed Finding. A listed Finding is refused (the whole
+request is a 400, nothing is recorded) when it is not a Finding of the **same Faultline** in the
+**same product**. "Never another product" is checked by Governance, not only by the GUI.
+
+`scope` (revision 1) stays in the API and behaves as before, for callers that use it. The GUI
+stops sending it and sends `copy_to` instead. `scope` and `copy_to` together are a 400.
+
+### D10 — The pick list shows every sibling, and says what will happen to each
+
+`GET /findings/{id}/scope-targets?scope=product&all=true` lists **every** Finding of the
+Faultline in the product, grouped by project, each with:
+
+- the project name and release version;
+- `level`: `artifact` or `component` (can be copied), or `vulnerability` (cannot: D2 holds, a
+  decision about one component says nothing about another);
+- its current decision, if it has one: stance, who decided, when.
+
+The GUI shows projects with a tick each, the releases under them, **Select all projects** and
+**Select all in product**. A target with its own decision is shown with that decision and the
+line "will be replaced by this decision". A `vulnerability`-level target is listed greyed with
+the reason and has no tick. Before recording, the page states the count: "also copies to N
+findings in M projects; K of them have a decision that will be replaced".
+
+### D11 — A copy is one-time, in the person's name, and may replace a decision
+
+For each target Governance raises a proposal `copied:<target>:<source>:v<n>` with the person as
+proposer and accepts it at once, as D3 does: same stance, same rationale plus one line naming
+the source ("copied from release <version> of project <name>"), the same review date, owner,
+treatment and proof, and `PropagatedFrom` for the audit.
+
+Three differences from a revision 1 scoped decision:
+
+1. **One-time.** The copy is done once. It does not apply to Findings born later, and a later
+   change of the source does not follow to the copies. Each copy is a decision of its own.
+2. **It may replace.** On a target that already has a decision, the copy adds the next Position
+   version. Positions are append-only, so the earlier decision stays in the history. This
+   overrides D5's "a local decision wins" for targets the person **picked by hand**, and only
+   for those.
+3. **Not a source.** A copied Position is never copied or propagated further by itself.
+
+It runs on the release-evaluation worker like D4, so the accept returns at once and the copies
+land within a minute. A failed target stays pending and is retried; it is never dropped.
+
+### D12 — The owner-set severity copies along (C4)
+
+When the source Finding carries an owner-set severity (EDR-SCORING-01 section 7.1, OS1-OS6),
+the copy sets the same severity on each target, with the same reason and the same person
+(OS5 there). This part waits for the severity steps V1-V2; D9-D11 do not.
+
+### Steps (each on the owner's go)
+
+- **C0** this revision (docs only).
+- **C1** Governance: `copy_to` on the decision, the `all=true` preview, the one-time copy on
+  the worker, a migration for the pending copy targets, tests.
+- **C2** GUI: the pick list on the decision page in place of "Applies to".
+- **C3** VM check.
+- **C4** severity copies along, after EDR-SCORING-01 S6.
+
 ## Realization notes
 
 ### Step S1 (2026-11-03) — scope on the decision, propagation, preview
@@ -199,6 +277,75 @@ change: each step ships only on the owner's explicit go.
   "applied by scope", a `rollforward:` proposal "roll-forward". No link to the source Finding
   yet: the drawer opens from a posture row, and a cross-release jump is a later GUI step.
 - Nothing in the GUI decides: the picker widens the subject of the person's own decision.
+
+### Step C1 (2026-11-25) — copy_to on the decision, the pick list, the one-time copy
+
+- **The Position row is the queue again**, like S1: `finding_positions` gained `copy_to`
+  (TEXT[], the picked Finding ids in the order given) and `copy_applied_at` (governance
+  migration 000026). A Position that names targets is pending until its copies are made; a
+  copy names none, so "never copied further" (D11 item 3) is structural. Written in the
+  accept's own transaction: a decision cannot be recorded and its copies lost.
+- **It rides the scope sweep, not the release-evaluation worker** (D11 said the worker). A
+  copy has nothing to do with a release being evaluated; the sweep (`THEMIS_SCOPE_SWEEP_INTERVAL`,
+  1m) already retries and already has the Registry seam. The sweep log gained one line,
+  `decision copy decisions=N copied=M`. With the sweep off or no Registry seam the node says at
+  startup that copies stay pending or cannot be made.
+- **Every pick is judged before the decision is recorded** (D9). The accept handler calls
+  `CheckCopyTargets` first: each id must be on the pick list (same Faultline, same product,
+  artifact or component level). One bad id refuses the whole request with 400 naming it, and
+  the source stays undecided. The source itself, another CVE's Finding and an unknown id are
+  refused the same way. No Registry seam is a 503; a Registry failure is an error, never "all
+  fine". `scope` project / product together with `copy_to` is a 400 (`ErrScopeAndCopy`).
+- **The pick list** is `GET /findings/{id}/scope-targets?scope=product&all=true`: every other
+  Finding of the CVE in the product with `level` (`vulnerability` = another component, listed
+  and never copied to), `decision` (stance, who, when) when it has one, and the counts
+  `copyable` and `decided` (the copyable ones a copy would replace). `all=true` with another
+  scope is a 400. Without `all` the endpoint answers as in revision 1.
+- **A copy** is proposal `copied:<target>:<source>:v<n>`, Asserted, in the person's name,
+  accepted at once with the source's terms and `PropagatedFrom`. On a decided target it adds
+  the next Position version; the earlier one stays. The rationale ends "copied from <project>
+  <version> (Finding …), Position v<n>, <level> level". The usual notes fire, so Communication
+  and the SLA clock see it like any decision.
+- **Edge cases, decided in the build:** a source re-decided before the sweep ran copies
+  nothing (the newer decision speaks for the person; if it names targets it makes its own
+  copies). A picked target that no longer carries the same component when the copy runs is
+  skipped. A retry after a half-done pass makes nothing twice (same proposal id).
+- A product-scoped key needs no new rule: the targets are in the source's product, which the
+  write check already confines.
+- Not in C1: the GUI (C2), the owner-set severity (C4), and showing "copied to N" on the
+  source Position (the targets are stored, not yet on the Position view).
+
+- **VM check of C1 (2026-11-25): PASS.** Governance restarted with the migration at 26, not
+  dirty; `copy_to` and `copy_applied_at` present on `finding_positions`. The pick list for one
+  CVE that sits in several releases answered: 8 other Findings in 8 projects of the same
+  product, 7 that can take a copy, 1 at `vulnerability` level (another component), 0 decided;
+  product name, project names and release versions on every row. Read only: no copy was made
+  in this round; the copy itself is checked from the GUI (C3).
+
+### Step C2 (2026-11-25) — the pick list on the decision page
+
+- **"Copy to" took the place of "Applies to"** on the decision page. The scope picker of S2 is
+  gone from the GUI; `scope` stays in the API for other callers (D9).
+- **The list is read only when the person opens it** ("Choose releases to copy to"), so a
+  decision for one release costs no Registry hop. It groups the releases by project: a tick
+  per release, a tick per project (all its releases), **Select all in product**, and Clear.
+  The owner's "select all projects" and "select all in product" are the same set here (a
+  product's projects are all its releases that carry the CVE), so there is one button.
+- **What each row says** (D10): the release version; "same package, other version" at
+  component level; a release on a different component is greyed with the reason and has no
+  tick; a decided release shows its decision and who took it, and once ticked "will be
+  replaced by this decision".
+- **Before recording** the list states the count: "Also copies to N findings in M projects,
+  once, in your name", and how many decisions will be replaced. When that number is not zero
+  the page **asks** ("Do you want to proceed?") before anything is sent; a "no" sends nothing.
+  This is the owner's C2 answer ("let the user know it is getting updated").
+- The picks go as `copy_to` on the accept, on all three ways to decide: the person's own
+  decision, the AI's answer recorded as is, and Accept on a waiting proposal. "Only propose"
+  with ticks is refused on the page: a proposal is not copied.
+- After the click the status line says "copying to N more findings, they follow within a
+  minute". The drawer's decision shows "Source: copied or applied from another release" when
+  the Position names one; the rationale names the project and version.
+- Not in C2: a link from a copy to its source Finding, and "copied to N" on the source.
 
 ## What this record does NOT decide
 
