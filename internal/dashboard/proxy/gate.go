@@ -100,13 +100,41 @@ func isAdvisoryAsk(r *http.Request) bool {
 	return id != "" && !strings.Contains(id, "/")
 }
 
+// severityRoute returns what follows "/severity" on an owner-set severity route
+// (/api/governance/findings/{id}/severity[/...]), and whether the path is one.
+func severityRoute(path string) (string, bool) {
+	const prefix = "/api/governance/findings/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", false
+	}
+	id, rest, ok := strings.Cut(path[len(prefix):], "/")
+	if !ok || id == "" || (rest != "severity" && !strings.HasPrefix(rest, "severity/")) {
+		return "", false
+	}
+	return strings.TrimPrefix(rest, "severity"), true
+}
+
+// isSeverityPreview reports the owner-set severity preview: it computes a score and records
+// nothing, so a read-scoped operator may use it.
+func isSeverityPreview(r *http.Request) bool {
+	rest, ok := severityRoute(r.URL.Path)
+	return ok && r.Method == http.MethodPost && rest == "/preview"
+}
+
+// isOwnerSeverityWrite reports a route that sets or removes an owner-set severity. Governance's
+// rule is admin only (EDR-SCORING-01 OS4), and for the GUI only this gate can enforce it.
+func isOwnerSeverityWrite(path string) bool {
+	_, ok := severityRoute(path)
+	return ok
+}
+
 // isRead classifies a request for D11: read methods, the stateless POSTs, and the advisory ask.
 func isRead(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return true
 	}
-	return statelessPosts[r.URL.Path] || isAdvisoryAsk(r)
+	return statelessPosts[r.URL.Path] || isAdvisoryAsk(r) || isSeverityPreview(r)
 }
 
 // Wrap enforces, in order: a session exists (401), the scope covers the route class
@@ -129,7 +157,7 @@ func (g Gate) Wrap(next http.Handler) http.Handler {
 			writeProblem(w, http.StatusForbidden, "read-only operator", "this operation records a decision and requires a write-capable key")
 			return
 		}
-		if isAdminWrite(r) && !p.IsAdmin() {
+		if (isAdminWrite(r) || isOwnerSeverityWrite(r.URL.Path)) && !p.IsAdmin() {
 			writeProblem(w, http.StatusForbidden, "admin only", "this operation requires the "+auth.ScopeAdmin+" scope")
 			return
 		}

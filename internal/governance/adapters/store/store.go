@@ -647,7 +647,7 @@ func (s *Store) ReleaseScope(ctx context.Context, releaseID string) (value.Produ
 func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.PostureEntry, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT f.id, f.faultline_id, f.cve, f.stage, f.current_stance, f.current_position_version,
-		       f.base_score, COALESCE(pr.evidence_trust, ''), f.band, f.selected_fixes,
+		       COALESCE(f.owner_base_score, f.base_score), COALESCE(pr.evidence_trust, ''), f.band, f.selected_fixes,
 		       COALESCE(po.rationale, ''), f.stale_since, f.stale_reason,
 		       COALESCE(po.actor_kind, ''), po.established_at
 		FROM findings f
@@ -732,7 +732,57 @@ func (s *Store) ReleasePosture(ctx context.Context, releaseID string) ([]app.Pos
 	if err != nil {
 		return nil, err
 	}
-	return s.attachScores(ctx, releaseID, out)
+	out, err = s.attachScores(ctx, releaseID, out)
+	if err != nil {
+		return nil, err
+	}
+	return s.attachOwnerSeverities(ctx, releaseID, out)
+}
+
+// attachOwnerSeverities fills each posture row's owner-set severity in force (EDR-SCORING-01
+// section 7.1), in ONE query for the release. The row's BaseScore already reads it.
+func (s *Store) attachOwnerSeverities(ctx context.Context, releaseID string, entries []app.PostureEntry) ([]app.PostureEntry, error) {
+	if len(entries) == 0 {
+		return entries, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+ownerSeverityRead+` FROM finding_owner_severities
+		WHERE ended_at IS NULL AND finding_id IN (SELECT id FROM findings WHERE release_id = $1)`, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byFinding := map[domain.FindingID]domain.OwnerSeverity{}
+	for rows.Next() {
+		id, o, err := scanOwnerSeverity(rows)
+		if err != nil {
+			return nil, err
+		}
+		byFinding[id] = o
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(byFinding) == 0 {
+		return entries, nil
+	}
+	// OS6: has the original moved since the person set (or last kept) the severity?
+	ids := make([]domain.FindingID, 0, len(byFinding))
+	for id := range byFinding {
+		ids = append(ids, id)
+	}
+	originals, err := s.OriginalSeverities(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		if o, ok := byFinding[entries[i].FindingID]; ok {
+			entries[i].OwnerSeverity = &o
+			now := originals[entries[i].FindingID]
+			entries[i].SeverityReview = o.ReviewReason(now.Score, now.Vector)
+		}
+	}
+	return entries, nil
 }
 
 // attachScores fills each posture row's original and expert severity from the newest stored

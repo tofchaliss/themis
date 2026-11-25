@@ -97,6 +97,17 @@ func TestGate_ScopeMatrix(t *testing.T) {
 		{"product op still writes elsewhere", productOp, http.MethodPost, "/api/knowledge/psirt/bulletins-other", http.StatusOK},
 		{"admin adds a bulletin", adminOp, http.MethodPost, "/api/knowledge/psirt/bulletins", http.StatusOK},
 		{"admin edits a bulletin", adminOp, http.MethodPut, "/api/knowledge/psirt/bulletins/b-1", http.StatusOK},
+		// EDR-SCORING-01 OS4: setting or removing an owner-set severity is admin only, enforced
+		// here for the same reason. Reading it and the preview (records nothing) stay reads.
+		{"product op CANNOT set a severity", productOp, http.MethodPut, "/api/governance/findings/f-1/severity", http.StatusForbidden},
+		{"product op CANNOT remove a severity", productOp, http.MethodPost, "/api/governance/findings/f-1/severity/remove", http.StatusForbidden},
+		{"admin sets a severity", adminOp, http.MethodPut, "/api/governance/findings/f-1/severity", http.StatusOK},
+		{"admin removes a severity", adminOp, http.MethodPost, "/api/governance/findings/f-1/severity/remove", http.StatusOK},
+		{"read op reads a severity", readOp, http.MethodGet, "/api/governance/findings/f-1/severity", http.StatusOK},
+		{"read op previews a severity", readOp, http.MethodPost, "/api/governance/findings/f-1/severity/preview", http.StatusOK},
+		{"read op CANNOT set a severity", readOp, http.MethodPut, "/api/governance/findings/f-1/severity", http.StatusForbidden},
+		{"product op still writes a look-alike route", productOp, http.MethodPost, "/api/governance/findings/f-1/severity-other", http.StatusOK},
+		{"product op still writes with no finding id", productOp, http.MethodPost, "/api/governance/findings//severity", http.StatusOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

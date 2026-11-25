@@ -48,6 +48,8 @@ type Handler struct {
 	watches *app.WatchService
 	// scores serves GET /findings/{id}/score (EDR-SCORING-01 S4). Nil ⇒ 503.
 	scores *app.ScoreService
+	// severity serves the owner-set severity (EDR-SCORING-01 section 7.1). Nil ⇒ 503.
+	severity *app.SeverityService
 	// now stamps generated_at; replaceable in tests.
 	now func() time.Time
 	// logger carries the DETAIL of an authorization refusal, which the HTTP response
@@ -974,6 +976,13 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	if e.ExpertScore != nil {
 		v := *e.ExpertScore
 		out.ExpertScore, out.ExpertSeverity = &v, strptr(domain.ScoreBand(v))
+	}
+	if e.OwnerSeverity != nil {
+		o := toOwnerSeverity(*e.OwnerSeverity)
+		if e.SeverityReview != "" {
+			o.ReviewReason = strptr(e.SeverityReview)
+		}
+		out.OwnerSeverity = &o
 	}
 	if e.ExpertStatus != "" {
 		out.ExpertStatus = strptr(e.ExpertStatus)

@@ -313,3 +313,55 @@ func TestApplyCopiedPosition_Refusals(t *testing.T) {
 		t.Error("invalid proposer swallowed")
 	}
 }
+
+// severityCopies records what a copied decision asked the severity to follow to.
+type severityCopies struct {
+	got []string
+	err error
+}
+
+func (c *severityCopies) CopySeverity(_ context.Context, source, target domain.FindingID) error {
+	c.got = append(c.got, string(source)+">"+string(target))
+	return c.err
+}
+
+// EDR-SYNC-01 D12: the owner-set severity follows the copied decision, only to a target that
+// took the copy, and again on a retry.
+func TestApplyCopy_CarriesTheSeverity(t *testing.T) {
+	ctx := context.Background()
+	terms := copyTo("a2", "b1-other-pkg")
+	repo := copyEstate(t, &terms)
+	sev := &severityCopies{}
+	sp := copyPass(repo, newScopeQueue(repo), scopeOwners()).WithSeverityCopy(sev)
+	if n, err := sp.ApplyCopy(ctx, app.ScopedPosition{FindingID: "src", Version: 1}); err != nil || n != 1 {
+		t.Fatalf("copy = %d %v", n, err)
+	}
+	// a2 took the copy; the Finding on another component did not, and gets no severity either.
+	if len(sev.got) != 1 || sev.got[0] != "src>a2" {
+		t.Fatalf("severity followed to %v", sev.got)
+	}
+	// A retry copies no decision again and still brings the severity.
+	if n, err := sp.ApplyCopy(ctx, app.ScopedPosition{FindingID: "src", Version: 1}); err != nil || n != 0 || len(sev.got) != 2 {
+		t.Fatalf("retry = %d %v, severity %v", n, err, sev.got)
+	}
+	// A failing severity copy fails the pass, so the row stays pending.
+	sev.err = errors.New("boom")
+	if _, err := sp.ApplyCopy(ctx, app.ScopedPosition{FindingID: "src", Version: 1}); err == nil || !strings.Contains(err.Error(), "copy severity to a2") {
+		t.Fatalf("severity failure: %v", err)
+	}
+	// So does a target that cannot be read back (the read after the copy itself).
+	sev.err = nil
+	only := copyTo("a2")
+	repo = copyEstate(t, &only)
+	boom := errors.New("read failed")
+	repo.onGetByID = func(n int, f domain.Finding) domain.Finding {
+		if n == 2 {
+			repo.getByIDErr = boom
+		}
+		return f
+	}
+	sp = copyPass(repo, newScopeQueue(repo), scopeOwners()).WithSeverityCopy(sev)
+	if _, err := sp.ApplyCopy(ctx, app.ScopedPosition{FindingID: "src", Version: 1}); !errors.Is(err, boom) {
+		t.Fatalf("read failure: %v", err)
+	}
+}

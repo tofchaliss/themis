@@ -467,6 +467,188 @@ paths:
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
+  /findings/{id}/severity:
+    get:
+      operationId: getFindingSeverity
+      summary: >
+        The severity of one Finding as a person decides it (EDR-SCORING-01 section 7.1): the
+        original score and vector, the owner-set severity in force (if any) and the history of
+        every owner-set severity. Read scope.
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingSeverity'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: setFindingSeverity
+      summary: >
+        Set the owner-set severity of one Finding (OS1-OS4). Admin only. The body gives a reason
+        and exactly one of a level or a changed CVSS 3.0 / 3.1 vector; Themis computes the score
+        either way. From the moment it is saved the owner-set score is what priority, the
+        remediation deadline and the lists read; the original is kept beside it. `apply_to` sets
+        the same on other Findings of the same CVE in the same product, all or nothing; one that
+        already has an owner-set severity is replaced (its record stays in the history).
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetSeverityRequest'
+      responses:
+        '200':
+          description: Saved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetSeverityResult'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/severity/remove:
+    post:
+      operationId: removeFindingSeverity
+      summary: >
+        Remove the owner-set severity of one Finding (OS2). Admin only. The original score counts
+        again; the record stays in the history. 404 when there is none to remove.
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actor_id]
+              properties:
+                actor_id: { type: string }
+      responses:
+        '200':
+          description: Removed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingSeverity'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/severity/keep:
+    post:
+      operationId: keepFindingSeverity
+      summary: >
+        Keep the owner-set severity after the original changed (OS6). Admin only. The severity is
+        not touched; the record notes who kept it and when, and the original they saw becomes
+        what the next change is measured against. 404 when there is none in force, 409 when the
+        original did not change.
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actor_id]
+              properties:
+                actor_id: { type: string }
+      responses:
+        '200':
+          description: Kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingSeverity'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/severity/preview:
+    post:
+      operationId: previewFindingSeverity
+      summary: >
+        Compute what a level or a changed vector would give on this Finding. Records nothing.
+        Read scope.
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                level: { type: string }
+                vector: { type: string }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeverityPreview'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /findings/{id}/severity/targets:
+    get:
+      operationId: getFindingSeverityTargets
+      summary: >
+        The pick list of an owner-set severity (OS3): every other Finding of the same CVE in the
+        same product, with the owner-set severity it carries now. Never another product. 503
+        when no Registry seam is configured.
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeverityTargets'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /findings/{id}/score:
     get:
       operationId: getFindingScore
@@ -1116,6 +1298,152 @@ components:
             Plain-language premise of the verdict (e.g. "vendor fix 0:39.2.0-9.el8_10 present"),
             stated by Knowledge and rendered verbatim - a clearance nobody can read the reason
             for is one nobody can audit.
+    OwnerSeverity:
+      type: object
+      required: [kind, level, score, reason, set_by, set_at]
+      description: One owner-set severity (EDR-SCORING-01 section 7.1).
+      properties:
+        kind:
+          type: string
+          enum: [level, vector]
+          description: How it was given - a picked level, or changed CVSS metric values.
+        level:
+          type: string
+          enum: [none, low, medium, high, critical]
+          description: The picked level, or the CVSS rating of the computed score for a vector.
+        vector:
+          type: string
+          description: The changed vector; absent for a level (a level has no vector).
+        score:
+          type: number
+          format: double
+          description: The score Themis computed (0.0 - 10.0).
+        original_score:
+          type: number
+          format: double
+          description: The original score when this was set; absent when there was none.
+        reason: { type: string }
+        set_by: { type: string }
+        set_at: { type: string, format: date-time }
+        picked_from:
+          type: string
+          description: >-
+            The Finding this came from, when it came through the pick list or with a copied
+            decision.
+        original_vector:
+          type: string
+          description: The vector selected for the original when this was set.
+        review_reason:
+          type: string
+          description: >-
+            Present on the severity in force when the original changed since it was set or last
+            kept (OS6): what changed, in words. The severity stays in force until a person keeps
+            it, changes it or removes it.
+        kept_at:
+          type: string
+          format: date-time
+          description: When a person last kept it after the original changed.
+        kept_by: { type: string }
+        ended_at:
+          type: string
+          format: date-time
+          description: History only - when it stopped being in force.
+        ended_by: { type: string }
+        end_cause:
+          type: string
+          enum: [replaced, removed]
+    FindingSeverity:
+      type: object
+      required: [finding_id, cve, history]
+      properties:
+        finding_id: { type: string }
+        cve: { type: string }
+        original_score:
+          type: number
+          format: double
+          description: The original score (source Base), unchanged by any owner-set severity.
+        original_severity: { type: string }
+        original_vector:
+          type: string
+          description: >-
+            The vector Themis selected for the original, where one exists. The form for changed
+            metrics starts from it.
+        owner:
+          $ref: '#/components/schemas/OwnerSeverity'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/OwnerSeverity'
+    SetSeverityRequest:
+      type: object
+      required: [actor_id, reason]
+      properties:
+        actor_id: { type: string }
+        reason:
+          type: string
+          description: Required - why this severity is right for the product.
+        level:
+          type: string
+          description: >-
+            none | low | medium | high | critical. The score is the original moved into the
+            level's band by the shortest way. Give this or `vector`, not both.
+        vector:
+          type: string
+          description: A CVSS 3.0 / 3.1 vector with the changed metric values. The calculator scores it.
+        apply_to:
+          type: array
+          items: { type: string }
+          description: >-
+            Other Finding ids to set the same severity on (GET .../severity/targets lists them).
+            Each must be a Finding of the same CVE in the same product, or the whole request is
+            refused (400) and nothing is recorded.
+    SetSeverityResult:
+      type: object
+      required: [applied, replaced, severity]
+      properties:
+        applied:
+          type: integer
+          description: How many Findings got the severity, this one included.
+        replaced:
+          type: integer
+          description: How many of them already had an owner-set severity.
+        severity:
+          $ref: '#/components/schemas/FindingSeverity'
+    SeverityPreview:
+      type: object
+      required: [kind, level, score]
+      properties:
+        kind: { type: string, enum: [level, vector] }
+        level: { type: string }
+        score: { type: number, format: double }
+        vector: { type: string }
+        original_score: { type: number, format: double }
+    SeverityTarget:
+      type: object
+      required: [finding_id, release_id]
+      properties:
+        finding_id: { type: string }
+        release_id: { type: string }
+        product_id: { type: string }
+        project_id: { type: string }
+        product_name: { type: string }
+        project_name: { type: string }
+        version: { type: string }
+        owner:
+          $ref: '#/components/schemas/OwnerSeverity'
+    SeverityTargets:
+      type: object
+      required: [finding_id, count, with_owner_severity, targets]
+      properties:
+        finding_id: { type: string }
+        count: { type: integer }
+        with_owner_severity:
+          type: integer
+          description: How many of the targets carry an owner-set severity now.
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeverityTarget'
     FindingScore:
       type: object
       required: [finding_id, cve, components, history]
@@ -1675,6 +2003,13 @@ components:
         expert_status:
           type: string
           description: final or provisional when expert_score is set (EDR-SCORING-01 D5).
+        owner_severity:
+          allOf:
+            - $ref: '#/components/schemas/OwnerSeverity'
+          description: >-
+            The owner-set severity in force (EDR-SCORING-01 section 7.1); absent when none. While
+            it is set, base_score and both priorities are computed from its score, and
+            original_score still shows what the source said.
         score_state:
           type: string
           description: >-

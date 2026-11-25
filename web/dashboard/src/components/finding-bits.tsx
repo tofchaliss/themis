@@ -69,7 +69,26 @@ export function OriginalSeverity({ entry }: { entry: PostureEntry }) {
   return <SeverityCell severity={entry.original_severity} score={entry.original_score} />;
 }
 
+/** The severity that counts for a Finding: the owner-set one while it stands (EDR-SCORING-01
+ * section 7.1), else Themis's own after the assessment. */
+export function countingSeverity(entry: PostureEntry): string | undefined {
+  return entry.owner_severity?.level ?? entry.expert_severity;
+}
+
 export function ExpertSeverity({ entry }: { entry: PostureEntry }) {
+  const o = entry.owner_severity;
+  if (o)
+    return (
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap" title={`Set by ${o.set_by}: ${o.reason}`}>
+        <SeverityCell severity={o.level} score={o.score} />
+        <span className="text-xs text-ink-2">owner-set</span>
+        {o.review_reason && (
+          <Badge tone="warn" title={`Severity to review: ${o.review_reason}`}>
+            review
+          </Badge>
+        )}
+      </span>
+    );
   return (
     <SeverityCell
       severity={entry.expert_severity}

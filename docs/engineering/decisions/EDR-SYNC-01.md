@@ -347,6 +347,24 @@ the copy sets the same severity on each target, with the same reason and the sam
   the Position names one; the rationale names the project and version.
 - Not in C2: a link from a copy to its source Finding, and "copied to N" on the source.
 
+### Step C4 (2026-11-25) — the owner-set severity goes with the copy
+
+Built with EDR-SCORING-01 section 7.1 V3 (D12). After the sweep copies a decision to a target,
+`ScopePropagation.copySeverity` asks the target whether its current Position rests on this
+copy; if so the source's owner-set severity is recorded there with the same reason and
+person. It asks the target, not the result of the pass, so a pass that failed after the
+decision was copied still brings the severity on its retry. See the V3 note there.
+
+### The same-component rule stays (owner, 2026-11-25)
+
+On the first try of the pick list on the test VM most releases were greyed "different
+component, cannot be copied to": the same CVE sat on a different set of packages there. A
+looser rule (copy whenever the CVE is the same) was offered and the owner chose **"Keep it as
+it is"**. A decision is copied only to a release that carries the same component (D2, D10); a
+release on a different component is decided on its own page. The owner-set severity uses the
+same list without this rule (EDR-SCORING-01 section 7.1), because a severity is about the CVE
+in the product.
+
 ## What this record does NOT decide
 
 - Any automatic decision. Scope widens the subject of a person's decision; it adds no decider.
