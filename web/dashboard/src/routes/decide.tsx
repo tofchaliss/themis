@@ -33,6 +33,8 @@ type Scope = "release" | "project" | "product";
 type Treatment = "" | "accept" | "transfer" | "avoid" | "mitigate_later";
 type ScopeTargets = Governance["schemas"]["ScopeTargetsView"];
 type Proposal = Governance["schemas"]["ProposalView"];
+/** A proposal nobody has decided yet. Governance's word is "proposed" (domain.StatusProposed). */
+const isWaiting = (p: Proposal) => p.status === "proposed";
 type Asked = { kind: "recorded" } | { kind: "none"; reason: string | null; detail: string | null };
 
 /** Ask Governance for an AI recommendation. 201 recorded an advisory proposal; 204 is a
@@ -105,6 +107,16 @@ function ScopePreview({ findingId, scope }: { findingId: string; scope: Scope })
   );
 }
 
+/** Seconds since the ask began, so a slow model never looks frozen. */
+function Elapsed() {
+  const [s, setS] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => setS((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  return <span className="font-mono">{s} s</span>;
+}
+
 function AiBox({
   proposal,
   asking,
@@ -139,7 +151,7 @@ function AiBox({
         {asking ? (
           <div role="status" aria-label="Asking the AI" className="flex flex-col gap-2">
             <Skeleton className="h-4 w-3/4" />
-            <p className="text-xs text-ink-2">Asking the AI for its reading of this CVE. A local model may take a minute. You can keep working on the form.</p>
+            <p className="text-xs text-ink-2">Asking the AI for its reading of this CVE. A local model may take a few minutes (<Elapsed /> so far). You can keep working on the form.</p>
           </div>
         ) : proposal ? (
           <>
@@ -169,6 +181,10 @@ function AiBox({
               </p>
             ) : asked?.kind === "none" ? (
               <AiOutcome reason={asked.reason} detail={asked.detail} />
+            ) : asked?.kind === "recorded" ? (
+              <p role="alert" className="text-crit">
+                The AI answered and Governance recorded its proposal, but this page could not read it back. Reload the page to see it.
+              </p>
             ) : (
               <p className="text-ink-2">Not asked for this finding. Ask when a second reading helps; each ask is one model call.</p>
             )}
@@ -208,7 +224,7 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
 
   const canWrite = who.data?.can_write !== false;
   // The newest AI proposal still waiting: the one the box shows and the form fills from.
-  const aiProposal = (f?.proposals ?? []).filter((p) => p.status === "pending" && p.proposer_kind === "ai").at(-1);
+  const aiProposal = (f?.proposals ?? []).filter((p) => isWaiting(p) && p.proposer_kind === "ai").at(-1);
   // Asked only on the button (ask.refetch), never on opening: the person chooses when a model
   // call is worth it. A read-only key may ask too (owner, 2026-11-25): the ask records an
   // advisory proposal only, and recording a decision stays blocked for that key.
@@ -343,7 +359,7 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
 
   const pos = f.current_position;
   const comps = f.components ?? [];
-  const pending = (f.proposals ?? []).filter((p) => p.status === "pending");
+  const pending = (f.proposals ?? []).filter(isWaiting);
 
   return (
     <div className="flex flex-col gap-4">
