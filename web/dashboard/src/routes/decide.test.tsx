@@ -35,6 +35,16 @@ const base: Record<string, Reply> = {
   "GET /api/registry/projects/j1": [200, { id: "j1", name: "project-a" }],
 };
 
+// The pick list of a copy: one open release, one of another version, one decided, one on a
+// different component.
+const PICK = "GET /api/governance/findings/f1/scope-targets?scope=product&all=true";
+const targets = [
+  { finding_id: "t1", project_id: "j1", project_name: "project-a", version: "1.5.0", level: "artifact" },
+  { finding_id: "t2", project_id: "j1", project_name: "project-a", version: "1.6.0", level: "component" },
+  { finding_id: "t3", project_id: "j2", project_name: "project-b", version: "2.0", level: "artifact", decision: { stance: "affected", decided_by_id: "bob", decided_by_kind: "human" } },
+  { finding_id: "t4", project_id: "j2", project_name: "project-b", version: "2.1", level: "vulnerability" },
+];
+
 const render = () => renderWithQuery(<Decide findingId="f1" releaseId="r1" version="1.4.0" />);
 
 describe("Decision page", () => {
@@ -72,40 +82,90 @@ describe("Decision page", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Name the accountable owner");
   });
 
-  it("records a decision as raise then accept, with scope, review date and acceptance terms", async () => {
+  it("records a decision as raise then accept, with review date and acceptance terms", async () => {
     const calls = mockFetch({
       ...base,
-      "GET /api/governance/findings/f1/scope-targets?scope=project": [
-        200,
-        { count: 9, projects: 1, targets: Array.from({ length: 9 }, (_, i) => ({ finding_id: `t${i}`, project_name: "project-a", version: `1.${i}` })) },
-      ],
       "POST /api/governance/findings/f1/proposals": [201, { proposal_id: "p-new" }],
       "POST /api/governance/findings/f1/proposals/p-new/accept": [204],
     });
     render();
     fireEvent.click(await screen.findByLabelText(/Accepted risk/));
     fireEvent.change(screen.getByLabelText(/Rationale/), { target: { value: "  We carry it.  " } });
-    fireEvent.change(screen.getByLabelText(/Applies to/), { target: { value: "project" } });
-    expect(await screen.findByText(/9 findings in 1 project/)).toBeInTheDocument();
-    expect(screen.getByText("+1 more")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/Review by/), { target: { value: "2027-01-31" } });
     fireEvent.change(screen.getByLabelText(/Owner/), { target: { value: "team-sec" } });
     fireEvent.change(screen.getByLabelText(/Disposition/), { target: { value: "mitigate_later" } });
     fireEvent.change(screen.getByLabelText(/Proof/), { target: { value: "https://example.com/doc" } });
     fireEvent.click(screen.getByRole("button", { name: "Record decision" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Recorded: accepted risk, decided by alice for the whole project.");
+    expect(await screen.findByRole("status")).toHaveTextContent("Recorded: accepted risk, decided by alice.");
     const raise = calls.find((c) => c.method === "POST" && c.url.endsWith("/proposals"));
     expect(raise?.body).toEqual({ stance: "accepted_risk", rationale: "We carry it.", proposer_kind: "human", proposer_id: "alice" });
     const acc = calls.find((c) => c.url.endsWith("/p-new/accept"));
     expect(acc?.body).toEqual({
       actor_id: "alice",
       actor_kind: "human",
-      scope: "project",
       review_by: "2027-01-31T00:00:00.000Z",
       owner: "team-sec",
       treatment: "mitigate_later",
       proof: "https://example.com/doc",
     });
+    // The list of releases is not read unless the person opens it.
+    expect(calls.some((c) => c.url.includes("scope-targets"))).toBe(false);
+  });
+
+  it("copies the decision to the ticked releases, and asks before replacing a decision", async () => {
+    const calls = mockFetch({
+      ...base,
+      [PICK]: [200, { targets }],
+      "POST /api/governance/findings/f1/proposals": [201, { proposal_id: "p-new" }],
+      "POST /api/governance/findings/f1/proposals/p-new/accept": [204],
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render();
+    fireEvent.click(await screen.findByLabelText(/^Affected/));
+    fireEvent.change(screen.getByLabelText(/Rationale/), { target: { value: "Reachable." } });
+    fireEvent.click(screen.getByRole("button", { name: "Choose releases to copy to" }));
+    fireEvent.click(await screen.findByLabelText("project-a 1.5.0"));
+    fireEvent.click(screen.getByLabelText("project-b 2.0"));
+    expect(screen.getByRole("note")).toHaveTextContent("Also copies to 2 findings in 2 projects, once, in your name. 1 of them has a decision that will be replaced");
+    // A proposal is never copied.
+    fireEvent.click(screen.getByRole("button", { name: "Only propose" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("A proposal is not copied");
+    // The person says no to the replacement: nothing is sent.
+    fireEvent.click(screen.getByRole("button", { name: "Record decision" }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("1 of the ticked releases already has a decision"));
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    // The person says yes: the picks go with the decision.
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Record decision" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Recorded: affected, decided by alice; copying to 2 more findings, they follow within a minute.");
+    expect(calls.find((c) => c.url.endsWith("/p-new/accept"))?.body).toEqual({ actor_id: "alice", actor_kind: "human", copy_to: ["t1", "t3"] });
+    confirm.mockRestore();
+  });
+
+  it("copies without asking when nothing is replaced, also when a waiting proposal is accepted", async () => {
+    const calls = mockFetch({ ...base, [PICK]: [200, { targets }], "POST /api/governance/findings/f1/proposals/p-ai/accept": [204] });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render();
+    fireEvent.click(await screen.findByRole("button", { name: "Choose releases to copy to" }));
+    fireEvent.click(await screen.findByLabelText("project-a 1.5.0"));
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Recorded: not affected, decided by alice; copying to 1 more finding, they follow within a minute.");
+    expect(calls.find((c) => c.url.endsWith("/p-ai/accept"))?.body).toEqual({ actor_id: "alice", actor_kind: "human", copy_to: ["t1"] });
+    // No replacement, so the confirm was only the "leave the page" guard's, never called here.
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("does not accept a waiting proposal when the person refuses the replacement", async () => {
+    const calls = mockFetch({ ...base, [PICK]: [200, { targets }] });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render();
+    fireEvent.click(await screen.findByRole("button", { name: "Choose releases to copy to" }));
+    fireEvent.click(await screen.findByLabelText("project-b 2.0"));
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    expect(confirm).toHaveBeenCalled();
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+    confirm.mockRestore();
   });
 
   it("only proposes when asked, and shows a refusal", async () => {
@@ -138,21 +198,6 @@ describe("Decision page", () => {
     expect(calls.find((c) => c.url.endsWith("/p-ai/accept"))?.body).toEqual({ actor_id: "alice", actor_kind: "human" });
     fireEvent.click(screen.getByRole("button", { name: "Reject" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("read-only key");
-  });
-
-  it("previews a scope that reaches nobody, and one that cannot be checked", async () => {
-    mockFetch({
-      ...base,
-      "GET /api/governance/findings/f1/scope-targets?scope=project": [200, { count: 0, projects: 0, targets: [] }],
-      "GET /api/governance/findings/f1/scope-targets?scope=product": [503, { detail: "no Registry seam" }],
-    });
-    render();
-    fireEvent.change(await screen.findByLabelText(/Applies to/), { target: { value: "project" } });
-    expect(await screen.findByText(/Reaches no other finding/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/Applies to/), { target: { value: "product" } });
-    expect(await screen.findByText(/Scope preview failed: .*no Registry seam/)).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/Applies to/), { target: { value: "release" } });
-    await waitFor(() => expect(screen.queryByText(/Scope preview failed/)).toBeNull());
   });
 
   it("asks before leaving with unsaved changes", async () => {

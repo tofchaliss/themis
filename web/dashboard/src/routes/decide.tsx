@@ -10,6 +10,11 @@
 // asks first. A read-only key may ask and read the answer, never record. Recording an unchanged AI fill accepts the AI's proposal; a changed form is the
 // person's own proposal. The AI never decides.
 //
+// Copying (EDR-SYNC-01 revision 2, owner 2026-11-25): the person may tick other releases of the
+// same product that carry the same CVE; the decision is then copied to each, once, in their
+// name. A ticked release that already has a decision is replaced, and the page asks first.
+// The pick list took the place of the "Applies to" scope picker.
+//
 // Changing severity is NOT here yet: severity comes from the CVSS vector, and the governed
 // vector change (EDR-SCORING-01 S6) is not built, so there is nothing true to warn about.
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
@@ -23,15 +28,14 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PackageCell, StanceBadge, isCleared } from "@/components/finding-bits";
 import { ErrorPanel } from "@/components/states";
-import { apiGet, apiPost, apiRaw } from "@/lib/api";
+import { CopyPicker, copySummary, type CopyTarget } from "@/components/copy-picker";
+import { apiPost, apiRaw } from "@/lib/api";
 import { useAssessment, useCveReleases, useWhoAmI } from "@/lib/queries";
 import { releaseHash } from "@/lib/router";
 import { cn } from "@/lib/utils";
 import type { components as Governance } from "@/types/api/governance";
 
-type Scope = "release" | "project" | "product";
 type Treatment = "" | "accept" | "transfer" | "avoid" | "mitigate_later";
-type ScopeTargets = Governance["schemas"]["ScopeTargetsView"];
 type Proposal = Governance["schemas"]["ProposalView"];
 /** A proposal nobody has decided yet. Governance's word is "proposed" (domain.StatusProposed). */
 const isWaiting = (p: Proposal) => p.status === "proposed";
@@ -67,43 +71,6 @@ function Label({ children, htmlFor, note }: { children: ReactNode; htmlFor: stri
       {children}
       {note && <span className="ml-1.5 font-normal text-ink-2">{note}</span>}
     </label>
-  );
-}
-
-/** EDR-SYNC-01 D7: what a wider scope reaches, BEFORE the click. "Nobody" and "cannot tell"
- * are different answers: an unreachable Registry is an error, never zero. */
-function ScopePreview({ findingId, scope }: { findingId: string; scope: Scope }) {
-  const [state, setState] = useState<{ scope: Scope; data?: ScopeTargets | null; error?: string } | null>(null);
-  useEffect(() => {
-    if (scope === "release") return;
-    let live = true;
-    apiGet<ScopeTargets>("governance", `/findings/${encodeURIComponent(findingId)}/scope-targets?scope=${scope}`)
-      .then((data) => live && setState({ scope, data }))
-      .catch((e: unknown) => live && setState({ scope, error: e instanceof Error ? e.message : "failed" }));
-    return () => {
-      live = false;
-    };
-  }, [findingId, scope]);
-  if (scope === "release") return null;
-  if (!state || state.scope !== scope) return <p className="text-xs text-ink-2">Checking what the {scope} scope reaches…</p>;
-  if (state.error) return <p className="text-xs text-crit">Scope preview failed: {state.error}</p>;
-  const targets = state.data?.targets ?? [];
-  if (!targets.length)
-    return <p className="text-xs text-ink-2">Reaches no other finding right now. A release uploaded later still gets this decision.</p>;
-  return (
-    <p className="flex flex-wrap items-center gap-1 text-xs text-ink-2">
-      Will also apply to{" "}
-      <b className="text-ink">
-        {state.data?.count} finding{state.data?.count === 1 ? "" : "s"} in {state.data?.projects} project{state.data?.projects === 1 ? "" : "s"}
-      </b>
-      , in your name:
-      {targets.slice(0, 8).map((t) => (
-        <Badge key={t.finding_id}>
-          {t.project_name || t.project_id} {t.version}
-        </Badge>
-      ))}
-      {targets.length > 8 && <Badge tone="info">+{targets.length - 8} more</Badge>}A finding someone already decided keeps its decision.
-    </p>
   );
 }
 
@@ -212,7 +179,8 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
 
   const [stance, setStance] = useState("");
   const [rationale, setRationale] = useState("");
-  const [scope, setScope] = useState<Scope>("release");
+  const [copyTo, setCopyTo] = useState<string[]>([]);
+  const [copyTargets, setCopyTargets] = useState<CopyTarget[]>([]);
   const [reviewBy, setReviewBy] = useState("");
   const [owner, setOwner] = useState("");
   const [treatment, setTreatment] = useState<Treatment>("");
@@ -257,7 +225,7 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
   // "As is": the form still says what the AI proposed, so recording it accepts that proposal.
   const asIs = !!aiProposal && filledFrom === aiProposal.id && stance === aiProposal.stance && rationale === (aiProposal.rationale ?? "");
 
-  const dirty = !done && ((!asIs && (!!stance || !!rationale.trim())) || scope !== "release" || !!reviewBy || !!owner || !!treatment || !!proof);
+  const dirty = !done && ((!asIs && (!!stance || !!rationale.trim())) || copyTo.length > 0 || !!reviewBy || !!owner || !!treatment || !!proof);
 
   // Leaving with unsaved changes asks first: a reload or closed tab, and any in-app link.
   useEffect(() => {
@@ -284,9 +252,19 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
     void qc.invalidateQueries({ queryKey: ["cve-releases"] });
   };
 
+  // What a copy does, said before and after: how many findings, and how many decisions go.
+  const copy = copySummary(copyTargets, copyTo);
+  const copied = () => (copyTo.length ? `; copying to ${copyTo.length} more finding${copyTo.length === 1 ? "" : "s"}, they follow within a minute` : "");
+  // The person is told before a decision already on a ticked release is replaced (owner, C2).
+  const okToReplace = () =>
+    copy.replaced === 0 ||
+    window.confirm(
+      `${copy.replaced} of the ticked releases already ${copy.replaced === 1 ? "has" : "have"} a decision. It will be replaced by this one; the old one stays in the history. Do you want to proceed?`,
+    );
+
   async function accept(proposalId: string, st: string) {
     const body: Governance["schemas"]["DecisionRequest"] = { actor_id: user, actor_kind: "human" };
-    if (scope !== "release") body.scope = scope;
+    if (copyTo.length) body.copy_to = copyTo;
     if (suppressing(st) && reviewBy) body.review_by = new Date(`${reviewBy}T00:00:00Z`).toISOString();
     if (acceptance(st)) {
       if (owner.trim()) body.owner = owner.trim();
@@ -302,11 +280,13 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
     if (!stance) return setError("Choose a decision.");
     if (!rationale.trim()) return setError("Write the rationale: it is the audit record.");
     if (mode === "record" && stance === "accepted_risk" && !owner.trim()) return setError("Name the accountable owner of this risk.");
+    if (mode === "propose" && copyTo.length) return setError("A proposal is not copied. Untick the releases, or record the decision.");
+    if (mode === "record" && !okToReplace()) return;
     setBusy(true);
     try {
       if (mode === "record" && asIs && aiProposal?.id) {
         await accept(aiProposal.id, stance);
-        setDone(`Recorded: ${stance.replace("_", " ")}, as the AI proposed, decided by ${user}${scope !== "release" ? ` for the whole ${scope}` : ""}.`);
+        setDone(`Recorded: ${stance.replace("_", " ")}, as the AI proposed, decided by ${user}${copied()}.`);
         refresh();
         return;
       }
@@ -320,7 +300,7 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
         const pid = raised.data?.proposal_id;
         if (!pid) throw new Error("Governance raised the proposal but returned no id; accept it under Proposals on record.");
         await accept(pid, stance);
-        setDone(`Recorded: ${stance.replace("_", " ")}, decided by ${user}${scope !== "release" ? ` for the whole ${scope}` : ""}.`);
+        setDone(`Recorded: ${stance.replace("_", " ")}, decided by ${user}${copied()}.`);
       } else {
         setDone("Proposal raised. It waits for someone to decide.");
       }
@@ -334,11 +314,12 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
 
   async function act(proposalId: string, st: string, verb: "accept" | "reject") {
     setError("");
+    if (verb === "accept" && !okToReplace()) return;
     setBusy(true);
     try {
       if (verb === "accept") await accept(proposalId, st);
       else await apiPost("governance", `/findings/${enc(findingId)}/proposals/${enc(proposalId)}/reject`, { actor_id: user, actor_kind: "human" });
-      setDone(verb === "accept" ? `Recorded: ${st.replace("_", " ")}, decided by ${user}.` : "Proposal rejected. The finding keeps its current state.");
+      setDone(verb === "accept" ? `Recorded: ${st.replace("_", " ")}, decided by ${user}${copied()}.` : "Proposal rejected. The finding keeps its current state.");
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "The request failed.");
@@ -447,17 +428,11 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
                 </div>
 
                 <div>
-                  <Label htmlFor="d-scope" note="who this decision applies to">
-                    Applies to
-                  </Label>
-                  <select id="d-scope" className={field} value={scope} onChange={(e) => setScope(e.target.value as Scope)}>
-                    <option value="release">This release only</option>
-                    <option value="project">Every release of this project</option>
-                    <option value="product">Every project and release of this product</option>
-                  </select>
-                  <div className="mt-1.5">
-                    <ScopePreview findingId={findingId} scope={scope} />
-                  </div>
+                  <p className="mb-1 font-medium">
+                    Copy to
+                    <span className="ml-1.5 font-normal text-ink-2">other releases of this product that have this CVE (optional)</span>
+                  </p>
+                  <CopyPicker findingId={findingId} picked={copyTo} onChange={setCopyTo} onTargets={setCopyTargets} />
                 </div>
 
                 {suppressing(stance) && (

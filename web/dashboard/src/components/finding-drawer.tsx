@@ -168,6 +168,7 @@ export function FindingDrawer({
                         <Row k="Decided">{day(pos.established_at)}</Row>
                         {pos.treatment && <Row k="Disposition">{pos.treatment}</Row>}
                         {pos.scope && pos.scope !== "release" && <Row k="Scope">decided for the {pos.scope}</Row>}
+                        {pos.propagated_from_finding_id && <Row k="Source">copied or applied from another release (see the rationale)</Row>}
                         <Row k="Rationale">{pos.rationale || <span className="text-muted">none written</span>}</Row>
                         {pos.review_by && <Row k="Review by">{day(pos.review_by)}</Row>}
                       </>
