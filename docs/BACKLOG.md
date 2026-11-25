@@ -371,6 +371,13 @@ three angles, and two of them proposed fixes that would not have worked.
   pass-through, or a verified operator name sent by the proxy. Also open: a GUI view of a
   bulletin's history, and product-scoped editing (EDR-PSIRT-01 R2).
 
+- [x] **AI recommendation on the decision page** (id `GUI-AI-DECIDE-1`, owner 2026-11-24).
+  The new GUI could not ask the AI for a position. The decision page now has an **Ask the AI**
+  button (never asked on opening), puts the answer into the form on request (asking first when
+  the form holds values), and records an unchanged fill as an acceptance of the AI's proposal
+  (EDR-GUI-02 D15). Open: VM check with the real model; the drawer's AI explanation
+  still hides without a word when the AI is off (`GUI-AI-DRAWER-OFF-1`).
+
 - [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
   feature). The owner's reference table shows per-release assessment-type markers (five status
   dots next to the AUTO / MANUAL column). Deferred: the Vulnerabilities dropdown (EDR-GUI-02 D13)

@@ -3,11 +3,19 @@
 // proposal, then accept it as the signed-in person): two audit entries, never one. A rationale
 // is required. Leaving with unsaved changes asks first.
 //
+// The AI box (owner, 2026-11-25): the AI is asked only on the "Ask the AI" button, never on
+// opening the page, so a low or plainly affected finding costs no model call. The form stays
+// usable while the AI works. Its answer (recommend_position, recorded as an advisory proposal)
+// goes into the form only when the person says so, and replacing values they already typed
+// asks first. Recording an unchanged AI fill accepts the AI's proposal; a changed form is the
+// person's own proposal. The AI never decides.
+//
 // Changing severity is NOT here yet: severity comes from the CVSS vector, and the governed
 // vector change (EDR-SCORING-01 S6) is not built, so there is nothing true to warn about.
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Sparkles } from "lucide-react";
+import { AiOutcome } from "@/components/ai-bits";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PackageCell, StanceBadge, isCleared } from "@/components/finding-bits";
 import { ErrorPanel } from "@/components/states";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost, apiRaw } from "@/lib/api";
 import { useAssessment, useCveReleases, useWhoAmI } from "@/lib/queries";
 import { releaseHash } from "@/lib/router";
 import { cn } from "@/lib/utils";
@@ -24,6 +32,18 @@ import type { components as Governance } from "@/types/api/governance";
 type Scope = "release" | "project" | "product";
 type Treatment = "" | "accept" | "transfer" | "avoid" | "mitigate_later";
 type ScopeTargets = Governance["schemas"]["ScopeTargetsView"];
+type Proposal = Governance["schemas"]["ProposalView"];
+type Asked = { kind: "recorded" } | { kind: "none"; reason: string | null; detail: string | null };
+
+/** Ask Governance for an AI recommendation. 201 recorded an advisory proposal; 204 is a
+ * no-answer with its reason (two headers, never joined). */
+async function recommend(findingId: string): Promise<Asked> {
+  const r = await apiRaw("governance", `/findings/${encodeURIComponent(findingId)}/recommend`, { method: "POST" });
+  if (r.status === 201) return { kind: "recorded" };
+  if (r.status === 204) return { kind: "none", reason: r.headers.get("X-Themis-AI-Reason"), detail: r.headers.get("X-Themis-AI-Detail") };
+  const j = (await r.json().catch(() => ({}))) as { detail?: string; title?: string };
+  throw new Error(`The AI recommendation returned ${r.status}: ${j.detail || j.title || "no detail"}`);
+}
 
 const STANCES: { id: string; label: string; note: string }[] = [
   { id: "affected", label: "Affected", note: "it applies here and needs fixing" },
@@ -85,6 +105,86 @@ function ScopePreview({ findingId, scope }: { findingId: string; scope: Scope })
   );
 }
 
+function AiBox({
+  proposal,
+  asking,
+  asked,
+  error,
+  filled,
+  canAsk,
+  onAsk,
+  onUse,
+}: {
+  proposal?: Proposal;
+  asking: boolean;
+  asked?: Asked;
+  error?: Error | null;
+  filled: boolean;
+  canAsk: boolean;
+  onAsk: () => void;
+  onUse: () => void;
+}) {
+  if (!proposal && !canAsk) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex flex-wrap items-center gap-2">
+          <Sparkles className="size-4 text-ai-ink" aria-hidden />
+          AI recommendation
+          <Badge tone="ai" title="The AI proposes; a person decides. Its proposal rests on inferred evidence and no rule can accept it.">
+            advisory
+          </Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        {asking ? (
+          <div role="status" aria-label="Asking the AI" className="flex flex-col gap-2">
+            <Skeleton className="h-4 w-3/4" />
+            <p className="text-xs text-ink-2">Asking the AI for its reading of this CVE. A local model may take a minute. You can keep working on the form.</p>
+          </div>
+        ) : proposal ? (
+          <>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-ink-2">The AI proposes</span>
+              <StanceBadge stance={proposal.stance} decided />
+              {proposal.evidence_trust && <Badge tone={proposal.evidence_trust === "inferred" ? "warn" : "neutral"}>{proposal.evidence_trust}</Badge>}
+            </div>
+            {proposal.rationale && <p className="leading-relaxed whitespace-pre-wrap">{proposal.rationale}</p>}
+            {filled ? (
+              <p className="text-xs text-ink-2">In the form below. Record it as is, or change anything first.</p>
+            ) : (
+              canAsk && (
+                <div>
+                  <Button size="sm" variant="outline" onClick={onUse}>
+                    Use this in the form
+                  </Button>
+                </div>
+              )
+            )}
+          </>
+        ) : (
+          <>
+            {error ? (
+              <p role="alert" className="text-crit">
+                {error.message}
+              </p>
+            ) : asked?.kind === "none" ? (
+              <AiOutcome reason={asked.reason} detail={asked.detail} />
+            ) : (
+              <p className="text-ink-2">Not asked for this finding. Ask when a second reading helps; each ask is one model call.</p>
+            )}
+            <div>
+              <Button size="sm" variant="outline" onClick={onAsk}>
+                {error || asked ? "Ask the AI again" : "Ask the AI"}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function Decide({ findingId, releaseId, version }: { findingId: string; releaseId: string; version: string }) {
   const a = useAssessment(findingId);
   const who = useWhoAmI();
@@ -105,8 +205,43 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState("");
+  const [filledFrom, setFilledFrom] = useState("");
 
-  const dirty = !done && (!!stance || !!rationale.trim() || scope !== "release" || !!reviewBy || !!owner || !!treatment || !!proof);
+  const canWrite = who.data?.can_write !== false;
+  // The newest AI proposal still waiting: the one the box shows and the form fills from.
+  const aiProposal = (f?.proposals ?? []).filter((p) => p.status === "pending" && p.proposer_kind === "ai").at(-1);
+  // Asked only on the button (ask.refetch), never on opening: the person chooses when a model
+  // call is worth it. It records a proposal, so a read-only key has no button.
+  const ask = useQuery({
+    queryKey: ["recommend", findingId],
+    enabled: false,
+    queryFn: async () => {
+      const r = await recommend(findingId);
+      // The recorded proposal is read back before the wait ends, so the form fills in one step.
+      if (r.kind === "recorded") await qc.invalidateQueries({ queryKey: ["assessment", findingId] });
+      return r;
+    },
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
+  });
+  const asking = ask.isFetching;
+  const fill = (p: Proposal) => {
+    setStance(STANCES.some((s) => s.id === p.stance) ? (p.stance ?? "") : "");
+    setRationale(p.rationale ?? "");
+    setFilledFrom(p.id ?? "");
+  };
+  // The AI's answer goes into the form on the person's word; values already there ask first.
+  const takeAi = () => {
+    if (!aiProposal) return;
+    const typed = !!stance || !!rationale.trim();
+    if (typed && !window.confirm("Replace the decision and rationale in the form with the AI's answer? Do you want to proceed?")) return;
+    fill(aiProposal);
+  };
+  // "As is": the form still says what the AI proposed, so recording it accepts that proposal.
+  const asIs = !!aiProposal && filledFrom === aiProposal.id && stance === aiProposal.stance && rationale === (aiProposal.rationale ?? "");
+
+  const dirty = !done && ((!asIs && (!!stance || !!rationale.trim())) || scope !== "release" || !!reviewBy || !!owner || !!treatment || !!proof);
 
   // Leaving with unsaved changes asks first: a reload or closed tab, and any in-app link.
   useEffect(() => {
@@ -125,7 +260,6 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
   }, [dirty]);
 
   const user = who.data?.user ?? "";
-  const canWrite = who.data?.can_write !== false;
   const enc = encodeURIComponent;
 
   const refresh = () => {
@@ -154,6 +288,12 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
     if (mode === "record" && stance === "accepted_risk" && !owner.trim()) return setError("Name the accountable owner of this risk.");
     setBusy(true);
     try {
+      if (mode === "record" && asIs && aiProposal?.id) {
+        await accept(aiProposal.id, stance);
+        setDone(`Recorded: ${stance.replace("_", " ")}, as the AI proposed, decided by ${user}${scope !== "release" ? ` for the whole ${scope}` : ""}.`);
+        refresh();
+        return;
+      }
       const raised = await apiPost<{ proposal_id?: string }>("governance", `/findings/${enc(findingId)}/proposals`, {
         stance,
         rationale: rationale.trim(),
@@ -230,6 +370,17 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
       )}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="flex flex-col gap-4">
+        <AiBox
+          proposal={aiProposal}
+          asking={asking}
+          asked={ask.data}
+          error={ask.error}
+          filled={asIs}
+          canAsk={canWrite}
+          onAsk={() => void ask.refetch()}
+          onUse={takeAi}
+        />
         <Card>
           <CardHeader>
             <CardTitle>Your decision</CardTitle>
@@ -336,12 +487,17 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
                   <Button type="button" variant="outline" disabled={busy} onClick={(e) => void submit(e, "propose")}>
                     Only propose
                   </Button>
-                  <span className="text-xs text-ink-2">Recorded in your name ({user}). Propose leaves the decision to someone else.</span>
+                  <span className="text-xs text-ink-2">
+                    {asIs
+                      ? `Recording it as is accepts the AI's proposal in your name (${user}).`
+                      : `Recorded in your name (${user}). Propose leaves the decision to someone else.`}
+                  </span>
                 </div>
               </form>
             )}
           </CardContent>
         </Card>
+        </div>
 
         <div className="flex flex-col gap-4">
           <Card>

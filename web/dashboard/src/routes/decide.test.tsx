@@ -47,8 +47,12 @@ describe("Decision page", () => {
     expect(screen.getByText("high · CVSS 7.5")).toBeInTheDocument();
     expect(screen.getByText("EPSS 5.0%")).toBeInTheDocument();
     expect(screen.getByText("openssl → 3.0.7, 3.1")).toBeInTheDocument();
-    expect(screen.getByText("Not reachable.")).toBeInTheDocument();
+    // Once in the AI box, once under Proposals waiting.
+    expect(screen.getAllByText("Not reachable.")).toHaveLength(2);
     expect(screen.getByText("AI")).toBeInTheDocument();
+    // Nothing is asked on opening, and the form is not filled.
+    expect(screen.getByRole("button", { name: "Use this in the form" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Rationale/)).toHaveValue("");
     expect(await screen.findByText("project-a v1.5.0")).toBeInTheDocument();
     expect(screen.queryByText("project-a v1.4.0")).toBeNull();
     expect(screen.getByRole("link", { name: /back to the release/i })).toHaveAttribute("href", "#/release/r1?v=1.4.0");
@@ -192,5 +196,144 @@ describe("Decision page", () => {
     renderWithQuery(<Decide findingId="f1" releaseId="" version="" />);
     expect(await screen.findByRole("link", { name: /back to the release/i })).toHaveAttribute("href", "#/release/r1");
     expect(await screen.findByText("none", { selector: "li" })).toBeInTheDocument();
+  });
+});
+
+const RECOMMEND = "POST /api/governance/findings/f1/recommend";
+const ASSESS = "GET /api/governance/findings/f1/assessment";
+const aiProposal = { id: "p-ai", stance: "not_affected", proposer_kind: "ai", status: "pending", evidence_trust: "inferred", rationale: "Not reachable." };
+const undecided = (proposals: unknown[]) => ({ ...assessment, finding: { ...assessment.finding, current_position: undefined, proposals } });
+
+/** An undecided finding with no AI proposal; the proposal appears once the AI was asked. */
+function fresh(reply: Reply, extra: Record<string, Reply> = {}) {
+  let asked = false;
+  return mockFetch({
+    ...base,
+    [ASSESS]: () => [200, undecided(asked ? [aiProposal] : [])],
+    [RECOMMEND]: () => {
+      asked = true;
+      return reply;
+    },
+    ...extra,
+  });
+}
+
+describe("Decision page: the AI recommendation", () => {
+  it("asks the AI only on the button, then fills the form on request and records it as is", async () => {
+    const calls = fresh([201, { proposal_id: "p-ai" }], { "POST /api/governance/findings/f1/proposals/p-ai/accept": [204] });
+    render();
+    expect(await screen.findByText(/Not asked for this finding/)).toBeInTheDocument();
+    expect(calls.some((c) => c.url.endsWith("/recommend"))).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask the AI" }));
+    const use = await screen.findByRole("button", { name: "Use this in the form" });
+    expect(calls.filter((c) => c.url.endsWith("/recommend"))).toHaveLength(1);
+    // The answer is shown, and the form is still the person's.
+    expect(screen.getByLabelText(/Rationale/)).toHaveValue("");
+
+    // An empty form takes the answer without a question.
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    fireEvent.click(use);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/Not affected/)).toBeChecked();
+    expect(screen.getByLabelText(/Rationale/)).toHaveValue("Not reachable.");
+    expect(screen.getByText(/In the form below/)).toBeInTheDocument();
+    expect(screen.getByText(/Recording it as is accepts the AI's proposal in your name \(alice\)/)).toBeInTheDocument();
+
+    // An untouched AI fill is not an unsaved change.
+    screen.getByRole("link", { name: /back to the release/i }).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(confirm).not.toHaveBeenCalled();
+    confirm.mockRestore();
+
+    fireEvent.click(screen.getByRole("button", { name: "Record decision" }));
+    expect(await screen.findByText(/Recorded: not affected, as the AI proposed, decided by alice\./)).toBeInTheDocument();
+    expect(calls.find((c) => c.url.endsWith("/p-ai/accept"))?.body).toEqual({ actor_id: "alice", actor_kind: "human" });
+    expect(calls.some((c) => c.method === "POST" && c.url.endsWith("/proposals"))).toBe(false);
+  });
+
+  it("asks before the AI's answer replaces what the person typed", async () => {
+    const calls = fresh([201, { proposal_id: "p-ai" }], {
+      "POST /api/governance/findings/f1/proposals": [201, { proposal_id: "p-new" }],
+      "POST /api/governance/findings/f1/proposals/p-new/accept": [204],
+    });
+    // Hold the AI's answer: the form stays usable while it works.
+    const inner = globalThis.fetch;
+    let release = () => {};
+    const held = new Promise<void>((ok) => (release = ok));
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/recommend")) await held;
+      return inner(input, init);
+    });
+    render();
+    fireEvent.click(await screen.findByRole("button", { name: "Ask the AI" }));
+    expect(await screen.findByRole("status", { name: "Asking the AI" })).toBeInTheDocument();
+    expect(screen.getByLabelText(/Rationale/)).toBeEnabled();
+    fireEvent.click(screen.getByLabelText(/^Affected/));
+    fireEvent.change(screen.getByLabelText(/Rationale/), { target: { value: "mine" } });
+    release();
+    const use = await screen.findByRole("button", { name: "Use this in the form" });
+    expect(screen.getByLabelText(/Rationale/)).toHaveValue("mine");
+
+    // "No" keeps the person's values.
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    fireEvent.click(use);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Do you want to proceed?"));
+    expect(screen.getByLabelText(/Rationale/)).toHaveValue("mine");
+
+    // Recording now is the person's own proposal; the AI's is not accepted.
+    confirm.mockRestore();
+    fireEvent.click(screen.getByRole("button", { name: "Record decision" }));
+    expect(await screen.findByText(/Recorded: affected, decided by alice\./)).toBeInTheDocument();
+    expect(calls.find((c) => c.method === "POST" && c.url.endsWith("/proposals"))?.body).toEqual({
+      stance: "affected",
+      rationale: "mine",
+      proposer_kind: "human",
+      proposer_id: "alice",
+    });
+    expect(calls.some((c) => c.url.endsWith("/p-ai/accept"))).toBe(false);
+
+    // "Yes" replaces them.
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Use this in the form" }));
+    expect(screen.getByLabelText(/Not affected/)).toBeChecked();
+    expect(screen.getByLabelText(/Rationale/)).toHaveValue("Not reachable.");
+    vi.restoreAllMocks();
+  });
+
+  it("names a no-answer and a failure, and asks again on request", async () => {
+    const calls = fresh([204]);
+    const first = render();
+    fireEvent.click(await screen.findByRole("button", { name: "Ask the AI" }));
+    expect(await screen.findByText("no answer")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ask the AI again" }));
+    await waitFor(() => expect(calls.filter((c) => c.url.endsWith("/recommend"))).toHaveLength(2));
+    first.unmount();
+
+    mockFetch({ ...base, [ASSESS]: [200, undecided([])], [RECOMMEND]: [500, { detail: "gateway broke" }] });
+    const second = render();
+    fireEvent.click(await screen.findByRole("button", { name: "Ask the AI" }));
+    expect(await screen.findByText(/returned 500: gateway broke/)).toBeInTheDocument();
+    second.unmount();
+
+    mockFetch({ ...base, [ASSESS]: [200, undecided([])], [RECOMMEND]: [500] });
+    render();
+    fireEvent.click(await screen.findByRole("button", { name: "Ask the AI" }));
+    expect(await screen.findByText(/returned 500: no detail/)).toBeInTheDocument();
+  });
+
+  it("has no AI box for a read-only key with nothing to show", async () => {
+    const quiet = mockFetch({ ...base, "GET /whoami": [200, { user: "viewer", scopes: ["read"], can_write: false }], [ASSESS]: [200, undecided([])] });
+    render();
+    expect(await screen.findByText(/Your key is read-only/)).toBeInTheDocument();
+    expect(screen.queryByText("AI recommendation")).toBeNull();
+    expect(quiet.some((c) => c.url.endsWith("/recommend"))).toBe(false);
+  });
+
+  it("ignores a stance it does not know", async () => {
+    mockFetch({ ...base, [ASSESS]: [200, undecided([{ ...aiProposal, stance: "fixed_elsewhere", rationale: undefined, id: "p-odd" }])] });
+    render();
+    fireEvent.click(await screen.findByRole("button", { name: "Use this in the form" }));
+    expect(screen.getByLabelText(/Rationale/)).toHaveValue("");
+    for (const r of screen.getAllByRole("radio")) expect(r).not.toBeChecked();
   });
 });
