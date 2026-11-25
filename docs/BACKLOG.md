@@ -387,8 +387,10 @@ three angles, and two of them proposed fixes that would not have worked.
   product only; a target with its own decision may be picked and is replaced with a notice.
   Design in EDR-SYNC-01 revision 2 (D9-D12). **C1 (Governance) built 2026-11-25**: `copy_to`
   on the decision, the pick list (`scope-targets?scope=product&all=true`), the one-time copy
-  on the scope sweep, governance migration 000026; see the C1 realization note. Open: C2
-  (GUI pick list), C3 (VM check), C4 (severity copies along, after the owner-set severity).
+  on the scope sweep, governance migration 000026; see the C1 realization note; VM check PASS 2026-11-25. **C2 (GUI) built
+  2026-11-25**: "Copy to" pick list on the decision page in place of "Applies to", asks before
+  a decision is replaced. Open: C3 (VM check of a real copy from the GUI), C4 (severity copies
+  along, after the owner-set severity), a link from a copy to its source.
 
 - [ ] **Owner-set severity** (id `GOV-SEVERITY-OWNER-1`, owner 2026-11-25, feature). The
   product owner decides the severity that counts for the product, whatever the original score

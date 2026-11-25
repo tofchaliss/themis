@@ -1,6 +1,6 @@
 # EDR-SYNC-01 — One decision, chosen scope: a CVE assessment applied across the projects of a product
 
-Status: **ACCEPTED — 2026-11-03 (owner merged PR #222; "go s1" the same day). S1 built 2026-11-03, see Realization notes. Revision 2 (copy to picked releases) accepted by the owner 2026-11-25 (PR #252 merged, "go" the same day); step C1 built 2026-11-25, see Realization notes.**
+Status: **ACCEPTED — 2026-11-03 (owner merged PR #222; "go s1" the same day). S1 built 2026-11-03, see Realization notes. Revision 2 (copy to picked releases) accepted by the owner 2026-11-25 (PR #252 merged, "go" the same day); steps C1 and C2 built 2026-11-25, C1 VM check PASS, see Realization notes.**
 Date: 2026-11-03
 Author: the design discussion of 2026-11-03 (thread "Nessus report intake"); owner picked
 "scope at decision time" over "auto copy" and "proposals only" the same day.
@@ -314,6 +314,38 @@ the copy sets the same severity on each target, with the same reason and the sam
   write check already confines.
 - Not in C1: the GUI (C2), the owner-set severity (C4), and showing "copied to N" on the
   source Position (the targets are stored, not yet on the Position view).
+
+- **VM check of C1 (2026-11-25): PASS.** Governance restarted with the migration at 26, not
+  dirty; `copy_to` and `copy_applied_at` present on `finding_positions`. The pick list for one
+  CVE that sits in several releases answered: 8 other Findings in 8 projects of the same
+  product, 7 that can take a copy, 1 at `vulnerability` level (another component), 0 decided;
+  product name, project names and release versions on every row. Read only: no copy was made
+  in this round; the copy itself is checked from the GUI (C3).
+
+### Step C2 (2026-11-25) — the pick list on the decision page
+
+- **"Copy to" took the place of "Applies to"** on the decision page. The scope picker of S2 is
+  gone from the GUI; `scope` stays in the API for other callers (D9).
+- **The list is read only when the person opens it** ("Choose releases to copy to"), so a
+  decision for one release costs no Registry hop. It groups the releases by project: a tick
+  per release, a tick per project (all its releases), **Select all in product**, and Clear.
+  The owner's "select all projects" and "select all in product" are the same set here (a
+  product's projects are all its releases that carry the CVE), so there is one button.
+- **What each row says** (D10): the release version; "same package, other version" at
+  component level; a release on a different component is greyed with the reason and has no
+  tick; a decided release shows its decision and who took it, and once ticked "will be
+  replaced by this decision".
+- **Before recording** the list states the count: "Also copies to N findings in M projects,
+  once, in your name", and how many decisions will be replaced. When that number is not zero
+  the page **asks** ("Do you want to proceed?") before anything is sent; a "no" sends nothing.
+  This is the owner's C2 answer ("let the user know it is getting updated").
+- The picks go as `copy_to` on the accept, on all three ways to decide: the person's own
+  decision, the AI's answer recorded as is, and Accept on a waiting proposal. "Only propose"
+  with ticks is refused on the page: a proposal is not copied.
+- After the click the status line says "copying to N more findings, they follow within a
+  minute". The drawer's decision shows "Source: copied or applied from another release" when
+  the Position names one; the rationale names the project and version.
+- Not in C2: a link from a copy to its source Finding, and "copied to N" on the source.
 
 ## What this record does NOT decide
 
