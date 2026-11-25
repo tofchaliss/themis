@@ -600,6 +600,10 @@ export interface components {
             count?: number;
             /** @description How many distinct projects the targets span. */
             projects?: number;
+            /** @description Only with `all=true` - how many of the targets a decision can be copied to. */
+            copyable?: number;
+            /** @description Only with `all=true` - how many of the copyable targets carry a decision a copy would replace. */
+            decided?: number;
             targets?: components["schemas"]["ScopeTargetView"][];
         };
         ScopeTargetView: {
@@ -613,10 +617,18 @@ export interface components {
             /** @description The target release's version. */
             version?: string;
             /**
-             * @description artifact = the same purls; component = the same packages at other versions (EDR-ROLLFORWARD-01 D3).
+             * @description artifact = the same purls; component = the same packages at other versions (EDR-ROLLFORWARD-01 D3). vulnerability (only with `all=true`) = the same CVE on a different component: listed, never copied to.
              * @enum {string}
              */
-            level?: "artifact" | "component";
+            level?: "artifact" | "component" | "vulnerability";
+            /** @description Only with `all=true`: the decision this Finding carries now. Absent when it has none. A copy to it adds a new Position version; this one stays in the history. */
+            decision?: {
+                stance?: string;
+                decided_by_kind?: string;
+                decided_by_id?: string;
+                /** Format: date-time */
+                decided_at?: string;
+            };
         };
         ProposalView: {
             id?: string;
@@ -1123,6 +1135,8 @@ export interface components {
              * @enum {string}
              */
             scope?: "release" | "project" | "product";
+            /** @description Finding ids this decision is copied to, once (EDR-SYNC-01 D9, D11). Each must be another Finding of the same CVE in the same product that carries the same component; one that is not refuses the whole request (400) and nothing is recorded. Governance establishes the SAME Position on each, recorded against the same decider, within a sweep (about a minute). A target that already has a Position gets a new version (the earlier one stays in the history). One-time: later Findings and later changes of this decision do not follow. Not allowed together with scope `project` / `product` (400). GET /findings/{id}/scope-targets?scope=product&all=true lists what can be picked. */
+            copy_to?: string[];
         };
         Problem: {
             title?: string;
@@ -1383,6 +1397,8 @@ export interface operations {
         parameters: {
             query: {
                 scope: "release" | "project" | "product";
+                /** @description The pick list of a decision copy (EDR-SYNC-01 D10). With `all=true` (scope must be `product`) the answer lists EVERY other Finding of the same CVE in the same product, decided or not, each with its level (`vulnerability` = a different component, cannot be copied to) and the decision it carries now. */
+                all?: boolean;
             };
             header?: never;
             path: {

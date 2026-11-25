@@ -269,6 +269,10 @@ func (h *Handler) GetScopeTargets(w http.ResponseWriter, r *http.Request, id str
 			"no Registry seam is configured (THEMIS_REGISTRY_URL), so the owners of the releases cannot be resolved")
 		return
 	}
+	if params.All != nil && *params.All {
+		h.writeCopyCandidates(w, r, id, scope)
+		return
+	}
 	targets, err := h.scope.Targets(r.Context(), domain.FindingID(id), scope)
 	if err != nil {
 		writeErr(w, "cannot preview scope targets", err)
@@ -290,6 +294,56 @@ func (h *Handler) GetScopeTargets(w http.ResponseWriter, r *http.Request, id str
 	sc := gen.ScopeTargetsViewScope(scope)
 	writeJSON(w, http.StatusOK, gen.ScopeTargetsView{
 		FindingId: strptr(id), Scope: &sc, Count: &count, Projects: &nProjects, Targets: &out,
+	})
+}
+
+// writeCopyCandidates answers the pick list of a decision copy (EDR-SYNC-01 D10): every other
+// Finding of the same CVE in the same product, decided or not, with its level and the decision
+// it carries now. The same list CheckCopyTargets judges a pick against.
+func (h *Handler) writeCopyCandidates(w http.ResponseWriter, r *http.Request, id string, scope domain.DecisionScope) {
+	if scope != domain.ScopeProduct {
+		writeProblem(w, http.StatusBadRequest, "invalid scope", "all=true lists a whole product: scope must be product")
+		return
+	}
+	candidates, err := h.scope.CopyCandidates(r.Context(), domain.FindingID(id))
+	if err != nil {
+		writeErr(w, "cannot list copy targets", err)
+		return
+	}
+	out := make([]gen.ScopeTargetView, 0, len(candidates))
+	projects := map[string]bool{}
+	copyable, decided := 0, 0
+	for _, c := range candidates {
+		projects[c.ProjectID] = true
+		level := gen.ScopeTargetViewLevel(c.Level)
+		v := gen.ScopeTargetView{
+			FindingId: strptr(string(c.FindingID)), ReleaseId: strptr(c.ReleaseID),
+			ProductId: strptr(c.ProductID), ProjectId: strptr(c.ProjectID),
+			ProductName: strptr(c.ProductName), ProjectName: strptr(c.ProjectName), Version: strptr(c.Version),
+			Level: &level,
+		}
+		if c.Decided {
+			at := c.DecidedAt
+			v.Decision = &struct {
+				DecidedAt     *time.Time `json:"decided_at,omitempty"`
+				DecidedById   *string    `json:"decided_by_id,omitempty"`
+				DecidedByKind *string    `json:"decided_by_kind,omitempty"`
+				Stance        *string    `json:"stance,omitempty"`
+			}{DecidedAt: &at, DecidedById: strptr(c.DecidedBy.ID), DecidedByKind: strptr(string(c.DecidedBy.Kind)), Stance: strptr(string(c.Stance))}
+		}
+		if c.Copyable() {
+			copyable++
+			if c.Decided {
+				decided++
+			}
+		}
+		out = append(out, v)
+	}
+	count, nProjects := len(out), len(projects)
+	sc := gen.ScopeTargetsViewScope(scope)
+	writeJSON(w, http.StatusOK, gen.ScopeTargetsView{
+		FindingId: strptr(id), Scope: &sc, Count: &count, Projects: &nProjects, Targets: &out,
+		Copyable: &copyable, Decided: &decided,
 	})
 }
 
@@ -628,6 +682,19 @@ func (h *Handler) AcceptProposal(w http.ResponseWriter, r *http.Request, id, pro
 	decider, terms, ok := decisionFrom(w, r)
 	if !ok {
 		return
+	}
+	if len(terms.CopyTo) > 0 {
+		// Every pick is judged BEFORE the decision is recorded (EDR-SYNC-01 D9): one Finding
+		// outside the product refuses the whole request, so nothing is half done.
+		if h.scope == nil {
+			writeProblem(w, http.StatusServiceUnavailable, "copy unavailable",
+				"no Registry seam is configured (THEMIS_REGISTRY_URL), so the product of the copy targets cannot be checked")
+			return
+		}
+		if err := h.scope.CheckCopyTargets(r.Context(), domain.FindingID(id), terms.CopyTo); err != nil {
+			writeErr(w, "cannot copy the decision", err)
+			return
+		}
 	}
 	if err := h.write.AcceptProposalWith(r.Context(), domain.FindingID(id), domain.ProposalID(proposalID), decider, terms); err != nil {
 		writeErr(w, "cannot accept proposal", err)
@@ -1055,6 +1122,11 @@ func decisionFrom(w http.ResponseWriter, r *http.Request) (domain.Actor, domain.
 		// set is the aggregate's.
 		terms.Scope = domain.DecisionScope(*body.Scope)
 	}
+	if body.CopyTo != nil {
+		for _, id := range *body.CopyTo {
+			terms.CopyTo = append(terms.CopyTo, domain.FindingID(id))
+		}
+	}
 	actor, ok := deciderActorFrom(w, r, &body)
 	return actor, terms, ok
 }
@@ -1103,7 +1175,8 @@ func writeErr(w http.ResponseWriter, title string, err error) {
 	case errors.Is(err, app.ErrUnauthorized):
 		writeProblem(w, http.StatusForbidden, title, err.Error())
 	case errors.Is(err, domain.ErrOwnerRequired), errors.Is(err, domain.ErrInvalidTreatment),
-		errors.Is(err, domain.ErrTermsNotApplicable), errors.Is(err, domain.ErrInvalidScope):
+		errors.Is(err, domain.ErrTermsNotApplicable), errors.Is(err, domain.ErrInvalidScope),
+		errors.Is(err, domain.ErrScopeAndCopy), errors.Is(err, app.ErrCopyTargetInvalid):
 		writeProblem(w, http.StatusBadRequest, title, err.Error())
 	case errors.Is(err, domain.ErrIllegalTransition),
 		errors.Is(err, domain.ErrProposalNotOpen),

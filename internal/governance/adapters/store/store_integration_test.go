@@ -1383,6 +1383,71 @@ func TestDecisionScopeRoundTripAndPendingQueue(t *testing.T) {
 	}
 }
 
+// The decision copy (EDR-SYNC-01 revision 2): the picked targets round-trip as a Position input
+// in the order given; a decision that names targets is pending for the sweep until marked, a
+// plain one and a copy never are; marking is idempotent and the listing is oldest-first.
+func TestDecisionCopyRoundTripAndPendingQueue(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	decide := func(id string, at time.Time, terms domain.AcceptanceTerms) {
+		t.Helper()
+		if err := st.Save(ctx, newFinding(t, id, "rel-"+id, "fl-copy", "CVE-2026-C"), true, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+		f, _, _ := load(t, st, domain.FindingID(id))
+		prev := f.Version()
+		p, _ := domain.NewGovernanceProposal("p1", human, domain.StanceNotAffected, "built without the codec", at, value.TrustAsserted)
+		_ = f.RaiseProposal(p)
+		if _, err := f.AcceptProposalWith("p1", human, at, terms); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Save(ctx, f, false, prev, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	decide("plain", epoch, domain.AcceptanceTerms{})
+	decide("later", epoch.Add(2*time.Hour), domain.AcceptanceTerms{CopyTo: []domain.FindingID{"t9"}})
+	decide("first", epoch.Add(time.Hour), domain.AcceptanceTerms{CopyTo: []domain.FindingID{"t2", "t1"}})
+	decide("copy", epoch.Add(3*time.Hour), domain.AcceptanceTerms{PropagatedFrom: domain.PropagationSource{FindingID: "first", Version: 1}})
+
+	got, _, _ := load(t, st, "first")
+	pos, _ := got.CurrentPosition()
+	if to := pos.CopyTo(); len(to) != 2 || to[0] != "t2" || to[1] != "t1" || !pos.IsCopySource() {
+		t.Errorf("copy targets = %v, source %v", to, pos.IsCopySource())
+	}
+	for _, id := range []domain.FindingID{"plain", "copy"} {
+		f, _, _ := load(t, st, id)
+		if p, _ := f.CurrentPosition(); len(p.CopyTo()) != 0 || p.IsCopySource() {
+			t.Errorf("%s reads back with copy targets %v", id, p.CopyTo())
+		}
+	}
+
+	pending, err := st.PendingCopyPositions(ctx, 10)
+	if err != nil || len(pending) != 2 || pending[0].FindingID != "first" || pending[1].FindingID != "later" || pending[0].Version != 1 {
+		t.Fatalf("pending = %+v %v, want [first later] oldest first", pending, err)
+	}
+	if one, _ := st.PendingCopyPositions(ctx, 1); len(one) != 1 || one[0].FindingID != "first" {
+		t.Errorf("limit = %+v", one)
+	}
+	if err := st.MarkCopyApplied(ctx, "first", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkCopyApplied(ctx, "first", 1); err != nil {
+		t.Fatal("second mark failed:", err)
+	}
+	if err := st.MarkCopyApplied(ctx, "ghost", 7); err != nil {
+		t.Fatal("unknown row mark failed:", err)
+	}
+	if left, _ := st.PendingCopyPositions(ctx, 10); len(left) != 1 || left[0].FindingID != "later" {
+		t.Errorf("after mark = %+v", left)
+	}
+	// the scope queue is a different queue: none of these is in it
+	if scoped, _ := st.PendingScopedPositions(ctx, 10); len(scoped) != 0 {
+		t.Errorf("copy decisions in the scope queue: %+v", scoped)
+	}
+}
+
 // EDR-INCIDENT-01 D2: a Watch round-trips whole (identifiers in order, the recorded resolution,
 // the notify flag), the list is newest first, and a delete removes it — twice is not found.
 func TestWatchRoundTrip(t *testing.T) {

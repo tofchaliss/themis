@@ -48,6 +48,9 @@ type AcceptanceTerms struct {
 	// a target (D3); a person's own decision names no source.
 	Scope          DecisionScope
 	PropagatedFrom PropagationSource
+	// CopyTo names the other Findings this decision is copied to, once (EDR-SYNC-01 D9). Not
+	// allowed together with a propagating Scope.
+	CopyTo []FindingID
 }
 
 var (
@@ -80,6 +83,10 @@ func checkTerms(stance Stance, by Actor, t AcceptanceTerms) (AcceptanceTerms, er
 		scope = "" // the pre-record spelling: a release-scoped decision carries no scope mark
 	}
 	t.Scope = scope
+	t.CopyTo = normalizeCopyTo(t.CopyTo)
+	if scope.Propagates() && len(t.CopyTo) > 0 {
+		return t, ErrScopeAndCopy
+	}
 	if !carriesAcceptance(stance) {
 		if t.Owner != "" || t.Treatment != "" || t.Proof != "" {
 			return t, ErrTermsNotApplicable

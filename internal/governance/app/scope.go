@@ -42,6 +42,11 @@ type ScopedPositions interface {
 	PendingScopedPositions(ctx context.Context, limit int) ([]ScopedPosition, error)
 	// MarkScopeApplied stamps the row; a later pass lists it no more.
 	MarkScopeApplied(ctx context.Context, findingID domain.FindingID, version int) error
+	// PendingCopyPositions lists up to limit decisions that name copy targets and have not
+	// made their copies yet, oldest first (EDR-SYNC-01 D11).
+	PendingCopyPositions(ctx context.Context, limit int) ([]ScopedPosition, error)
+	// MarkCopyApplied stamps the row; a later pass lists it no more.
+	MarkCopyApplied(ctx context.Context, findingID domain.FindingID, version int) error
 }
 
 // ReleaseOwners is a release as Registry knows it: the ids that decide scope and the names a
@@ -82,6 +87,9 @@ type ScopeResult struct {
 	// (release pass); Applied how many Positions were established; Conflicts how many targets
 	// were left alone because two standing decisions disagreed (D5).
 	Decisions, Applied, Conflicts int
+	// Copies is how many decisions with copy targets were visited (sweep); Copied how many
+	// Positions they established (EDR-SYNC-01 D11).
+	Copies, Copied int
 }
 
 // ScopePropagation applies scoped decisions. It needs the write service, the queue, the
@@ -220,7 +228,7 @@ func (p *ScopePropagation) Sweep(ctx context.Context) (ScopeResult, error) {
 		}
 		res.Decisions++
 	}
-	return res, nil
+	return p.sweepCopies(ctx, res)
 }
 
 // ForRelease is the later-born half (D4): every undecided Finding of a release whose owners are
