@@ -375,8 +375,12 @@ three angles, and two of them proposed fixes that would not have worked.
   The new GUI could not ask the AI for a position. The decision page now has an **Ask the AI**
   button (never asked on opening), puts the answer into the form on request (asking first when
   the form holds values), and records an unchanged fill as an acceptance of the AI's proposal
-  (EDR-GUI-02 D15). Open: VM check with the real model; the drawer's AI explanation
-  still hides without a word when the AI is off (`GUI-AI-DRAWER-OFF-1`).
+  (EDR-GUI-02 D15). VM check 2026-11-25: the model answered (141 s and 24 s) and Governance
+  recorded both proposals, but the page showed none. Cause: the page filtered proposals on
+  status `pending`; Governance's word is `proposed`, so "Proposals waiting" had been empty in
+  the new GUI since the page was built, and the test fixture carried the same wrong word.
+  Fixed, with a seconds counter while the AI works. Open: re-check on the VM; the drawer's AI
+  explanation still hides without a word when the AI is off (`GUI-AI-DRAWER-OFF-1`).
 
 - [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
   feature). The owner's reference table shows per-release assessment-type markers (five status
