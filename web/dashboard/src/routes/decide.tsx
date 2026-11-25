@@ -7,7 +7,7 @@
 // opening the page, so a low or plainly affected finding costs no model call. The form stays
 // usable while the AI works. Its answer (recommend_position, recorded as an advisory proposal)
 // goes into the form only when the person says so, and replacing values they already typed
-// asks first. Recording an unchanged AI fill accepts the AI's proposal; a changed form is the
+// asks first. A read-only key may ask and read the answer, never record. Recording an unchanged AI fill accepts the AI's proposal; a changed form is the
 // person's own proposal. The AI never decides.
 //
 // Changing severity is NOT here yet: severity comes from the CVSS vector, and the governed
@@ -111,7 +111,7 @@ function AiBox({
   asked,
   error,
   filled,
-  canAsk,
+  canUse,
   onAsk,
   onUse,
 }: {
@@ -120,11 +120,10 @@ function AiBox({
   asked?: Asked;
   error?: Error | null;
   filled: boolean;
-  canAsk: boolean;
+  canUse: boolean;
   onAsk: () => void;
   onUse: () => void;
 }) {
-  if (!proposal && !canAsk) return null;
   return (
     <Card>
       <CardHeader>
@@ -153,7 +152,7 @@ function AiBox({
             {filled ? (
               <p className="text-xs text-ink-2">In the form below. Record it as is, or change anything first.</p>
             ) : (
-              canAsk && (
+              canUse && (
                 <div>
                   <Button size="sm" variant="outline" onClick={onUse}>
                     Use this in the form
@@ -211,7 +210,8 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
   // The newest AI proposal still waiting: the one the box shows and the form fills from.
   const aiProposal = (f?.proposals ?? []).filter((p) => p.status === "pending" && p.proposer_kind === "ai").at(-1);
   // Asked only on the button (ask.refetch), never on opening: the person chooses when a model
-  // call is worth it. It records a proposal, so a read-only key has no button.
+  // call is worth it. A read-only key may ask too (owner, 2026-11-25): the ask records an
+  // advisory proposal only, and recording a decision stays blocked for that key.
   const ask = useQuery({
     queryKey: ["recommend", findingId],
     enabled: false,
@@ -377,7 +377,7 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
           asked={ask.data}
           error={ask.error}
           filled={asIs}
-          canAsk={canWrite}
+          canUse={canWrite}
           onAsk={() => void ask.refetch()}
           onUse={takeAi}
         />

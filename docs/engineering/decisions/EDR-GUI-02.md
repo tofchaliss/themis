@@ -335,7 +335,12 @@ button was never carried over. The owner's rule, as revised on 2026-11-25:
    "Proposals waiting".
 5. A no-answer shows its reason (`X-Themis-AI-Reason`), never a blank box. **Ask the AI again**
    retries.
-6. A read-only key has no button (asking records a proposal, which is a write).
+6. A **read-only** user may ask too (owner, 2026-11-25) and reads the answer. Recording a
+   decision, accepting, rejecting and raising a proposal stay blocked for that user. The
+   dashboard gate lets a read session send exactly `POST /api/governance/findings/{id}/recommend`.
+   This narrows EDR-GUI-01 D11 for one route: the ask records an advisory proposal, changes no
+   Position, and no rule can accept it. The direct Gateway invoke of `recommend_position` stays
+   refused for a read session.
 
 The AI still only proposes. Its proposal is `inferred` and no rule can accept it.
 

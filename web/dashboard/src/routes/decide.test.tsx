@@ -321,12 +321,16 @@ describe("Decision page: the AI recommendation", () => {
     expect(await screen.findByText(/returned 500: no detail/)).toBeInTheDocument();
   });
 
-  it("has no AI box for a read-only key with nothing to show", async () => {
-    const quiet = mockFetch({ ...base, "GET /whoami": [200, { user: "viewer", scopes: ["read"], can_write: false }], [ASSESS]: [200, undecided([])] });
+  it("lets a read-only key ask the AI and read the answer, never use or record it", async () => {
+    const calls = fresh([201, { proposal_id: "p-ai" }], { "GET /whoami": [200, { user: "viewer", scopes: ["read"], can_write: false }] });
     render();
     expect(await screen.findByText(/Your key is read-only/)).toBeInTheDocument();
-    expect(screen.queryByText("AI recommendation")).toBeNull();
-    expect(quiet.some((c) => c.url.endsWith("/recommend"))).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Ask the AI" }));
+    expect(await screen.findAllByText("Not reachable.")).toHaveLength(2);
+    expect(calls.filter((c) => c.url.endsWith("/recommend"))).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Use this in the form" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Record decision" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
   });
 
   it("ignores a stance it does not know", async () => {
