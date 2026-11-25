@@ -53,6 +53,8 @@ func writeSeverityErr(w http.ResponseWriter, title string, err error) {
 		errors.Is(err, domain.ErrOwnerSeverityVector), errors.Is(err, domain.ErrOwnerSeverityReason),
 		errors.Is(err, domain.ErrOwnerSeverityActor), errors.Is(err, app.ErrSeverityTargetInvalid):
 		writeProblem(w, http.StatusBadRequest, title, err.Error())
+	case errors.Is(err, app.ErrNothingToReview):
+		writeProblem(w, http.StatusConflict, title, err.Error())
 	case errors.Is(err, app.ErrNoOwnerSeverity):
 		writeProblem(w, http.StatusNotFound, title, err.Error())
 	case errors.Is(err, app.ErrSeverityTargetsUnavailable):
@@ -138,6 +140,26 @@ func (h *Handler) RemoveFindingSeverity(w http.ResponseWriter, r *http.Request, 
 	h.writeSeverityView(w, r, id)
 }
 
+// KeepFindingSeverity handles POST /findings/{id}/severity/keep. Admin only.
+func (h *Handler) KeepFindingSeverity(w http.ResponseWriter, r *http.Request, id gen.FindingId) {
+	if !severityAdmin(w, r) || !h.severityReady(w) {
+		return
+	}
+	var body gen.KeepFindingSeverityJSONRequestBody
+	if !decode(w, r, &body) {
+		return
+	}
+	actor, ok := severityActor(w, r, body.ActorId)
+	if !ok {
+		return
+	}
+	if err := h.severity.Keep(r.Context(), domain.FindingID(id), actor); err != nil {
+		writeSeverityErr(w, "cannot keep severity", err)
+		return
+	}
+	h.writeSeverityView(w, r, id)
+}
+
 // PreviewFindingSeverity handles POST /findings/{id}/severity/preview. It records nothing.
 func (h *Handler) PreviewFindingSeverity(w http.ResponseWriter, r *http.Request, id gen.FindingId) {
 	if !h.severityReady(w) {
@@ -204,6 +226,9 @@ func toFindingSeverity(v app.SeverityView) gen.FindingSeverity {
 	}
 	if v.Owner != nil {
 		o := toOwnerSeverity(*v.Owner)
+		if v.Review != "" {
+			o.ReviewReason = strptr(v.Review)
+		}
 		out.Owner = &o
 	}
 	for _, rec := range v.History {
@@ -227,6 +252,13 @@ func toOwnerSeverity(o domain.OwnerSeverity) gen.OwnerSeverity {
 	}
 	if o.PickedFrom != "" {
 		out.PickedFrom = strptr(string(o.PickedFrom))
+	}
+	if o.OriginalVector != "" {
+		out.OriginalVector = strptr(o.OriginalVector)
+	}
+	if o.Kept != nil {
+		at := o.Kept.At
+		out.KeptAt, out.KeptBy = &at, strptr(o.Kept.By)
 	}
 	return out
 }

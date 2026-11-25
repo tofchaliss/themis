@@ -144,3 +144,42 @@ func TestOwnerSeverityForAnotherFinding(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+func TestOwnerSeverityReviewReason(t *testing.T) {
+	const v1, v2 = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+	o := OwnerSeverity{OriginalScore: f64(9.8), OriginalVector: v1}
+	cases := []struct {
+		score  *float64
+		vector string
+		want   string
+	}{
+		{f64(9.8), v1, ""},
+		{f64(7.5), v1, "the original score changed from 9.8 to 7.5"},
+		{nil, "", "the original score was 9.8, now there is none"},
+		{f64(9.8), v2, "the original CVSS vector changed"},
+	}
+	for _, c := range cases {
+		if got := o.ReviewReason(c.score, c.vector); got != c.want {
+			t.Errorf("%v %q: got %q, want %q", c.score, c.vector, got, c.want)
+		}
+	}
+	none := OwnerSeverity{}
+	if got := none.ReviewReason(f64(5.0), v1); got != "there was no original score, now it is 5.0" {
+		t.Errorf("got %q", got)
+	}
+	if got := none.ReviewReason(nil, ""); got != "" {
+		t.Errorf("got %q", got)
+	}
+	// Once a person kept it against the new original, that original is the baseline.
+	o.Kept = &SeverityKept{At: time.Now(), By: "analyst-1", Score: f64(7.5), Vector: v2}
+	if got := o.ReviewReason(f64(7.5), v2); got != "" {
+		t.Errorf("after keep: got %q", got)
+	}
+	if got := o.ReviewReason(f64(9.8), v1); got != "the original score changed from 7.5 to 9.8" {
+		t.Errorf("after keep, changed again: got %q", got)
+	}
+	// A severity recorded on another Finding starts with no baseline of its own and no keep.
+	if got := o.For("src", nil); got.Kept != nil || got.OriginalVector != "" {
+		t.Errorf("For kept the source's baseline: %+v", got)
+	}
+}

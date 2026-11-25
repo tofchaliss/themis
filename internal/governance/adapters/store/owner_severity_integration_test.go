@@ -144,6 +144,7 @@ func TestOwnerSeverityRecordAndReadColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	vec.OriginalVector = originals["a"].Vector
 	if err := st.SaveOwnerSeverities(ctx, []app.OwnerSeverityWrite{{FindingID: "a", Severity: vec}}); err != nil {
 		t.Fatal(err)
 	}
@@ -159,6 +160,34 @@ func TestOwnerSeverityRecordAndReadColumns(t *testing.T) {
 	}
 	if a := byID()["a"]; a.BaseScore != 81 {
 		t.Fatalf("posture a after the vector = %+v", a)
+	}
+
+	// OS6: the severity on a was set against an original of 7.5 with its vector. Nothing changed
+	// yet, so the list shows no review; then the source corrects the rating.
+	if a := byID()["a"]; a.SeverityReview != "" || a.OwnerSeverity.OriginalVector != originals["a"].Vector {
+		t.Fatalf("fresh severity: review %q, vector %q", a.SeverityReview, a.OwnerSeverity.OriginalVector)
+	}
+	if err := st.AppendScores(ctx, "a", []app.ScoreRevision{
+		{PURL: "pkg:a@1", Cause: domain.CauseSourceAdded, Fingerprint: "a-2", RecordedAt: at.Add(90 * time.Minute),
+			Snapshot: domain.ComponentScore{PURL: "pkg:a@1", Eligible: true, Open: true, Status: domain.ScoreFinal,
+				Scores: &domain.Scores{Base: 5.3, Environmental: 5.3}}},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if a := byID()["a"]; a.SeverityReview != "the original score changed from 7.5 to 5.3" || a.BaseScore != 81 {
+		t.Fatalf("after the source change: review %q base %d", a.SeverityReview, a.BaseScore)
+	}
+	newScore := 5.3
+	kept, err := st.KeepOwnerSeverity(ctx, "a", domain.SeverityKept{At: at.Add(100 * time.Minute), By: "key:k-3", Score: &newScore})
+	if err != nil || !kept {
+		t.Fatalf("keep = %v %v", kept, err)
+	}
+	if a := byID()["a"]; a.SeverityReview != "" || a.OwnerSeverity.Kept == nil || a.OwnerSeverity.Kept.By != "key:k-3" ||
+		*a.OwnerSeverity.Kept.Score != 5.3 || !a.OwnerSeverity.Kept.At.Equal(at.Add(100*time.Minute)) || a.BaseScore != 81 {
+		t.Fatalf("after keep: %+v review %q", a.OwnerSeverity, a.SeverityReview)
+	}
+	if kept, err := st.KeepOwnerSeverity(ctx, "n", domain.SeverityKept{At: at, By: "x"}); err != nil || kept {
+		t.Fatalf("keep with none in force = %v %v", kept, err)
 	}
 
 	// Removal: the original counts again, the history stays, a second removal finds nothing.

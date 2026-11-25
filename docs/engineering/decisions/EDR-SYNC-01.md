@@ -347,6 +347,14 @@ the copy sets the same severity on each target, with the same reason and the sam
   the Position names one; the rationale names the project and version.
 - Not in C2: a link from a copy to its source Finding, and "copied to N" on the source.
 
+### Step C4 (2026-11-25) — the owner-set severity goes with the copy
+
+Built with EDR-SCORING-01 section 7.1 V3 (D12). After the sweep copies a decision to a target,
+`ScopePropagation.copySeverity` asks the target whether its current Position rests on this
+copy; if so the source's owner-set severity is recorded there with the same reason and
+person. It asks the target, not the result of the pass, so a pass that failed after the
+decision was copied still brings the severity on its retry. See the V3 note there.
+
 ### The same-component rule stays (owner, 2026-11-25)
 
 On the first try of the pick list on the test VM most releases were greyed "different

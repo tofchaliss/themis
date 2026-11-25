@@ -3,7 +3,9 @@
 // Themis computes the score either way and shows it before anything is saved. The original
 // score stays beside it. The same severity can be set on other releases of the same product
 // that have the same CVE, picked from a list; one that already has an owner-set severity is
-// replaced, and the page asks first. Admin only: everyone else reads.
+// replaced, and the page asks first. Admin only: everyone else reads. When the original changes
+// later the card says "severity to review" with what changed; the severity stays until a person
+// keeps it, changes it or removes it.
 import { useEffect, useState, type FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
@@ -245,6 +247,20 @@ export function SeverityCard({ findingId, canSet, user }: { findingId: string; c
     }
   }
 
+  async function keep() {
+    setError("");
+    setBusy(true);
+    try {
+      await apiPost("governance", `${path}/keep`, { actor_id: user });
+      setDone("Kept. The owner-set severity stays as it is.");
+      refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The request failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -275,6 +291,11 @@ export function SeverityCard({ findingId, canSet, user }: { findingId: string; c
                       <Badge tone="accent">counts for priority and deadline</Badge>
                     </span>
                     <OwnerLine o={s.owner} />
+                    {s.owner.kept_at && (
+                      <span className="text-xs text-ink-2">
+                        kept by {s.owner.kept_by} on {when(s.owner.kept_at)} after the original changed
+                      </span>
+                    )}
                     {s.owner.vector && <span className="font-mono text-xs text-ink-2 break-all">{s.owner.vector}</span>}
                     <span className="text-xs">Reason: {s.owner.reason}</span>
                   </>
@@ -283,6 +304,19 @@ export function SeverityCard({ findingId, canSet, user }: { findingId: string; c
                 )}
               </dd>
             </dl>
+
+            {s.owner?.review_reason && (
+              <div role="note" aria-label="Severity to review" className="rounded-lg border border-warn/50 bg-warn/15 p-2 text-xs">
+                <b>Severity to review:</b> {s.owner.review_reason}. The owner-set severity stays in force until a person keeps it, changes it or removes it.
+                {canSet && !editing && (
+                  <span className="mt-1.5 block">
+                    <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void keep()}>
+                      Keep it
+                    </Button>
+                  </span>
+                )}
+              </div>
+            )}
 
             {done && (
               <p role="status" className="rounded-lg border border-good/40 bg-good/10 p-2 text-xs">

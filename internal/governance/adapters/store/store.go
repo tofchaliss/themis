@@ -746,7 +746,7 @@ func (s *Store) attachOwnerSeverities(ctx context.Context, releaseID string, ent
 		return entries, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT `+ownerSeverityColumns+` FROM finding_owner_severities
+		SELECT `+ownerSeverityRead+` FROM finding_owner_severities
 		WHERE ended_at IS NULL AND finding_id IN (SELECT id FROM findings WHERE release_id = $1)`, releaseID)
 	if err != nil {
 		return nil, err
@@ -763,9 +763,23 @@ func (s *Store) attachOwnerSeverities(ctx context.Context, releaseID string, ent
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if len(byFinding) == 0 {
+		return entries, nil
+	}
+	// OS6: has the original moved since the person set (or last kept) the severity?
+	ids := make([]domain.FindingID, 0, len(byFinding))
+	for id := range byFinding {
+		ids = append(ids, id)
+	}
+	originals, err := s.OriginalSeverities(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	for i := range entries {
 		if o, ok := byFinding[entries[i].FindingID]; ok {
 			entries[i].OwnerSeverity = &o
+			now := originals[entries[i].FindingID]
+			entries[i].SeverityReview = o.ReviewReason(now.Score, now.Vector)
 		}
 	}
 	return entries, nil

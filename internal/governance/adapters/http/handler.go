@@ -979,6 +979,9 @@ func toPostureEntry(e app.PostureEntry) gen.PostureEntry {
 	}
 	if e.OwnerSeverity != nil {
 		o := toOwnerSeverity(*e.OwnerSeverity)
+		if e.SeverityReview != "" {
+			o.ReviewReason = strptr(e.SeverityReview)
+		}
 		out.OwnerSeverity = &o
 	}
 	if e.ExpertStatus != "" {

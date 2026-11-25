@@ -779,9 +779,35 @@ was the other choice and was not taken.
   owner-set severity is replaced, "Remove owner-set severity", and the history. In the lists
   the Expert severity cell shows the owner-set score with the words "owner-set", and the
   release's severity donut counts it.
-- **Not built yet:** V3 (the "severity to review" flag of OS6, and the severity travelling
-  with a copied decision, OS5 / EDR-SYNC-01 C4), no event is published when a severity is set,
-  and V4 (VM check).
+- **Not built yet:** no event is published when a severity is set, and V4 (VM check).
+
+**Realization note, V3 (2026-11-25, on the owner's word to add V3 to the same PR).**
+
+- **"Severity to review" (OS6) is derived, not stored.** The record keeps the original the
+  person saw when they set the severity (`original_score`, `original_vector`). On every read
+  Governance compares it with the original as it is now (`OwnerSeverity.ReviewReason`) and,
+  when they differ, says what changed in words: the score moved, a score appeared, the score
+  is gone, or the vector changed. Nothing has to run for the flag to appear, so it cannot be
+  missed or go stale. The owner-set severity is never changed by it.
+- **Keep.** `POST /findings/{id}/severity/keep` (admin) records who kept it and when, and the
+  original they saw (`kept_at`, `kept_by`, `kept_score`, `kept_vector`) becomes what the next
+  change is measured against. 409 when the original did not change. Changing or removing the
+  severity also ends the flag, because a new record has a new baseline.
+- **Where it shows.** `review_reason` on the severity in force, in the severity read and on
+  the posture row. The GUI shows a "Severity to review" notice on the Severity card with
+  "Keep it" for an admin, and a "review" mark next to "owner-set" in the lists.
+- **Limit.** A change of the selected source that leaves both the score and the vector the
+  same raises no flag: there is nothing different for the person to judge.
+- **It travels with a copied decision (OS5).** When the scope sweep copies a decision
+  (EDR-SYNC-01 D11) and the target now rests on that copy, the source's owner-set severity is
+  recorded on the target: same level or vector, same reason, same person, `picked_from` the
+  source. A level is computed from the target's own original. A source with no owner-set
+  severity copies nothing and leaves the target's own as it is. A target that did not take
+  the decision (a different component, or re-decided since) gets no severity. A retried pass
+  records nothing twice.
+- **Not built:** the severity is not offered with a roll-forward proposal on a later upload
+  (the last sentence of OS5). A later upload gets the decision proposed as today and the
+  severity is set by hand, or with "Also set on".
 
 ---
 

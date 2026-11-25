@@ -219,7 +219,12 @@ func Wire(
 			evaluations = evaluations.WithUploadOutcomes(app.NewUploadOutcomes(ev, st).WithPresence(st, sysClock{}))
 		}
 	}
-	handler = handler.WithSeverity(app.NewSeverityService(st, st, severityCandidates, sysClock{}))
+	severity := app.NewSeverityService(st, st, severityCandidates, sysClock{})
+	handler = handler.WithSeverity(severity)
+	if scope != nil {
+		// A copied decision carries the source's owner-set severity (EDR-SYNC-01 D12).
+		scope.WithSeverityCopy(severity)
+	}
 	return Governance{
 		Handler:      handler.Router(),
 		Store:        st,

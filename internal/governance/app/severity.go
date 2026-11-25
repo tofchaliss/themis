@@ -22,6 +22,8 @@ var (
 	ErrSeverityTargetsUnavailable = errors.New("governance: the releases of the product cannot be listed (no Registry seam)")
 	// ErrNoOwnerSeverity is returned when there is no owner-set severity to remove.
 	ErrNoOwnerSeverity = errors.New("governance: this Finding has no owner-set severity")
+	// ErrNothingToReview is returned when a severity is kept although the original did not change.
+	ErrNothingToReview = errors.New("governance: the original did not change, there is nothing to keep")
 )
 
 // OriginalSeverity is what the sources say about one Finding: the original score and the vector
@@ -56,6 +58,9 @@ type OwnerSeverityStore interface {
 	SaveOwnerSeverities(ctx context.Context, writes []OwnerSeverityWrite) error
 	// EndOwnerSeverity ends the severity in force (cause "removed"); false when there was none.
 	EndOwnerSeverity(ctx context.Context, id domain.FindingID, actorID string, at time.Time) (bool, error)
+	// KeepOwnerSeverity marks the severity in force as kept against an original; false when
+	// there is none.
+	KeepOwnerSeverity(ctx context.Context, id domain.FindingID, kept domain.SeverityKept) (bool, error)
 }
 
 // SeverityCandidates lists every other Finding of the same CVE in the same product
@@ -70,7 +75,10 @@ type SeverityView struct {
 	CVE       string
 	Original  OriginalSeverity
 	Owner     *domain.OwnerSeverity
-	History   []OwnerSeverityRecord
+	// Review says what changed in the original since the severity in force was set or last
+	// kept (OS6); empty when nothing did, or when none is in force.
+	Review  string
+	History []OwnerSeverityRecord
 }
 
 // SeverityTarget is one row of the pick list: where the Finding lives and the owner-set
@@ -128,6 +136,7 @@ func (s *SeverityService) View(ctx context.Context, id domain.FindingID) (Severi
 		if history[i].EndedAt.IsZero() {
 			cur := history[i].OwnerSeverity
 			v.Owner = &cur
+			v.Review = cur.ReviewReason(v.Original.Score, v.Original.Vector)
 		}
 	}
 	return v, nil
@@ -195,13 +204,14 @@ func (s *SeverityService) Set(ctx context.Context, id domain.FindingID, in SetSe
 	if err != nil {
 		return SetSeverityResult{}, err
 	}
+	own.OriginalVector = originals[id].Vector
 	current, err := s.store.CurrentOwnerSeverities(ctx, all)
 	if err != nil {
 		return SetSeverityResult{}, err
 	}
 	writes := []OwnerSeverityWrite{{FindingID: id, Severity: own}}
 	for _, pick := range picks {
-		writes = append(writes, OwnerSeverityWrite{FindingID: pick, Severity: own.For(id, originals[pick].Score)})
+		writes = append(writes, OwnerSeverityWrite{FindingID: pick, Severity: severityFor(own, id, originals[pick])})
 	}
 	if err := s.store.SaveOwnerSeverities(ctx, writes); err != nil {
 		return SetSeverityResult{}, err
@@ -256,4 +266,60 @@ func (s *SeverityService) Remove(ctx context.Context, id domain.FindingID, actor
 		return ErrNoOwnerSeverity
 	}
 	return nil
+}
+
+// severityFor is `own` as it is recorded on another Finding with its own original.
+func severityFor(own domain.OwnerSeverity, source domain.FindingID, original OriginalSeverity) domain.OwnerSeverity {
+	out := own.For(source, original.Score)
+	out.OriginalVector = original.Vector
+	return out
+}
+
+// Keep records that a named person looked at the changed original and kept the severity in
+// force (OS6). The severity itself is not touched; the original they saw becomes what the next
+// change is measured against.
+func (s *SeverityService) Keep(ctx context.Context, id domain.FindingID, actor domain.Actor) error {
+	if actor.Kind != domain.ActorHuman || actor.ID == "" {
+		return domain.ErrOwnerSeverityActor
+	}
+	v, err := s.View(ctx, id)
+	if err != nil {
+		return err
+	}
+	if v.Owner == nil {
+		return ErrNoOwnerSeverity
+	}
+	if v.Review == "" {
+		return ErrNothingToReview
+	}
+	_, err = s.store.KeepOwnerSeverity(ctx, id, domain.SeverityKept{
+		At: s.clock.Now().UTC(), By: actor.ID, Score: v.Original.Score, Vector: v.Original.Vector,
+	})
+	return err
+}
+
+// CopySeverity puts the source's owner-set severity on the target of a copied decision (OS5,
+// EDR-SYNC-01 D12): same level or vector, same reason, same person. A source with none copies
+// nothing and leaves the target as it is. A target that already carries this copy is left
+// alone, so a retried copy records nothing twice.
+func (s *SeverityService) CopySeverity(ctx context.Context, source, target domain.FindingID) error {
+	current, err := s.store.CurrentOwnerSeverities(ctx, []domain.FindingID{source, target})
+	if err != nil {
+		return err
+	}
+	src, ok := current[source]
+	if !ok {
+		return nil
+	}
+	if has, ok := current[target]; ok && has.PickedFrom == source && has.Kind == src.Kind && has.Level == src.Level &&
+		has.Vector == src.Vector && has.Reason == src.Reason && has.Actor == src.Actor {
+		return nil
+	}
+	originals, err := s.store.OriginalSeverities(ctx, []domain.FindingID{target})
+	if err != nil {
+		return err
+	}
+	next := severityFor(src, source, originals[target])
+	next.SetAt = s.clock.Now().UTC()
+	return s.store.SaveOwnerSeverities(ctx, []OwnerSeverityWrite{{FindingID: target, Severity: next}})
 }

@@ -93,6 +93,21 @@ func (m *memSeverity) EndOwnerSeverity(_ context.Context, id domain.FindingID, a
 	return m.end(id, actorID, "removed", at), nil
 }
 
+func (m *memSeverity) KeepOwnerSeverity(_ context.Context, id domain.FindingID, kept domain.SeverityKept) (bool, error) {
+	if err := m.fail("keep"); err != nil {
+		return false, err
+	}
+	rows := m.history[id]
+	for i := range rows {
+		if rows[i].EndedAt.IsZero() {
+			k := kept
+			rows[i].Kept = &k
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // fixedCandidates is the pick list seam: the given Findings, or an error.
 type fixedCandidates struct {
 	ids []domain.FindingID
@@ -302,5 +317,92 @@ func TestSeverityViewAndPreviewFailures(t *testing.T) {
 	st.failOn = "history"
 	if _, err := svc.View(ctx, "src"); !errors.Is(err, errSeverityBoom) {
 		t.Fatalf("view history: %v", err)
+	}
+}
+
+// OS6: a changed original flags the severity for review and never changes it; "keep" makes the
+// original the person saw the new baseline.
+func TestSeverityReviewAndKeep(t *testing.T) {
+	ctx := context.Background()
+	repo, st := severityEstate(t)
+	svc := severitySvc(repo, st, nil)
+	if err := svc.Keep(ctx, "src", human); !errors.Is(err, app.ErrNoOwnerSeverity) {
+		t.Fatalf("keep with none in force: %v", err)
+	}
+	if _, err := svc.Set(ctx, "src", app.SetSeverityInput{Level: "medium", Reason: "r", Actor: human}); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := svc.View(ctx, "src")
+	if v.Review != "" || v.Owner.OriginalVector == "" {
+		t.Fatalf("fresh severity: review %q owner %+v", v.Review, v.Owner)
+	}
+	if err := svc.Keep(ctx, "src", human); !errors.Is(err, app.ErrNothingToReview) {
+		t.Fatalf("keep with nothing changed: %v", err)
+	}
+
+	// The source corrects its rating: flagged, with what changed; the severity is untouched.
+	st.originals["src"] = app.OriginalSeverity{Score: sevScore(7.5), Vector: st.originals["src"].Vector}
+	v, _ = svc.View(ctx, "src")
+	if v.Review != "the original score changed from 9.8 to 7.5" || v.Owner.Score != 6.9 {
+		t.Fatalf("after the change: review %q owner %+v", v.Review, v.Owner)
+	}
+	if err := svc.Keep(ctx, "src", domain.Actor{Kind: domain.ActorSystem, ID: "s"}); !errors.Is(err, domain.ErrOwnerSeverityActor) {
+		t.Fatalf("a rule kept a severity: %v", err)
+	}
+	st.failOn = "keep"
+	if err := svc.Keep(ctx, "src", human); !errors.Is(err, errSeverityBoom) {
+		t.Fatalf("store failure: %v", err)
+	}
+	st.failOn = ""
+	if err := svc.Keep(ctx, "src", human); err != nil {
+		t.Fatal(err)
+	}
+	v, _ = svc.View(ctx, "src")
+	if v.Review != "" || v.Owner.Kept == nil || v.Owner.Kept.By != human.ID || *v.Owner.Kept.Score != 7.5 || v.Owner.Score != 6.9 || len(v.History) != 1 {
+		t.Fatalf("after keep: review %q owner %+v", v.Review, v.Owner)
+	}
+	if err := svc.Keep(ctx, "missing", human); err == nil {
+		t.Fatal("kept on a Finding that does not exist")
+	}
+}
+
+// OS5: a copied decision carries the source's owner-set severity, once.
+func TestCopySeverity(t *testing.T) {
+	ctx := context.Background()
+	repo, st := severityEstate(t)
+	svc := severitySvc(repo, st, nil)
+	// A source with none copies nothing and leaves the target as it is.
+	if _, err := svc.Set(ctx, "a2", app.SetSeverityInput{Level: "low", Reason: "own", Actor: human}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CopySeverity(ctx, "src", "a2"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := svc.View(ctx, "a2"); v.Owner.Reason != "own" || len(v.History) != 1 {
+		t.Fatalf("a source with none changed the target: %+v", v)
+	}
+	if _, err := svc.Set(ctx, "src", app.SetSeverityInput{Level: "high", Reason: "not reachable", Actor: human}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CopySeverity(ctx, "src", "a2"); err != nil {
+		t.Fatal(err)
+	}
+	v, _ := svc.View(ctx, "a2")
+	if v.Owner.Level != domain.SeverityHigh || v.Owner.Score != 7.0 || v.Owner.Reason != "not reachable" || v.Owner.Actor != human ||
+		v.Owner.PickedFrom != "src" || len(v.History) != 2 || v.History[0].EndCause != "replaced" || v.Review != "" {
+		t.Fatalf("after the copy: %+v owner %+v", v, v.Owner)
+	}
+	// A retried copy records nothing twice.
+	if err := svc.CopySeverity(ctx, "src", "a2"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := svc.View(ctx, "a2"); len(v.History) != 2 {
+		t.Fatalf("the copy was recorded twice: %+v", v.History)
+	}
+	for _, method := range []string{"current", "originals", "save"} {
+		st.failOn = method
+		if err := svc.CopySeverity(ctx, "src", "b1"); !errors.Is(err, errSeverityBoom) {
+			t.Fatalf("%s failure: %v", method, err)
+		}
 	}
 }

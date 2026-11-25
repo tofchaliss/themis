@@ -102,8 +102,49 @@ type OwnerSeverity struct {
 	Actor         Actor
 	SetAt         time.Time
 	// PickedFrom is the Finding whose form this was set on, when it reached this Finding through
-	// the pick list (OS3); empty on that Finding itself.
+	// the pick list (OS3) or with a copied decision (OS5); empty on that Finding itself.
 	PickedFrom FindingID
+	// OriginalVector is the vector Themis had selected for the original when this was set.
+	OriginalVector string
+	// Kept is the last time a person looked at a changed original and kept this severity (OS6);
+	// nil when nobody has.
+	Kept *SeverityKept
+}
+
+// SeverityKept records that a named person kept an owner-set severity after the original
+// changed: who, when, and the original they saw.
+type SeverityKept struct {
+	At     time.Time
+	By     string
+	Score  *float64
+	Vector string
+}
+
+// Baseline is the original this severity was last judged against: what the person saw when
+// they set it, or when they last kept it.
+func (o OwnerSeverity) Baseline() (score *float64, vector string) {
+	if o.Kept != nil {
+		return o.Kept.Score, o.Kept.Vector
+	}
+	return o.OriginalScore, o.OriginalVector
+}
+
+// ReviewReason says what changed in the original since the baseline (OS6), in words a person
+// reads; empty when nothing changed. A change never alters the owner-set severity: it only
+// asks a person to look again.
+func (o OwnerSeverity) ReviewReason(score *float64, vector string) string {
+	was, wasVector := o.Baseline()
+	switch {
+	case was == nil && score != nil:
+		return fmt.Sprintf("there was no original score, now it is %.1f", *score)
+	case was != nil && score == nil:
+		return fmt.Sprintf("the original score was %.1f, now there is none", *was)
+	case was != nil && *was != *score:
+		return fmt.Sprintf("the original score changed from %.1f to %.1f", *was, *score)
+	case wasVector != vector:
+		return "the original CVSS vector changed"
+	}
+	return ""
 }
 
 // ComputeOwnerScore computes what an owner-set severity would be from exactly one of a level or
@@ -164,12 +205,12 @@ func (o OwnerSeverity) BaseScore() int { return int(math.Round(o.Score * 10)) }
 // SLABucket is the deadline bucket of the owner-set score; empty for None (no deadline).
 func (o OwnerSeverity) SLABucket() string { return SLABucketOf(o.BaseScore()) }
 
-// For returns the same severity as it is recorded on another Finding picked from this one's
-// form (OS3): same level or vector, same reason and person. A level is computed again from
+// For returns the same severity as it is recorded on another Finding, picked from this one's
+// form (OS3) or reached by a copied decision (OS5): same level or vector, same reason and person. A level is computed again from
 // that Finding's own original score; a vector's score does not depend on it.
 func (o OwnerSeverity) For(source FindingID, original *float64) OwnerSeverity {
 	out := o
-	out.PickedFrom, out.OriginalScore = source, nil
+	out.PickedFrom, out.OriginalScore, out.OriginalVector, out.Kept = source, nil, "", nil
 	if original != nil {
 		v := *original
 		out.OriginalScore = &v

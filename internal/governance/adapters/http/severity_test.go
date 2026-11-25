@@ -70,6 +70,18 @@ func (m *sevStore) EndOwnerSeverity(_ context.Context, id domain.FindingID, by s
 	return m.end(id, by, "removed", at), nil
 }
 
+func (m *sevStore) KeepOwnerSeverity(_ context.Context, id domain.FindingID, kept domain.SeverityKept) (bool, error) {
+	rows := m.history[id]
+	for i := range rows {
+		if rows[i].EndedAt.IsZero() {
+			k := kept
+			rows[i].Kept = &k
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 type sevCandidates []domain.FindingID
 
 func (c sevCandidates) CopyCandidates(context.Context, domain.FindingID) ([]app.CopyCandidate, error) {
@@ -137,6 +149,9 @@ type sevOwner struct {
 	PickedFrom string   `json:"picked_from"`
 	EndCause   string   `json:"end_cause"`
 	EndedBy    string   `json:"ended_by"`
+	Review     string   `json:"review_reason"`
+	KeptBy     string   `json:"kept_by"`
+	OrigVector string   `json:"original_vector"`
 }
 
 type sevView struct {
@@ -252,6 +267,9 @@ func TestSeverityRoutesRefusals(t *testing.T) {
 		{"unknown finding", http.MethodPut, srv.URL + "/findings/nope/severity", `{"actor_id":"a","reason":"r","level":"low"}`, http.StatusNotFound},
 		{"remove with no actor", http.MethodPost, base + "/remove", `{"actor_id":""}`, http.StatusBadRequest},
 		{"bad remove body", http.MethodPost, base + "/remove", `{`, http.StatusBadRequest},
+		{"keep with none in force", http.MethodPost, base + "/keep", `{"actor_id":"a"}`, http.StatusNotFound},
+		{"keep with no actor", http.MethodPost, base + "/keep", `{"actor_id":""}`, http.StatusBadRequest},
+		{"bad keep body", http.MethodPost, base + "/keep", `{`, http.StatusBadRequest},
 		{"empty preview", http.MethodPost, base + "/preview", `{}`, http.StatusBadRequest},
 		{"bad preview body", http.MethodPost, base + "/preview", `{`, http.StatusBadRequest},
 		{"read unknown finding", http.MethodGet, srv.URL + "/findings/nope/severity", "", http.StatusNotFound},
@@ -285,6 +303,9 @@ func TestSeverityRoutesAdminOnlyAndUnwired(t *testing.T) {
 		}
 		if code := sevDo(t, http.MethodPost, base+"/remove", `{"actor_id":"x"}`, nil); code != http.StatusForbidden {
 			t.Errorf("%v remove = %d, want 403", scopes, code)
+		}
+		if code := sevDo(t, http.MethodPost, base+"/keep", `{"actor_id":"x"}`, nil); code != http.StatusForbidden {
+			t.Errorf("%v keep = %d, want 403", scopes, code)
 		}
 	}
 
@@ -321,9 +342,36 @@ func TestSeverityRoutesAdminOnlyAndUnwired(t *testing.T) {
 	for _, c := range []struct{ method, url, body string }{
 		{http.MethodGet, ubase, ""}, {http.MethodPut, ubase, set}, {http.MethodPost, ubase + "/remove", `{"actor_id":"x"}`},
 		{http.MethodPost, ubase + "/preview", `{"level":"low"}`}, {http.MethodGet, ubase + "/targets", ""},
+		{http.MethodPost, ubase + "/keep", `{"actor_id":"x"}`},
 	} {
 		if code := sevDo(t, c.method, c.url, c.body, nil); code != http.StatusServiceUnavailable {
 			t.Errorf("unwired %s %s = %d", c.method, c.url, code)
 		}
+	}
+}
+
+// OS6 over the wire: a changed original shows as review_reason on the severity in force and on
+// the release posture; keep clears it and names who kept it.
+func TestSeverityRoutesReviewAndKeep(t *testing.T) {
+	st := newSevStore()
+	srv := severityServer(t, st, nil, nil)
+	base := srv.URL + "/findings/f1/severity"
+	if code := sevDo(t, http.MethodPut, base, `{"actor_id":"alice","reason":"r","level":"medium"}`, nil); code != http.StatusOK {
+		t.Fatalf("set = %d", code)
+	}
+	if code := sevDo(t, http.MethodPost, base+"/keep", `{"actor_id":"alice"}`, nil); code != http.StatusConflict {
+		t.Fatalf("keep with nothing changed = %d, want 409", code)
+	}
+	lower := 7.5
+	st.original.Score = &lower
+	var v sevView
+	if code := sevDo(t, http.MethodGet, base, "", &v); code != http.StatusOK || v.Owner == nil ||
+		v.Owner.Review != "the original score changed from 9.8 to 7.5" || v.Owner.Score != 6.9 || v.Owner.OrigVector == "" {
+		t.Fatalf("after the change = %d %+v", code, v.Owner)
+	}
+	v = sevView{}
+	if code := sevDo(t, http.MethodPost, base+"/keep", `{"actor_id":"alice"}`, &v); code != http.StatusOK || v.Owner == nil ||
+		v.Owner.Review != "" || v.Owner.KeptBy != "dev:alice" || v.Owner.Score != 6.9 {
+		t.Fatalf("keep = %d %+v", code, v.Owner)
 	}
 }

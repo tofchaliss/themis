@@ -82,6 +82,11 @@ export function ExpertSeverity({ entry }: { entry: PostureEntry }) {
       <span className="inline-flex items-center gap-1.5 whitespace-nowrap" title={`Set by ${o.set_by}: ${o.reason}`}>
         <SeverityCell severity={o.level} score={o.score} />
         <span className="text-xs text-ink-2">owner-set</span>
+        {o.review_reason && (
+          <Badge tone="warn" title={`Severity to review: ${o.review_reason}`}>
+            review
+          </Badge>
+        )}
       </span>
     );
   return (

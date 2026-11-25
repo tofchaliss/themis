@@ -165,6 +165,39 @@ describe("severity card", () => {
   });
 });
 
+describe("severity to review", () => {
+  const changed = { ...withOwner, original_score: 7.5, owner: { ...owner, review_reason: "the original score changed from 9.8 to 7.5" } };
+  const kept = { ...withOwner, original_score: 7.5, owner: { ...owner, kept_at: "2026-11-25T12:00:00Z", kept_by: "alice" } };
+
+  it("says what changed and lets an admin keep the severity", async () => {
+    let now: unknown = changed;
+    let status = 409;
+    const calls = show({
+      [`GET ${BASE}`]: () => [200, now],
+      [`POST ${BASE}/keep`]: () => [status, status === 200 ? kept : { detail: "nothing to keep" }],
+    });
+    const note = await screen.findByRole("note", { name: "Severity to review" });
+    expect(note).toHaveTextContent("Severity to review: the original score changed from 9.8 to 7.5. The owner-set severity stays in force");
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("nothing to keep");
+    status = 200;
+    now = kept;
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(await screen.findByText("Kept. The owner-set severity stays as it is.")).toBeInTheDocument();
+    expect(calls.find((c) => c.url.endsWith("/keep"))?.body).toEqual({ actor_id: "alice" });
+    await waitFor(() => expect(screen.queryByRole("note", { name: "Severity to review" })).not.toBeInTheDocument());
+    expect(screen.getAllByText(/kept by alice on .* after the original changed/).length).toBeGreaterThan(0);
+  });
+
+  it("shows the notice without the button to a person who is not an admin, and marks the list cell", async () => {
+    show({ [`GET ${BASE}`]: [200, changed] }, false);
+    expect(await screen.findByRole("note", { name: "Severity to review" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Keep it" })).not.toBeInTheDocument();
+    render(<ExpertSeverity entry={{ owner_severity: changed.owner } as Parameters<typeof countingSeverity>[0]} />);
+    expect(screen.getByTitle("Severity to review: the original score changed from 9.8 to 7.5")).toHaveTextContent("review");
+  });
+});
+
 describe("the severity that counts in the lists", () => {
   it("is the owner-set one while it stands", () => {
     const entry = { expert_severity: "critical", expert_score: 9.8, owner_severity: owner } as Parameters<typeof countingSeverity>[0];

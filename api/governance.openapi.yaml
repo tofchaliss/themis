@@ -557,6 +557,44 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /findings/{id}/severity/keep:
+    post:
+      operationId: keepFindingSeverity
+      summary: >
+        Keep the owner-set severity after the original changed (OS6). Admin only. The severity is
+        not touched; the record notes who kept it and when, and the original they saw becomes
+        what the next change is measured against. 404 when there is none in force, 409 when the
+        original did not change.
+      parameters:
+        - $ref: '#/components/parameters/FindingId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actor_id]
+              properties:
+                actor_id: { type: string }
+      responses:
+        '200':
+          description: Kept.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FindingSeverity'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /findings/{id}/severity/preview:
     post:
       operationId: previewFindingSeverity
@@ -1289,7 +1327,23 @@ components:
         set_at: { type: string, format: date-time }
         picked_from:
           type: string
-          description: The Finding whose form this was set on, when it came through the pick list.
+          description: >-
+            The Finding this came from, when it came through the pick list or with a copied
+            decision.
+        original_vector:
+          type: string
+          description: The vector selected for the original when this was set.
+        review_reason:
+          type: string
+          description: >-
+            Present on the severity in force when the original changed since it was set or last
+            kept (OS6): what changed, in words. The severity stays in force until a person keeps
+            it, changes it or removes it.
+        kept_at:
+          type: string
+          format: date-time
+          description: When a person last kept it after the original changed.
+        kept_by: { type: string }
         ended_at:
           type: string
           format: date-time

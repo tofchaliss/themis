@@ -344,6 +344,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/findings/{id}/severity/keep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Keep the owner-set severity after the original changed (OS6). Admin only. The severity is not touched; the record notes who kept it and when, and the original they saw becomes what the next change is measured against. 404 when there is none in force, 409 when the original did not change. */
+        post: operations["keepFindingSeverity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/findings/{id}/severity/preview": {
         parameters: {
             query?: never;
@@ -781,8 +798,18 @@ export interface components {
             set_by: string;
             /** Format: date-time */
             set_at: string;
-            /** @description The Finding whose form this was set on, when it came through the pick list. */
+            /** @description The Finding this came from, when it came through the pick list or with a copied decision. */
             picked_from?: string;
+            /** @description The vector selected for the original when this was set. */
+            original_vector?: string;
+            /** @description Present on the severity in force when the original changed since it was set or last kept (OS6): what changed, in words. The severity stays in force until a person keeps it, changes it or removes it. */
+            review_reason?: string;
+            /**
+             * Format: date-time
+             * @description When a person last kept it after the original changed.
+             */
+            kept_at?: string;
+            kept_by?: string;
             /**
              * Format: date-time
              * @description History only - when it stopped being in force.
@@ -1944,6 +1971,40 @@ export interface operations {
             400: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    keepFindingSeverity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["FindingId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    actor_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Kept. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FindingSeverity"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
             500: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };

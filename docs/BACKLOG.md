@@ -389,8 +389,8 @@ three angles, and two of them proposed fixes that would not have worked.
   on the decision, the pick list (`scope-targets?scope=product&all=true`), the one-time copy
   on the scope sweep, governance migration 000026; see the C1 realization note; VM check PASS 2026-11-25. **C2 (GUI) built
   2026-11-25**: "Copy to" pick list on the decision page in place of "Applies to", asks before
-  a decision is replaced. Open: C3 (VM check of a real copy from the GUI), C4 (severity copies
-  along, after the owner-set severity), a link from a copy to its source.
+  a decision is replaced. **C4 built 2026-11-25** (the owner-set severity goes with the
+  copy). Open: C3 (VM check of a real copy from the GUI), a link from a copy to its source.
 
 - [ ] **Owner-set severity** (id `GOV-SEVERITY-OWNER-1`, owner 2026-11-25, feature). The
   product owner decides the severity that counts for the product, whatever the original score
@@ -402,8 +402,10 @@ three angles, and two of them proposed fixes that would not have worked.
   (OS1 item 2) was settled by the owner on 2026-11-25.
   **V1 (Governance) and V2 (GUI) built 2026-11-25**: governance migration 000027, the
   `/findings/{id}/severity` routes, the read columns priority and deadline use, the "Severity"
-  card on the decision page; see the realization note in section 7.1. Open: V3 (review flag,
-  severity copies along with a decision), V4 (VM check), an event when a severity is set.
+  card on the decision page; see the realization note in section 7.1. **V3 built 2026-11-25**:
+  the "severity to review" notice when the original changes (derived on read, with "Keep it"),
+  and the severity travelling with a copied decision. Open: V4 (VM check), an event when a
+  severity is set, offering the severity with a roll-forward proposal on a later upload.
 
 - [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
   feature). The owner's reference table shows per-release assessment-type markers (five status

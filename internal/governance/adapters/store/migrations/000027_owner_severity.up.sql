@@ -15,6 +15,13 @@ CREATE TABLE IF NOT EXISTS finding_owner_severities (
     actor_id       TEXT        NOT NULL,
     set_at         TIMESTAMPTZ NOT NULL,
     picked_from    TEXT        NOT NULL DEFAULT '',
+    original_vector TEXT       NOT NULL DEFAULT '',
+    -- OS6: a person looked at a changed original and kept this severity. The original they saw
+    -- becomes what the next change is measured against.
+    kept_at        TIMESTAMPTZ,
+    kept_by        TEXT        NOT NULL DEFAULT '',
+    kept_score     DOUBLE PRECISION,
+    kept_vector    TEXT        NOT NULL DEFAULT '',
     ended_at       TIMESTAMPTZ,
     ended_by       TEXT        NOT NULL DEFAULT '',
     end_cause      TEXT        NOT NULL DEFAULT '' CHECK (end_cause IN ('', 'replaced', 'removed'))

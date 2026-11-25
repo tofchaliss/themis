@@ -118,6 +118,9 @@ type PostureEntry struct {
 	// OwnerSeverity is the owner-set severity in force (EDR-SCORING-01 section 7.1); nil when
 	// none. While it is set, BaseScore is the owner-set score on the 0-100 scale.
 	OwnerSeverity *domain.OwnerSeverity
+	// SeverityReview says what changed in the original since the owner-set severity was set or
+	// last kept (OS6); empty when nothing did. The severity stays in force either way.
+	SeverityReview string
 	ExpertScore   *float64
 	ExpertStatus  string
 	ScoreState    string
