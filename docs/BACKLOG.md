@@ -385,8 +385,10 @@ three angles, and two of them proposed fixes that would not have worked.
 - [ ] **Copy a decision to picked releases** (id `GOV-COPY-1`, owner 2026-11-25, feature).
   One CVE decision copied once to the projects and releases the person picks, in the same
   product only; a target with its own decision may be picked and is replaced with a notice.
-  Design in EDR-SYNC-01 revision 2 (PROPOSED, D9-D12). Steps C1 (Governance), C2 (GUI), C3
-  (VM), C4 (severity copies along, after the owner-set severity).
+  Design in EDR-SYNC-01 revision 2 (D9-D12). **C1 (Governance) built 2026-11-25**: `copy_to`
+  on the decision, the pick list (`scope-targets?scope=product&all=true`), the one-time copy
+  on the scope sweep, governance migration 000026; see the C1 realization note. Open: C2
+  (GUI pick list), C3 (VM check), C4 (severity copies along, after the owner-set severity).
 
 - [ ] **Owner-set severity** (id `GOV-SEVERITY-OWNER-1`, owner 2026-11-25, feature). The
   product owner decides the severity that counts for the product, whatever the original score

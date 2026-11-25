@@ -31,6 +31,9 @@ type PositionInputs struct {
 	// taken directly (D3). Both are inputs the decision rested on, like the terms above.
 	Scope          DecisionScope
 	PropagatedFrom PropagationSource
+	// CopyTo names the Findings the decider asked this decision to be copied to (EDR-SYNC-01
+	// D9). Empty on a decision taken for its own Finding only, and on every copy.
+	CopyTo []FindingID
 }
 
 // Position is one immutable version of an Enterprise Position — the authoritative,
