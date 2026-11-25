@@ -191,6 +191,9 @@ func Wire(
 	// no worker is wired and the queue simply holds.
 	var evaluations *app.ReleaseEvaluationWorker
 	var scope *app.ScopePropagation
+	// Owner-set severity (EDR-SCORING-01 section 7.1). Without the Registry seam a severity can
+	// still be set on one Finding; only the pick list of other releases is unavailable.
+	var severityCandidates app.SeverityCandidates
 	if reg != nil {
 		// Same-CVE roll-forward (EDR-ROLLFORWARD-01) rides the worker: it needs the same
 		// release → project hop, and the same "defer and retry" posture when Registry is down.
@@ -199,6 +202,7 @@ func Wire(
 		// decided for the whole product should carry no sibling's proposal.
 		scope = app.NewScopePropagation(write, st, st, reg)
 		handler = handler.WithScopePropagation(scope)
+		severityCandidates = scope
 		evaluations = app.NewReleaseEvaluationWorker(st, reg, sysClock{}, evaluationLog{logger}).WithScopePropagation(scope).WithRollForward(rollForward)
 		if rejudge != nil {
 			rejudge = rejudge.WithRollForward(rollForward)
@@ -214,6 +218,12 @@ func Wire(
 		if ev != nil {
 			evaluations = evaluations.WithUploadOutcomes(app.NewUploadOutcomes(ev, st).WithPresence(st, sysClock{}))
 		}
+	}
+	severity := app.NewSeverityService(st, st, severityCandidates, sysClock{})
+	handler = handler.WithSeverity(severity)
+	if scope != nil {
+		// A copied decision carries the source's owner-set severity (EDR-SYNC-01 D12).
+		scope.WithSeverityCopy(severity)
 	}
 	return Governance{
 		Handler:      handler.Router(),

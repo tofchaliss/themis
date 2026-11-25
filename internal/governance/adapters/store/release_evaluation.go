@@ -75,7 +75,7 @@ func (s *Store) ListPendingReleaseEvaluations(ctx context.Context, limit int) ([
 // No disposition filter: a suppressed Finding is still a Finding of this Release (M1b-4). A
 // `base_score` of 0 reaches the domain and is counted in no bucket.
 func (s *Store) CountFindingsByBaseScoreBuckets(ctx context.Context, releaseID string) (domain.SeverityCounts, error) {
-	rows, err := s.pool.Query(ctx, `SELECT base_score FROM findings WHERE release_id = $1`, releaseID)
+	rows, err := s.pool.Query(ctx, `SELECT COALESCE(owner_base_score, base_score) FROM findings WHERE release_id = $1`, releaseID)
 	if err != nil {
 		return domain.SeverityCounts{}, err
 	}

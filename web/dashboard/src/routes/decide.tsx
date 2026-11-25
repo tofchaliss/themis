@@ -15,8 +15,8 @@
 // name. A ticked release that already has a decision is replaced, and the page asks first.
 // The pick list took the place of the "Applies to" scope picker.
 //
-// Changing severity is NOT here yet: severity comes from the CVSS vector, and the governed
-// vector change (EDR-SCORING-01 S6) is not built, so there is nothing true to warn about.
+// Severity (EDR-SCORING-01 section 7.1, owner 2026-11-25): the "Severity" card shows the original
+// score and lets an admin set the severity that counts for the product, with the reason.
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Sparkles } from "lucide-react";
@@ -29,6 +29,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PackageCell, StanceBadge, isCleared } from "@/components/finding-bits";
 import { ErrorPanel } from "@/components/states";
 import { CopyPicker, copySummary, type CopyTarget } from "@/components/copy-picker";
+import { SeverityCard } from "@/components/severity-card";
 import { apiPost, apiRaw } from "@/lib/api";
 import { useAssessment, useCveReleases, useWhoAmI } from "@/lib/queries";
 import { releaseHash } from "@/lib/router";
@@ -191,6 +192,8 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
   const [filledFrom, setFilledFrom] = useState("");
 
   const canWrite = who.data?.can_write !== false;
+  // Setting a severity is admin only (OS4); with no scopes stated (auth off) whoever may write.
+  const isAdmin = who.data ? (who.data.scopes ? who.data.scopes.includes("admin") : who.data.can_write) : false;
   // The newest AI proposal still waiting: the one the box shows and the form fills from.
   const aiProposal = (f?.proposals ?? []).filter((p) => isWaiting(p) && p.proposer_kind === "ai").at(-1);
   // Asked only on the button (ask.refetch), never on opening: the person chooses when a model
@@ -378,6 +381,7 @@ export function Decide({ findingId, releaseId, version }: { findingId: string; r
           onAsk={() => void ask.refetch()}
           onUse={takeAi}
         />
+        <SeverityCard findingId={findingId} canSet={isAdmin} user={user} />
         <Card>
           <CardHeader>
             <CardTitle>Your decision</CardTitle>

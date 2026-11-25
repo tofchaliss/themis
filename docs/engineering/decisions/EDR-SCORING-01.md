@@ -731,6 +731,84 @@ person keeps it, changes it or removes it (item 7).
 the original score moved into the picked band by the shortest way. One fixed number per level
 was the other choice and was not taken.
 
+**Realization note, V1 and V2 (2026-11-25, on the owner's "go but build both v1 and v2").**
+
+- **The record.** Governance migration 000027 adds `finding_owner_severities` (kind level or
+  vector, level, vector, score, the original score at that time, reason, person, time, the
+  Finding whose form it was set on). A row is never deleted or rewritten: a new severity or a
+  removal ENDS the row in force (when, who, `replaced` or `removed`). At most one row per
+  Finding is in force.
+- **The score (OS1).** `domain.ComputeOwnerScore` takes exactly one of a level or a CVSS 3.0 /
+  3.1 vector. A level gives the original moved into its band (`ScoreForLevel`); with no
+  original score there is nothing to move and the result is the bottom of the band. A vector
+  goes through the kernel calculator and the result is its Environmental score, which is the
+  Base score when the vector carries no temporal or environmental metrics.
+- **"Original" here** is the Original column of the lists: the highest source Base score over
+  the open carrier components, else over every current component. The vector the form starts
+  from is the assessment vector of the component that gave it.
+- **It counts (OS2).** Two read columns on `findings`: `owner_base_score` (the owner score
+  times ten, on the 0-100 scale) and `owner_sla_bucket`. The posture list (so both
+  priorities), the remediation deadline, the remediation metrics and the severity counts of
+  `release_evaluated` read them before `base_score` / `sla_bucket`, which are never touched.
+  The floors of the 0-100 scale (90 / 70 / 40) are the CVSS bands times ten, so the level the
+  person sees is the deadline bucket. Removal sets the columns back to empty and the original
+  counts again.
+- **Three things to know.** (1) While an owner-set severity stands, the deadline uses ITS
+  bucket, not the bucket frozen at first score (EDR-REMEDIATION-01 Q1); the period start does
+  not move. (2) The owner score replaces the whole 0-100 base score, including the lift
+  Knowledge gives for KEV and EPSS; the exploit band and a CISA due date still show and still
+  apply. (3) Level None gives score 0: no deadline bucket, and counted in no severity bucket.
+- **The API.** `GET /findings/{id}/severity` (original, in force, history),
+  `PUT /findings/{id}/severity` (reason plus `level` or `vector`, optional `apply_to`),
+  `POST /findings/{id}/severity/remove`, `POST /findings/{id}/severity/preview` (computes,
+  records nothing), `GET /findings/{id}/severity/targets` (the pick list). The posture row
+  carries `owner_severity`.
+- **The pick list (OS3)** is the list of EDR-SYNC-01 D10 (same CVE, same product), without
+  the same-component rule: a severity is about the CVE in the product, not about one package.
+  Every pick is checked before anything is saved, and all picks are saved in one transaction.
+  For a level, each picked Finding gets its own score from its own original. Without the
+  Registry seam a severity can still be set on the one Finding; the pick list answers 503.
+- **Who (OS4).** Set and remove are admin only in the Governance API (no principal means auth
+  is off) and at the dashboard gate (`isOwnerSeverityWrite`). Reading and the preview need the
+  read scope. The record names the authenticated key, like every decision.
+- **The GUI (V2).** A "Severity" card on the decision page, above "Your decision": the
+  original with its vector, the owner-set one with who, when and why, and for an admin "Set
+  severity" with the two ways (a level, or the eight base metrics as lists starting from the
+  original vector), the score Themis would compute shown before saving, the required reason,
+  the pick list ("Select all in product", "will be replaced"), a question before any existing
+  owner-set severity is replaced, "Remove owner-set severity", and the history. In the lists
+  the Expert severity cell shows the owner-set score with the words "owner-set", and the
+  release's severity donut counts it.
+- **Not built yet:** no event is published when a severity is set, and V4 (VM check).
+
+**Realization note, V3 (2026-11-25, on the owner's word to add V3 to the same PR).**
+
+- **"Severity to review" (OS6) is derived, not stored.** The record keeps the original the
+  person saw when they set the severity (`original_score`, `original_vector`). On every read
+  Governance compares it with the original as it is now (`OwnerSeverity.ReviewReason`) and,
+  when they differ, says what changed in words: the score moved, a score appeared, the score
+  is gone, or the vector changed. Nothing has to run for the flag to appear, so it cannot be
+  missed or go stale. The owner-set severity is never changed by it.
+- **Keep.** `POST /findings/{id}/severity/keep` (admin) records who kept it and when, and the
+  original they saw (`kept_at`, `kept_by`, `kept_score`, `kept_vector`) becomes what the next
+  change is measured against. 409 when the original did not change. Changing or removing the
+  severity also ends the flag, because a new record has a new baseline.
+- **Where it shows.** `review_reason` on the severity in force, in the severity read and on
+  the posture row. The GUI shows a "Severity to review" notice on the Severity card with
+  "Keep it" for an admin, and a "review" mark next to "owner-set" in the lists.
+- **Limit.** A change of the selected source that leaves both the score and the vector the
+  same raises no flag: there is nothing different for the person to judge.
+- **It travels with a copied decision (OS5).** When the scope sweep copies a decision
+  (EDR-SYNC-01 D11) and the target now rests on that copy, the source's owner-set severity is
+  recorded on the target: same level or vector, same reason, same person, `picked_from` the
+  source. A level is computed from the target's own original. A source with no owner-set
+  severity copies nothing and leaves the target's own as it is. A target that did not take
+  the decision (a different component, or re-decided since) gets no severity. A retried pass
+  records nothing twice.
+- **Not built:** the severity is not offered with a roll-forward proposal on a later upload
+  (the last sentence of OS5). A later upload gets the decision proposed as today and the
+  severity is set by hand, or with "Also set on".
+
 ---
 
 ## 8. Lifecycle summary (B5, SETTLED)

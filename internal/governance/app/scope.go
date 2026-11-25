@@ -99,6 +99,20 @@ type ScopePropagation struct {
 	pending   ScopedPositions
 	undecided UndecidedFindingLister
 	registry  ReleaseOwnerResolver
+	// severity copies the source's owner-set severity along with a copied decision
+	// (EDR-SYNC-01 D12). Nil ⇒ only the decision is copied.
+	severity SeverityCopier
+}
+
+// SeverityCopier puts one Finding's owner-set severity on another (SeverityService.CopySeverity).
+type SeverityCopier interface {
+	CopySeverity(ctx context.Context, source, target domain.FindingID) error
+}
+
+// WithSeverityCopy makes a copied decision carry the source's owner-set severity.
+func (p *ScopePropagation) WithSeverityCopy(c SeverityCopier) *ScopePropagation {
+	p.severity = c
+	return p
 }
 
 // NewScopePropagation builds the pass.

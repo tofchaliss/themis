@@ -60,7 +60,8 @@ func (s *Store) PutSLAPolicy(ctx context.Context, r app.SLAPolicyRecord) error {
 }
 
 const slaFactsSelect = `
-	SELECT f.id, f.release_id, f.faultline_id, f.cve, f.stage, f.created_at, f.base_score, f.sla_bucket,
+	SELECT f.id, f.release_id, f.faultline_id, f.cve, f.stage, f.created_at, COALESCE(f.owner_base_score, f.base_score),
+	       CASE WHEN f.owner_base_score IS NOT NULL THEN f.owner_sla_bucket ELSE f.sla_bucket END,
 	       f.stale_since, f.signal_kev_due, f.stage_stopped_at
 	FROM findings f`
 

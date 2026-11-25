@@ -130,8 +130,30 @@ func (p *ScopePropagation) ApplyCopy(ctx context.Context, sp ScopedPosition) (in
 		if ok {
 			copied++
 		}
+		if err := p.copySeverity(ctx, source.ID(), pos.Version(), id); err != nil {
+			return copied, fmt.Errorf("copy severity to %s: %w", id, err)
+		}
 	}
 	return copied, nil
+}
+
+// copySeverity carries the source's owner-set severity to a target that now rests on this copy
+// (D12). It asks the target, not the result of this pass, so a pass that failed after the
+// decision was copied still brings the severity on its retry. A target that did not take the
+// copy (a different component by now, or re-decided since) gets nothing.
+func (p *ScopePropagation) copySeverity(ctx context.Context, source domain.FindingID, version int, target domain.FindingID) error {
+	if p.severity == nil {
+		return nil
+	}
+	t, err := p.svc.repo.GetByID(ctx, target)
+	if err != nil {
+		return err
+	}
+	cur, ok := t.CurrentPosition()
+	if !ok || cur.Inputs().PropagatedFrom != (domain.PropagationSource{FindingID: source, Version: version}) {
+		return nil
+	}
+	return p.severity.CopySeverity(ctx, source, target)
 }
 
 // sweepCopies makes the pending copies and marks each decision done. A failure leaves the row

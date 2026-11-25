@@ -115,6 +115,12 @@ type PostureEntry struct {
 	// provisional when ExpertScore is set; ScoreState is the roll-up state (scored,
 	// no_carrier, unavailable, …) so "not assessed" and "nothing to assess" read differently.
 	OriginalScore *float64
+	// OwnerSeverity is the owner-set severity in force (EDR-SCORING-01 section 7.1); nil when
+	// none. While it is set, BaseScore is the owner-set score on the 0-100 scale.
+	OwnerSeverity *domain.OwnerSeverity
+	// SeverityReview says what changed in the original since the owner-set severity was set or
+	// last kept (OS6); empty when nothing did. The severity stays in force either way.
+	SeverityReview string
 	ExpertScore   *float64
 	ExpertStatus  string
 	ScoreState    string
