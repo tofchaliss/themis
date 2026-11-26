@@ -355,6 +355,15 @@ three angles, and two of them proposed fixes that would not have worked.
   (Enterprise default, Midnight, Ops night), new GUI at `/next/` screen by screen, then the
   switch. Steps G1-G7, one PR each on the owner's go.
 
+- [ ] **Policy-driven image rebuild per release** (id `COMM-REBUILD-POLICY-1`, owner ask
+  2026-11-26, feature). A fixed-field rebuild policy in Governance replaces the fixed "open
+  Critical or High" rule of the rebuild loop; it also evaluates on `fix_available`; releases opt
+  in by tag (`rebuild:auto` / `rebuild:ask`); the request leaves as one signed
+  `rebuild_requested` event to a build connector outside this repository (owner pick
+  2026-11-26), so no enterprise build setup enters Themis core. Callback, comparison and attempt
+  limit unchanged. Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6, one PR
+  each on the owner's go (release freeze).
+
 - [ ] **PSIRT early alert on the Overview** (id `GUI-PSIRT-1`, owner 2026-11-23, feature).
   Newly published critical/high CVEs in the world (original source score, no Themis score),
   tied to the products whose components they may hit, as the first bucket before the Themis
