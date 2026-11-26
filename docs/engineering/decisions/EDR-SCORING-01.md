@@ -809,6 +809,21 @@ was the other choice and was not taken.
   (the last sentence of OS5). A later upload gets the decision proposed as today and the
   severity is set by hand, or with "Also set on".
 
+**VM check, V4 (2026-11-26): part done.**
+
+- **Migration and nodes: PASS.** Governance and the dashboard restarted on the build with
+  this step; the governance migration is at 27, not dirty; `owner_base_score` and
+  `owner_sla_bucket` are on `findings`.
+- **Reads from the GUI: PASS.** On the decision page the Severity card loaded, the preview
+  answered several times and the "Also set on" list loaded, all with status 200. The list
+  took about 16 seconds (backlog `GOV-COPY-PICKLIST-SLOW-1`).
+- **Save from the GUI: still open.** In the first round no severity was stored, and the logs
+  show why: no save request was ever sent. The owner had recorded the decision, which is a
+  different form on the same page; the severity form opens only after "Set severity". Nothing
+  was refused. Open: one saved severity (a level, then changed metrics), remove, and the copy
+  with a decision. Also open as a GUI point: whether the severity form should be open by
+  default, since its own button was easy to miss (backlog `GUI-SEVERITY-FORM-1`).
+
 ---
 
 ## 8. Lifecycle summary (B5, SETTLED)

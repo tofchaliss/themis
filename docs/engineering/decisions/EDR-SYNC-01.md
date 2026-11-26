@@ -347,6 +347,18 @@ the copy sets the same severity on each target, with the same reason and the sam
   the Position names one; the rationale names the project and version.
 - Not in C2: a link from a copy to its source Finding, and "copied to N" on the source.
 
+### Step C3 (2026-11-26) — VM check of a real copy from the GUI
+
+- **PASS, as reported by the owner.** On the test VM an admin recorded a decision
+  (`affected`) on the decision page with releases ticked in "Copy to". The page answered
+  "Recorded ... copying to 14 more findings, they follow within a minute", and the owner
+  checked the decision in the other releases. The owner's word is the record here: no
+  database lines were captured for this round.
+- **Seen on the way: the pick list is slow.** Opening the list of releases for one CVE took
+  about 16 seconds on the VM (status 200). `CopyCandidates` loads each sibling Finding and
+  asks Registry for its owners one by one. The same read feeds the "Also set on" list of the
+  owner-set severity. Backlog `GOV-COPY-PICKLIST-SLOW-1`.
+
 ### Step C4 (2026-11-25) — the owner-set severity goes with the copy
 
 Built with EDR-SCORING-01 section 7.1 V3 (D12). After the sweep copies a decision to a target,
