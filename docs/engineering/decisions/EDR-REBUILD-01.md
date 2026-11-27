@@ -14,7 +14,9 @@ D26; the owner decided who may approve in mode `ask` (D22). A fourth review, of 
 gave D27 to D32; they align decisions already taken and add no new owner choice. A fifth
 review, of D1 to D32, gave D33 to D36, again with no new owner choice. A sixth review, of D1
 to D36, gave D37 and D38: the connector's stored states with recovery after a restart, and the
-word `submitted` in place of `started`. No new owner choice.
+word `submitted` in place of `started`. No new owner choice. A seventh review, of D1 to D38,
+gave D39: one worker per intent in the connector, and when "no build found" may be believed.
+No new owner choice.
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -773,8 +775,8 @@ to pick the event up again. Decided:
    records for `received` and `submitting`, and for end states whose report Themis has not
    confirmed, and carries each one forward by the table.
 3. **`submitting` found after a restart:** a build with the intent id exists → `submitted`. The
-   build system answers and has none → back to `received`, and the build is submitted. The
-   build system cannot be asked, or cannot search → `uncertain`.
+   build system answers and has none, **and that answer may be believed (D39 item 5)** → back
+   to `received`, and the build is submitted. In every other case → `uncertain`.
 4. **The status report is repeated until Themis answers with success.** Themis takes a
    repeated report of the same state for the same intent id as a no-op.
 5. **Two records, named.** The *event record* is written at `received`. The *outcome record*
@@ -812,6 +814,48 @@ now kept apart:
 5. **The identity returned at `submitted` is kept** on the connector's record and sent in the
    status call, so that a person can find the queued build.
 
+### D39 — One worker per intent, and when "no build found" may be believed (revision 3)
+
+D37 added a recovery worker that scans the records. Themis may also deliver one event twice
+(D12). So two workers, or two connector instances, can see the same record in `received` and
+both call the build system. The intent id as a job parameter (D12 item 4) lets a build be
+found; it does not stop a second one. Decided:
+
+1. **The rule.** For one intent id the connector makes at most one submission call at a time,
+   and never a second one while the result of the first is not known.
+2. **The claim is one conditional write.** The move `received` → `submitting` is a single
+   compare-and-set in the connector's store (in SQL: an update that names the old state, and
+   exactly one row changes). The worker that wins holds the claim. Every other worker, and
+   every second delivery of the same event, sees `submitting` and makes no call. The store
+   must be shared by all instances of one connector; a store per instance is not allowed.
+3. **The claim carries an owner, a counter and an end time.** The counter goes up by one with
+   every new claim. The outcome record (D37 item 5) is also a conditional write that names the
+   counter, so a worker that lost its claim cannot write an outcome.
+4. **An expired claim does not allow a new call.** A claim whose time has passed is taken over
+   only for the question of D37 item 3, never for a direct call. The call to the build system
+   has a hard time limit that is shorter than the claim, and the take-over waits for the end
+   of the claim plus a margin. So the old worker's call is over before the question is asked.
+5. **"No build found" is believed only where the build system makes it true.** Per build
+   system the connector states whether its search is complete: it must cover waiting builds
+   (the queue) as well as running and finished ones, and must show a build as soon as the
+   request was accepted. Complete → "none" means not submitted, and the record goes back to
+   `received`. Not complete, or not stated → `uncertain`, and a person settles it (D24). The
+   reference connector states this for its one build system and tests it.
+6. **Where the build system has an idempotency key, the intent id is sent as that key.** Then
+   the build system itself refuses a second submission, and that is the stronger guard. The
+   job parameter of D12 item 4 stays as well, for the search.
+7. **What is and is not promised.** With an idempotency key in the build system: one intent,
+   at most one accepted build. Without one: the connector cannot make that a proof, because a
+   request may be accepted by the build system after the caller gave up. Items 2 to 5 close
+   every path the connector controls, and what is left ends in `uncertain`, not in a silent
+   second build. A second build, if one ever happens, is seen: two build callbacks for one
+   intent id, and Themis records the second and counts no new attempt (M2-7 rule: a callback
+   changes no Finding).
+
+Tests of step R5 for this decision: two workers and two instances on one `received` record
+give one call; a worker stopped inside the call, then a take-over, gives no second call before
+the question; an outcome write with an old counter is refused.
+
 ## Choices for the owner
 
 | # | Choice | Assumed pick | State |
@@ -837,7 +881,7 @@ now kept apart:
 | R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule | Communication |
 | R4 | mode `ask`: the "start rebuild" action in API and GUI | Governance or Communication API, GUI |
-| R5 | reference build connector, with the durable event record of D12, the stored states and recovery worker of D37, and the required checks of D18 | new repository |
+| R5 | reference build connector, with the durable event record of D12, the stored states and recovery worker of D37, the per-intent claim of D39, and the required checks of D18 | new repository |
 | R6 | VM check: one release tagged, one fix published, one build, one comparison | test VM |
 
 R1 changes the domain model and an API, R3 changes event contracts, R5 is a new repository. Each
@@ -852,6 +896,9 @@ is on the "must ask" list.
   that are switched on. A language package with no feed fix never triggers.
 - **The connector is outside Themis's guarantees.** Themis can prove what it asked for and what
   came back, not what the pipeline did in between.
+- **"At most one build per intent" is a proof only with an idempotency key in the build
+  system.** Without one the connector closes the paths it controls and sends the rest to a
+  person (D39 item 7).
 - **Two Communication nodes racing on one release** is closed by D13 for cycle creation. Two
   nodes may still both try to deliver one intent; the event id makes that harmless (D12).
 - **Three policy levels are more to keep in order than one.** The list read of D11 is the
