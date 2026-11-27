@@ -377,7 +377,10 @@ three angles, and two of them proposed fixes that would not have worked.
   the facts used, version order is Knowledge's verdict, a parameter schema per job, an expiry
   sweep. D33 to D36 from a fifth review, no new owner choice: the CI credential is narrow in the
   build system and the connector fails closed, required fields of a targeted entry, what a
-  missing assessment revision means, one intent sends one payload byte for byte.
+  missing assessment revision means, one intent sends one payload byte for byte. D37 and D38
+  from a sixth review, no new owner choice: the connector's stored states with a recovery worker
+  after a restart, and the attempt is used at `submitted` (the build system accepted the build),
+  not at execution.
   Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6 plus R1a and R2a, one
   PR each on the owner's go (release freeze).
 

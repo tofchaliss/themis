@@ -12,7 +12,9 @@ second review the same day gave D17 to D21; the owner decided that the policy is
 automation and a tag can only restrict it (D17). A third review, of revision 3, gave D22 to
 D26; the owner decided who may approve in mode `ask` (D22). A fourth review, of D1 to D26,
 gave D27 to D32; they align decisions already taken and add no new owner choice. A fifth
-review, of D1 to D32, gave D33 to D36, again with no new owner choice.
+review, of D1 to D32, gave D33 to D36, again with no new owner choice. A sixth review, of D1
+to D36, gave D37 and D38: the connector's stored states with recovery after a restart, and the
+word `submitted` in place of `started`. No new owner choice.
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -323,11 +325,12 @@ Build order: the installation policy first (R1), then Product and Release overri
 Themis delivers at least once and always repeats a request with the **same event id** (the
 intent id). The rest is the receiver's duty and part of the connector contract:
 
-1. The connector keeps a durable record per event id and writes it **before** it calls the
-   build system.
-2. An event id already recorded as started is acknowledged and starts nothing.
-3. An event id recorded but with an unknown outcome (a crash between the call and the record)
-   is **not** sent again blindly. The connector first asks the build system for a build that
+1. The connector keeps a durable record per event id. It writes the **event record** before
+   it calls the build system, and the **outcome record** after the build system answers. D37
+   names the states.
+2. An event id already recorded as submitted is acknowledged and submits nothing.
+3. An event id whose event record exists but whose outcome record is missing (a crash between
+   the call to the build system and the outcome record) is **not** sent again blindly. The connector first asks the build system for a build that
    carries this intent id. If it cannot tell, it reports the attempt as `uncertain` through the
    callback and a person decides.
 4. The reference connector passes the intent id to the job as a parameter, so that step 3 can
@@ -473,11 +476,11 @@ Three counters are kept apart:
 | Counter | Counts | Limit |
 | --- | --- | --- |
 | delivery retries | tries to hand one event to the receiver | the existing delivery budget |
-| refusals | answers "not started" from the connector (freeze window, job not allowed, D18) | 3 per cycle |
-| attempts | builds that started, plus requests whose outcome is still open (D28) | `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS` (2) |
+| refusals | answers "not submitted" from the connector (freeze window, job not allowed, D18) | 3 per cycle |
+| attempts | builds the build system accepted (`submitted`, D38), plus requests whose outcome is still open (D28) | `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS` (2) |
 
-1. An attempt is **reserved** when the request is delivered and **used** when the build is known
-   to have started; a refusal **gives it back**. D28 has the full table.
+1. An attempt is **reserved** when the request is delivered and **used** when the build system
+   has accepted the build (D38); a refusal **gives it back**. D28 has the full table.
 2. A refusal is recorded on the cycle with its reason, and a person is told.
 3. After a refusal the request is made again at the next trigger, or by a person.
 4. After 3 refusals the cycle stops as `refused`, and a person is told. Nothing is retried
@@ -534,11 +537,11 @@ decision id, the cycle id and the intent id.
 
 ### D24 — Settling an uncertain build is recorded (revision 3)
 
-When the connector cannot tell whether a build started (D12 item 3), the cycle shows
+When the connector cannot tell whether a build was submitted (D12 item 3), the cycle shows
 `uncertain` and waits. A person settles it through the API or the GUI with one of two answers,
-`started` or `not_started`, under the same rule as D22. The answer, the actor and the time are
-recorded on the cycle. `not_started` gives the attempt back (D20) and the request may be sent
-again; `started` keeps it. A build system with no way to search by intent id always ends here,
+`submitted` or `not_submitted`, under the same rule as D22. The answer, the actor and the time are
+recorded on the cycle. `not_submitted` gives the attempt back (D20) and the request may be sent
+again; `submitted` keeps it. A build system with no way to search by intent id always ends here,
 and that is acceptable.
 
 ### D25 — Delivered is not built: the words Themis uses (revision 3)
@@ -551,7 +554,7 @@ evidence allows:
 | --- | --- |
 | `requested` | the intent exists |
 | `delivered` | the receiver answered with success |
-| `started` | the connector reported that the build system took the build (D28) |
+| `submitted` | the connector reported that the build system accepted the build and gave it an identity (D38) |
 | `refused` / `uncertain` | the connector said so (D20, D12) |
 | `build_reported` | the callback arrived with image digest and SBOM id (M2-7) |
 | `evaluated` | the new SBOM was evaluated and compared (M2-8) |
@@ -601,15 +604,15 @@ delivered is not built. This table is the one rule and replaces both sentences.
 | delivery fails and is given up | — | not touched |
 | the receiver stored the event | `delivered` | **reserved** |
 | the connector refuses | `refused` | given back |
-| the connector reports the build system took the build | `started` | **used** |
+| the connector reports the build system accepted the build | `submitted` | **used** |
 | the connector cannot tell | `uncertain` | still reserved, until a person settles it (D24) |
-| a person settles `not_started` | — | given back |
-| a person settles `started` | `started` | used |
+| a person settles `not_submitted` | — | given back |
+| a person settles `submitted` | `submitted` | used |
 | the build callback arrives | `build_reported` | used (if not already) |
 
 1. A reserved attempt counts against the limit while it is open. So a cycle never has more
    requests in flight than attempts left.
-2. The connector reports `started`, `refused` or `uncertain` with one small status call on the
+2. The connector reports `submitted`, `refused` or `uncertain` with one small status call on the
    existing callback route, under the `delivery:callback` key, naming the intent id. It changes
    no Finding, as every callback (M2-7).
 3. A reservation with no status and no build callback after the connector's time limit
@@ -689,6 +692,10 @@ D18 item 4 promised. Corrected:
    then logs that fact at every start, and its status page shows it. In that setup the
    allow-list in connector code is the only limit, and this record does **not** call the
    credential least-privileged. That is a residual risk the enterprise accepts by setting it.
+5. **The check is written per build system.** Permission models differ between build systems
+   and are not interchangeable. The reference connector carries the check for the one build
+   system it supports. A connector for another build system writes its own check against that
+   system's model, and items 1 to 4 hold for it unchanged.
 
 ### D34 — The targeted entry: which fields are required (revision 3)
 
@@ -743,6 +750,68 @@ To keep the two from drifting:
 4. The connector may store the hash with its event record (D12) and refuse a second delivery
    of a known event id whose body differs.
 
+### D37 — The connector's stored states, and recovery after a restart (revision 3)
+
+D12 asks for a stored record before the build call, D25 lets the connector answer with success
+once the event is stored, and D28 reserves the attempt on that answer. One case was left open:
+the connector stores the event, answers with success, and stops before it calls the build
+system. Themis does not send again, because it got a success. Nothing in D12 told the connector
+to pick the event up again. Decided:
+
+| Stored state | Meaning | After a restart |
+| --- | --- | --- |
+| `received` | the event is stored and checked (D18); the build system was not called yet | continue: go to `submitting` |
+| `submitting` | written just before the call to the build system | never call again blindly: first ask the build system for a build that carries the intent id (D12 item 3) |
+| `submitted` | the build system accepted the build and gave it an identity (D38) | never submit again; report again if the report was not confirmed |
+| `refused` | a check of D18 failed, or the build system said no | report again if the report was not confirmed |
+| `uncertain` | the question in `submitting` could not be answered | report again; a person settles it (D24) |
+
+1. **The rule.** A success answer to the event is a promise. Every stored event ends in
+   `submitted`, `refused` or `uncertain`, and that end is reported to Themis (D28 item 2). No
+   stored event is dropped in silence.
+2. **A recovery worker is required.** At start, and then on a timer, the connector scans its
+   records for `received` and `submitting`, and for end states whose report Themis has not
+   confirmed, and carries each one forward by the table.
+3. **`submitting` found after a restart:** a build with the intent id exists → `submitted`. The
+   build system answers and has none → back to `received`, and the build is submitted. The
+   build system cannot be asked, or cannot search → `uncertain`.
+4. **The status report is repeated until Themis answers with success.** Themis takes a
+   repeated report of the same state for the same intent id as a no-op.
+5. **Two records, named.** The *event record* is written at `received`. The *outcome record*
+   is the move to `submitted`, `refused` or `uncertain`. D12 item 3 means a crash between the
+   call and the outcome record.
+6. **Themis keeps its own guard.** If the connector loses its store entirely, D28 item 3 still
+   applies: a reservation with no status after the time limit shows as `uncertain` and goes to
+   a person. So a lost build request is seen from both sides.
+
+This is part of the connector contract of step R5 and of its tests: stop the connector in each
+state, start it, and check the end state and the build count.
+
+### D38 — `submitted` is the counting point, not execution (revision 3)
+
+D20 said "builds that started", D25 and D28 said "the build system took the build". A build
+system can accept a request, put it in a queue, and run it later or never. The two moments are
+now kept apart:
+
+| Word | Evidence | Role |
+| --- | --- | --- |
+| `submitted` | the build system accepted the request and returned an identity (a queue item or a run id) | **the attempt is used here** |
+| `execution_started` | the build system says the build is running | optional, shown only |
+
+1. **The attempt is used at `submitted`.** A build that waits in a queue counts. So a cycle
+   cannot send a second request while the first one waits.
+2. **The state of D25 and D28 is renamed from `started` to `submitted`**, and with it the
+   status value of D28 item 2 and the answers of D24 (`submitted` / `not_submitted`). D12, D20,
+   D24, D25 and D28 above carry the new word.
+3. **`execution_started` is optional information.** The connector may send it with the same
+   status call. Themis shows it and counts nothing from it. A build system that does not
+   report it loses nothing.
+4. **A build that was accepted and then cancelled, or that failed before it ran, stays a used
+   attempt.** It ends as the loop already ends a build with no result (M2-8); the attempt is
+   not given back. Giving it back would let a queue that keeps cancelling ask without end.
+5. **The identity returned at `submitted` is kept** on the connector's record and sent in the
+   status call, so that a person can find the queued build.
+
 ## Choices for the owner
 
 | # | Choice | Assumed pick | State |
@@ -768,7 +837,7 @@ To keep the two from drifting:
 | R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule | Communication |
 | R4 | mode `ask`: the "start rebuild" action in API and GUI | Governance or Communication API, GUI |
-| R5 | reference build connector, with the durable event record of D12 and the required checks of D18 | new repository |
+| R5 | reference build connector, with the durable event record of D12, the stored states and recovery worker of D37, and the required checks of D18 | new repository |
 | R6 | VM check: one release tagged, one fix published, one build, one comparison | test VM |
 
 R1 changes the domain model and an API, R3 changes event contracts, R5 is a new repository. Each
