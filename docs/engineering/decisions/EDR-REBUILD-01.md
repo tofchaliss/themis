@@ -21,6 +21,8 @@ day, gave D40 to D43 and three corrections in place (D4, D8, D10). A review of D
 D44 (the states of a recommendation, and one standing recommendation enforced by the database)
 and one more correction in D8. No new owner choice. A review of D44 gave D45: approval only
 while the effective mode is exactly `ask`, and what the notice rule does and does not promise.
+A review of D45 gave D46: the approval against a policy or tag change at the same moment, and
+expiry before withdrawal.
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -968,6 +970,57 @@ Every state except `standing` is final.
    and an approval of a decision id that is not standing is refused with the id of the
    standing one (D41 item 4).
 
+### D46 — Approval against a change at the same moment; expiry comes first (review of D45)
+
+D45 put the mode check and the state change in one transaction. A transaction alone does not
+stop a policy change that commits between the read and the write. And the three inputs of the
+effective mode (D17) do not live in one place: the two policies are in Governance's database,
+the tags are in Registry and are read over the read seam.
+
+**Order of the checks in an approval.** First the 7 days, then the mode.
+
+1. **Expiry comes first.** If the 7 days have passed, the approval is refused and the
+   recommendation is recorded as `expired`, whatever the mode is now. A fact about time is not
+   overwritten by `withdrawn`. The expiry event of D26 is recorded once, by the approval or by
+   the sweep, whichever sees it first. Nothing else follows; the next trigger evaluates (D26).
+2. **Only a recommendation still inside its 7 days is checked for the mode**, and D45 item 2
+   (`withdrawn`, with an evaluation trigger) applies to that case only.
+
+**The policy part is exact.**
+
+3. Every policy has a version counter (D11 item 4). The approval reads the installation policy
+   and the policy in force **with a lock that blocks a write to them** until the approval
+   commits (in SQL: `SELECT ... FOR SHARE` on those rows, in the approval's transaction). A
+   policy write waits, or the approval waits for it. So a policy change that committed before
+   the approval is always seen, and none can slip between the check and the state change.
+4. Creating or deleting a Product or Release policy for that release takes the same lock path
+   (it locks the installation policy row first), so "which policy is in force" cannot change
+   under the approval either.
+5. The approval record stores the policy versions it checked (D15).
+
+**The tag part is as exact as two stores allow.**
+
+6. The approval reads the tags **fresh from Registry** inside the approval call. No cached
+   value is used.
+7. **It fails closed.** If Registry cannot be read, the approval is refused and the
+   recommendation stays `standing`. This is on purpose the opposite of the blast-radius read,
+   which falls back to a neutral value: here the read authorizes a build.
+8. The approval record stores the tag values it read and the time of the read.
+9. **Honest limit.** A tag changed in Registry in the instant between that read and the
+   approval's commit is not seen. No transaction spans the two stores, and this record does not
+   add one. The result is the same as if the approval had come an instant earlier, and the
+   record shows which tag values it rested on. The installation policy, the only input that
+   can **raise** the mode (D17), is in the exact part.
+
+**After the approval.**
+
+10. The request that Governance publishes carries the policy versions and the tag values of
+    the approval. Nothing is evaluated again between approval and publication; they are one
+    transaction through the outbox (D13).
+11. A change to `off` **after** an approval does not call back a request already published.
+    Whether `off` should stop a cycle that is already open is not decided here; it is listed
+    under what this record does not decide.
+
 ### D42 — Every receiver of `rebuild_requested` meets the connector contract (own review)
 
 D8 said a CI system that can verify the signature "needs no connector at all", and D10 let a
@@ -1021,7 +1074,7 @@ not say which new rules reach it. Decided:
 | R2 | evaluation on `new_sbom` and on `fix_available`; the two new events; tag scope | Governance, Registry read seam |
 | R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule; the status call, attempt reservation, refusal counter and try number (D20, D28, D40); settling `uncertain` (D24) | Communication, API |
-| R4 | mode `ask`: the "start rebuild" action in API and GUI; one standing recommendation and its states (D41, D44, D45); the expiry sweep (D32) | Governance or Communication API, GUI |
+| R4 | mode `ask`: the "start rebuild" action in API and GUI; one standing recommendation and its states (D41, D44, D45, D46); the expiry sweep (D32) | Governance or Communication API, GUI |
 | R5 | reference build connector, with the durable event record of D12, the stored states and recovery worker of D37, the per-intent claim of D39, and the required checks of D18 | new repository |
 | R6 | VM check: one release tagged, one fix published, one build, one comparison | test VM |
 
@@ -1053,5 +1106,7 @@ is on the "must ask" list.
   are common.
 - The pull transport of D1.
 - A per-Release attempt limit (refused in M2-8, not reopened).
+- Stopping a cycle that is already open when the mode is switched to `off` (D46 item 11).
+  Today an open cycle runs to its end or its attempt limit.
 - Deploying the rebuilt image. Themis asks for a build and checks the SBOM; rollout stays with
   the enterprise.

@@ -388,7 +388,9 @@ three angles, and two of them proposed fixes that would not have worked.
   which rules reach the built-in Jenkins sender. D44 from a review of D40 to D43: the states of
   a recommendation (an expired one is no longer standing), and one standing recommendation per
   Release kept by a database unique rule. D45 from a review of D44: approval only while the
-  effective mode is exactly `ask`, and one notice per created recommendation.
+  effective mode is exactly `ask`, and one notice per created recommendation. D46 from a review
+  of D45: the approval locks the policies it checks, reads the tags fresh and fails closed, and
+  expiry is recorded before withdrawal. Not decided: stopping an open cycle on mode `off`.
   Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6 plus R1a and R2a, one
   PR each on the owner's go (release freeze).
 
