@@ -17,7 +17,9 @@ to D36, gave D37 and D38: the connector's stored states with recovery after a re
 word `submitted` in place of `started`. No new owner choice. A seventh review, of D1 to D38,
 gave D39: one worker per intent in the connector, and when "no build found" may be believed.
 No new owner choice. An own read of D1 to D39 against each other, asked by the owner the same
-day, gave D40 to D43 and three corrections in place (D4, D8, D10).
+day, gave D40 to D43 and three corrections in place (D4, D8, D10). A review of D40 to D43 gave
+D44 (the states of a recommendation, and one standing recommendation enforced by the database)
+and one more correction in D8. No new owner choice.
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -226,7 +228,10 @@ A build system still cannot close a Finding. Only the evaluation of the new SBOM
 
 The connector is small: verify the signature, run the checks of D18 on the build profile the
 event carries, start the pipeline, nothing else. It holds the CI credentials and its own
-allow-lists. It keeps no security state.
+allow-lists. It owns no security decision and no Finding state. It **does** keep stored
+working state: the event records, their states, the claim and the build identity, for
+duplicate detection, recovery and status reports (D12, D37, D39). (The first text said "it
+keeps no security state", which read as "no state".)
 
 - It lives in its own repository so that an enterprise can fork or replace it without touching
   Themis.
@@ -893,6 +898,50 @@ Decided:
    decision id is refused, with the id of the standing one in the answer.
 5. The 7 days of D15 count from the standing recommendation's own time.
 
+D44 fixes the states, what ends "standing", and how "at most one" is enforced.
+
+### D44 — The states of a recommendation, and how "one standing" is kept (review of D41)
+
+D41 left three things open: whether an expired recommendation is still the standing one, what
+stops two triggers from creating two, and what a change of mode does to it.
+
+**States.** A recommendation is in exactly one:
+
+| State | Meaning | Can be approved |
+| --- | --- | --- |
+| `standing` | the one open recommendation of the release | yes |
+| `approved` | a person approved it (D22); the request was published | no |
+| `superseded` | a later trigger gave a different result (D41 item 3) | no |
+| `expired` | 7 days passed with no answer (D15) | no |
+| `withdrawn` | a later trigger found nothing to ask for, or the mode is no longer `ask` | no |
+
+Every state except `standing` is final.
+
+1. **Expired means no longer standing, by the clock.** A recommendation older than 7 days is
+   not standing from that moment, whether or not the sweep of D32 has marked it yet. The
+   evaluation and the approval both check the time themselves. The sweep only records the
+   event and tells a person.
+2. **So the next trigger after expiry makes a new recommendation**, even with the same
+   targeted set, policy version and profile revision, and a person is told. The `unchanged`
+   outcome of D41 item 2 exists only against a recommendation that is standing now.
+3. **The comparison of D41 item 2 includes the effective mode** (D17). If the mode is now
+   `off`, or the evaluation finds nothing to count, the standing recommendation becomes
+   `withdrawn` and nothing new is made. If the mode is now `auto`, it becomes `withdrawn` and
+   the request is published directly, as `auto` does.
+4. **The database keeps "at most one".** Governance's store has a unique rule: one `standing`
+   recommendation per Release (the same means as D13 for cycles). Ending the old one, creating
+   the new one and writing the notice to the outbox happen in **one transaction**.
+5. **Two triggers at once.** The transaction that loses on the unique rule creates nothing and
+   sends nothing. It evaluates again against the recommendation that won and applies D41
+   (`unchanged` or supersede). Because the notice is written in the winner's transaction, only
+   one notice leaves.
+6. **Approval is one conditional write**, `standing` → `approved`, that also checks the 7 days
+   and that the effective mode is not `off`. Of two approvals at once, one wins; the other is
+   refused as in D41 item 4.
+7. **After approval and until the cycle closes, no new recommendation is made** for the
+   release. A trigger in that time joins the cycle (D13, D21). Governance learns that the
+   cycle closed from the closure trigger (D21, D27) and evaluates then.
+
 ### D42 — Every receiver of `rebuild_requested` meets the connector contract (own review)
 
 D8 said a CI system that can verify the signature "needs no connector at all", and D10 let a
@@ -946,7 +995,7 @@ not say which new rules reach it. Decided:
 | R2 | evaluation on `new_sbom` and on `fix_available`; the two new events; tag scope | Governance, Registry read seam |
 | R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule; the status call, attempt reservation, refusal counter and try number (D20, D28, D40); settling `uncertain` (D24) | Communication, API |
-| R4 | mode `ask`: the "start rebuild" action in API and GUI; one standing recommendation (D41); the expiry sweep (D32) | Governance or Communication API, GUI |
+| R4 | mode `ask`: the "start rebuild" action in API and GUI; one standing recommendation and its states (D41, D44); the expiry sweep (D32) | Governance or Communication API, GUI |
 | R5 | reference build connector, with the durable event record of D12, the stored states and recovery worker of D37, the per-intent claim of D39, and the required checks of D18 | new repository |
 | R6 | VM check: one release tagged, one fix published, one build, one comparison | test VM |
 
