@@ -361,8 +361,10 @@ three angles, and two of them proposed fixes that would not have worked.
   in by tag (`rebuild:auto` / `rebuild:ask`); the request leaves as one signed
   `rebuild_requested` event to a build connector outside this repository (owner pick
   2026-11-26), so no enterprise build setup enters Themis core. Callback, comparison and attempt
-  limit unchanged. Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6, one PR
-  each on the owner's go (release freeze).
+  limit unchanged. The build configuration is a build profile, an opaque JSON block per Project
+  with Release override, stored in Registry and copied into the event (D10, owner pick
+  2026-11-26). Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6 plus R2a,
+  one PR each on the owner's go (release freeze).
 
 - [ ] **PSIRT early alert on the Overview** (id `GUI-PSIRT-1`, owner 2026-11-23, feature).
   Newly published critical/high CVEs in the world (original source score, no Themis score),

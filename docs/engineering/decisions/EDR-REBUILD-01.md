@@ -4,6 +4,8 @@ Status: **PROPOSED — 2026-11-26.** Design only, no code. The owner picked the 
 same day (choice 1 below: signed event plus build connector). Choices 2 to 5 carry an assumed pick
 and wait for the owner. Feature work stays behind the release freeze: each step needs the owner's
 go.
+**Revision 2, 2026-11-26:** the owner chose to keep the build configuration in Themis, as a build
+profile per Project and Release (D10). D10 replaces the mapping part of D8.
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -164,11 +166,13 @@ output):
     "attempt": 1, "max_attempts": 2,
     "reason": "fix_available",
     "policy_version": "<n>",
-    "targeted": [ { "cve": "CVE-0000-0000", "package": "<name>", "fixed_version": "<version>" } ]
+    "targeted": [ { "cve": "CVE-0000-0000", "package": "<name>", "fixed_version": "<version>" } ],
+    "build": { }
   }
 }
 ```
 
+- `build` is the release's build profile, copied as stored (D10, revision 2).
 - The signature is the existing `X-Themis-Signature: sha256=<hex>` over the body. A
   `rebuild_requested` route **without** a signing secret is refused at configure time: an
   unsigned request to build is not sent.
@@ -191,6 +195,9 @@ per-release limit stands.
 A build system still cannot close a Finding. Only the evaluation of the new SBOM can.
 
 ### D8 — The build connector is a separate program, outside this repository (assumed pick, choice 5)
+
+> **Revision 2 (2026-11-26):** the mapping no longer lives in the connector. D10 puts it in
+> Themis as a build profile. The connector keeps the credentials and the last step only.
 
 The connector is small: verify the signature, look up the release in a mapping file, start the
 pipeline, nothing else. It holds the CI credentials and the mapping. It keeps no security state.
@@ -218,6 +225,54 @@ gave.
 
 A policy per Product is the expected next step and is not designed here.
 
+### D10 — The build profile: a JSON block per Project and Release, stored in Themis (owner, 2026-11-26, revision 2)
+
+The owner's question: which Jenkins configuration is pushed, and can it be a JSON configuration
+set per project and release in Themis. Answer: yes.
+
+1. **Registry stores one build profile per Project.** A Release inherits its Project's profile
+   and may carry its own, which replaces the Project's as a whole (no field-by-field merge: a
+   merged profile is one nobody wrote).
+2. **The profile is opaque to Themis.** It must be a JSON object. Themis does not read inside
+   it and no Themis rule depends on a key in it. It is copied as stored into the `build` field
+   of the `rebuild_requested` event (D6). This is what keeps build-system knowledge out of
+   Themis core while the configuration sits beside the release it belongs to.
+3. **No secrets.** The profile is shown in the GUI, returned by the read API and sent in an
+   event. Credentials stay on the build side. Themis refuses a profile with a key named like a
+   secret (`password`, `token`, `secret`, `api_key`, `credential`, any case, any depth). That
+   check is a guard against mistakes and not proof; the rule is stated on the form.
+4. **Bounded.** At most 16 KiB and 5 levels deep.
+5. **Who may write it:** `admin`, or the Product's own `product:<id>` key, as for tags. Each
+   change is recorded with actor and time, and the previous value is kept.
+6. **No profile, no request.** A release in scope by tag (D4) with no profile, own or
+   inherited, gets no `rebuild_requested`. Themis sends the "rebuild recommended" notification
+   with the reason "no build profile", so the gap is seen.
+7. **The profile is frozen on the request.** The value is copied into the intent snapshot when
+   the request is created. A later edit changes the next request, not one already sent.
+
+A suggested shape, which Themis does not enforce:
+
+```json
+{
+  "job": "team/build-image",
+  "parameters": {
+    "BRANCH": "release/<version>",
+    "BASE_IMAGE_TAG": "latest",
+    "REGISTRY_PATH": "<registry>/project-a"
+  }
+}
+```
+
+A Jenkins job with a webhook trigger reads `data.build.parameters` as its job parameters and the
+other `data` fields as facts. The same block serves any other build system; only its keys
+differ.
+
+What remains for the connector (D8): verify the signature, hold the credentials, start the job
+that `build` names. An allow-list of job names on the connector side is recommended, because a
+person who can edit a profile can otherwise name any job the connector's credential can start.
+
+The Jenkins sender of M2-6 keeps its seven fixed parameters and does not read the profile.
+
 ## Choices for the owner
 
 | # | Choice | Assumed pick | State |
@@ -227,6 +282,7 @@ A policy per Product is the expected next step and is not designed here.
 | 3 | Where the policy is stored | Governance database with API and audit (D9) | open |
 | 4 | Default mode | `ask` (D5) | open |
 | 5 | Where the connector lives | its own repository (D8) | open |
+| 6 | Where the build configuration lives | in Themis, per Project and Release (D10) | **answered 2026-11-26** |
 
 ## Order of work (proposed; each step alone, on the owner's go)
 
@@ -235,6 +291,7 @@ A policy per Product is the expected next step and is not designed here.
 | R0 | this record and the backlog item | docs |
 | R1 | policy record, evaluation in the domain, read and write API | Governance domain, API, migration |
 | R2 | evaluation on `new_sbom` and on `fix_available`; the two new events; tag scope | Governance, Registry read seam |
+| R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule | Communication |
 | R4 | mode `ask`: the "start rebuild" action in API and GUI | Governance or Communication API, GUI |
 | R5 | reference build connector | new repository |
@@ -259,6 +316,8 @@ is on the "must ask" list.
 ## What this record does NOT decide
 
 - A per-Product or per-Release policy.
+- A schema for the build profile. It stays opaque until a second build system shows which keys
+  are common.
 - The pull transport of D1.
 - A per-Release attempt limit (refused in M2-8, not reopened).
 - Deploying the rebuilt image. Themis asks for a build and checks the SBOM; rollout stays with
