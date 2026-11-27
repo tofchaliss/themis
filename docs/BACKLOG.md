@@ -372,6 +372,10 @@ three angles, and two of them proposed fixes that would not have worked.
   D22 to D26 from a third review: approval by admin or product key with a named person (owner
   pick 2026-11-27), four ids so an equal later request is new, the record of a settled uncertain
   build, the state words (delivered is not built), expiry of a recommendation as an event.
+  D27 to D32 from a fourth review, no new owner choice: a recommendation is its decision id and
+  the cycle follows the approval, attempts are reserved / used / given back, the request carries
+  the facts used, version order is Knowledge's verdict, a parameter schema per job, an expiry
+  sweep.
   Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6 plus R1a and R2a, one
   PR each on the owner's go (release freeze).
 
