@@ -11,7 +11,8 @@ Product and Release (D11). Five clarifications from that review are decided as D
 second review the same day gave D17 to D21; the owner decided that the policy is the ceiling for
 automation and a tag can only restrict it (D17). A third review, of revision 3, gave D22 to
 D26; the owner decided who may approve in mode `ask` (D22). A fourth review, of D1 to D26,
-gave D27 to D32; they align decisions already taken and add no new owner choice.
+gave D27 to D32; they align decisions already taken and add no new owner choice. A fifth
+review, of D1 to D32, gave D33 to D36, again with no new owner choice.
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -174,15 +175,22 @@ output):
     "policy_version": "<n>", "policy_scope": "product",
     "build_profile_revision": "<n>", "build_profile_scope": "project",
     "build_profile_sha256": "<hex>",
-    "targeted": [ { "finding_id": "<uuid>", "cve": "CVE-0000-0000", "purl": "<purl>",
-                    "current_version": "<version>", "fixed_version": "<version>",
-                    "fix_source": "<feed>" } ],
+    "targeted": [ {
+      "finding_id": "<uuid>", "cve": "CVE-0000-0000", "purl": "<purl>",
+      "current_version": "<version>", "fixed_version": "<version>", "fix_source": "<feed>",
+      "severity": "high", "score": 8.1, "score_source": "<source>",
+      "known_exploited": false, "claim_class": "carrier",
+      "position": "none",
+      "counted_because": ["severity_floor"],
+      "assessment": { "state": "assessed", "revision": "<n>" }
+    } ],
     "build": { }
   }
 }
 ```
 
 - `build` is the release's build profile, copied as stored (D10, revision 2).
+- Which fields of a targeted entry are required is fixed in D34.
 - The signature is the existing `X-Themis-Signature: sha256=<hex>` over the body. A
   `rebuild_requested` route **without** a signing secret is refused at configure time: an
   unsigned request to build is not sent.
@@ -428,7 +436,8 @@ contract, and the reference connector refuses to start without them configured:
    Product and Project is refused.
 2. An allow-list of parameter **names** per job. An unknown name is refused, not dropped.
 3. Value checks per parameter, from a schema per job (D31).
-4. A build-system credential that can start only the listed jobs.
+4. A build-system credential that can start only the listed jobs, restricted **in the build
+   system itself** (D33).
 5. Replay checks: the event id must be new (D12), the `type` must be known, and the `time`
    must not be older than the connector's limit (default 24 hours, which is longer than
    Themis's delivery retries).
@@ -616,7 +625,8 @@ does not rely on reading history back. Each targeted entry carries, as decided:
 - the Finding id, the purl, the current and fixed version, the fix source (D19),
 - the severity and score used and their source, the known-exploited flag, the claim class,
 - the state of the Position (none, or which stance),
-- the revision of the component assessment (EDR-SCORING-01), where that record has one.
+- the state of the component assessment (EDR-SCORING-01) and its revision when there is one;
+  what a missing revision means is fixed in D35.
 
 These are frozen on the decision (D15) and copied to the intent snapshot. The decision record
 in Governance is the audit copy; the event is the transport copy.
@@ -651,8 +661,7 @@ builds a shell command or a script from event values. The reference connector ha
 tries a value with command syntax against each built-in rule.
 
 The least-privilege credential (D18 item 4) is checked against the build system, not only
-declared: at startup the reference connector tries to see a job outside its allow-list and
-warns loudly if it can.
+declared. How, and what happens when the check fails, is decided in D33.
 
 ### D32 — Expiry is found by a sweep that evaluates nothing (revision 3)
 
@@ -660,6 +669,79 @@ D26 says what expiry is; this says what notices it. A sweep in Governance, on th
 the existing review-by sweep (`THEMIS_REVIEW_BY_INTERVAL`, default 1h), finds recommendations
 older than 7 days, records `rebuild_recommendation_expired` once per decision id, and tells a
 person. It does not evaluate the policy, approve or build. The next trigger of D3 evaluates.
+
+### D33 — The credential is narrow in the build system, and the connector fails closed (revision 3)
+
+D31 said the connector "warns loudly" when its credential can reach a job outside the
+allow-list. A warning does not stop that credential from being used, so it did not deliver what
+D18 item 4 promised. Corrected:
+
+1. **The limit lives in the build system.** The connector's credential is given the right to
+   start the allow-listed jobs and nothing else, with the build system's own permissions (a
+   folder or project scoped role, a token bound to one pipeline). The connector's allow-list is
+   a second check, not the boundary.
+2. **The startup check asks, it does not try.** The reference connector queries the build
+   system for the credential's permissions. It never starts a job to find out.
+3. **It fails closed.** If the check shows the credential can start a job outside the
+   allow-list, the connector **does not start**. The same when the check cannot be run.
+4. **One stated exception.** Where a build system cannot express a narrow enough permission,
+   the operator may set an explicit setting that accepts a broader credential. The connector
+   then logs that fact at every start, and its status page shows it. In that setup the
+   allow-list in connector code is the only limit, and this record does **not** call the
+   credential least-privileged. That is a residual risk the enterprise accepts by setting it.
+
+### D34 — The targeted entry: which fields are required (revision 3)
+
+The example in D6 now shows every field of D29. One targeted entry is **one matched component
+of one Finding**.
+
+| Field | Required | Note |
+| --- | --- | --- |
+| `finding_id`, `cve`, `purl` | yes | |
+| `current_version`, `fixed_version`, `fix_source` | yes | a request exists only with a known fix (D19) when `fix_required` is on; with it off, `fixed_version` and `fix_source` may be `null` |
+| `severity`, `score_source` | yes | the severity the policy compared with its floor, and where it came from |
+| `score` | nullable | `null` when the source gave a level and no number |
+| `known_exploited` | yes | `true` or `false` |
+| `claim_class` | yes | `carrier` or `unknown`; a `scope` component is never targeted under `carrier_only` |
+| `position` | yes | `none`, or the stance in force |
+| `counted_because` | yes, not empty | the policy fields that made it count: `severity_floor`, `known_exploited` |
+| `assessment` | yes | see D35 |
+
+**Identity of an entry.** Within one request the pair (`finding_id`, `purl`) is unique: a
+Finding lists each matched component once, and the purl carries the version. Step R2 must
+confirm that against Governance's stored component list before the event contract is fixed. If
+one Finding can hold the same purl twice, an occurrence index is added to the entry then; a
+purl alone is never taken as the identity.
+
+### D35 — What a missing assessment revision means (revision 3)
+
+`assessment.state` is always present and takes one of three values. `revision` is present only
+with the first.
+
+| `state` | Meaning | `revision` |
+| --- | --- | --- |
+| `assessed` | a component assessment exists and its severity was used | present |
+| `not_assessed` | no component assessment exists yet; the source severity of the CVE was used | absent |
+| `not_eligible` | the component is outside the assessment (for example scope-class); cannot occur in a request while `carrier_only` is on | absent |
+
+There is no fourth, silent state. With `counted_because`, the versions and the severity source,
+an entry says by itself why the component was targeted, whether or not a revision exists.
+
+### D36 — One intent, one payload, byte for byte (revision 3)
+
+The decision record in Governance is the audit copy and the event is the transport copy (D29).
+To keep the two from drifting:
+
+1. The event body is **built once**, when the intent is created, from the frozen decision. It
+   is stored on the intent as bytes with its SHA-256. This is the existing rule that a payload
+   is materialized at enqueue and a sender never renders (EDR-DELIVERY-01 M1b-3), now stated
+   for this event.
+2. Every delivery try of that intent sends **exactly those bytes**. Nothing is read again from
+   Governance, Knowledge or Registry for a retry, so a feed update or a calculator change
+   between two tries cannot change what is sent under one event id.
+3. The signature (D6) is over those bytes, so it is the same on every try.
+4. The connector may store the hash with its event record (D12) and refuse a second delivery
+   of a known event id whose body differs.
 
 ## Choices for the owner
 
