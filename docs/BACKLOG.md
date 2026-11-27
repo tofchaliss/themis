@@ -363,8 +363,11 @@ three angles, and two of them proposed fixes that would not have worked.
   2026-11-26), so no enterprise build setup enters Themis core. Callback, comparison and attempt
   limit unchanged. The build configuration is a build profile, an opaque JSON block per Project
   with Release override, stored in Registry and copied into the event (D10, owner pick
-  2026-11-26). Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6 plus R2a,
-  one PR each on the owner's go (release freeze).
+  2026-11-26). Policy scope is installation, Product and Release, nearest wins as a whole (D11,
+  owner pick 2026-11-27); review points decided as D12 to D16 (one build per request, one open
+  cycle per release, cool-down from dispatch, approval record, profile revision on the event).
+  Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6 plus R1a and R2a, one
+  PR each on the owner's go (release freeze).
 
 - [ ] **PSIRT early alert on the Overview** (id `GUI-PSIRT-1`, owner 2026-11-23, feature).
   Newly published critical/high CVEs in the world (original source score, no Themis score),

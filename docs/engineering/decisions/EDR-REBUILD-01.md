@@ -6,6 +6,8 @@ and wait for the owner. Feature work stays behind the release freeze: each step 
 go.
 **Revision 2, 2026-11-26:** the owner chose to keep the build configuration in Themis, as a build
 profile per Project and Release (D10). D10 replaces the mapping part of D8.
+**Revision 3, 2026-11-27:** after an outside review the owner chose a policy per installation,
+Product and Release (D11). Five clarifications from that review are decided as D12 to D16.
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -165,7 +167,8 @@ output):
     "prior_sbom_id": "<uuid>",
     "attempt": 1, "max_attempts": 2,
     "reason": "fix_available",
-    "policy_version": "<n>",
+    "policy_version": "<n>", "policy_scope": "product",
+    "build_profile_revision": "<n>", "build_profile_scope": "project",
     "targeted": [ { "cve": "CVE-0000-0000", "package": "<name>", "fixed_version": "<version>" } ],
     "build": { }
   }
@@ -223,7 +226,7 @@ change recorded with the actor. An environment-file policy would be faster to bu
 policy that can start builds needs an owner and an audit trail, which is the same reason M2-8
 gave.
 
-A policy per Product is the expected next step and is not designed here.
+> **Revision 3 (2026-11-27):** D11 replaces "one policy per installation" with three levels.
 
 ### D10 — The build profile: a JSON block per Project and Release, stored in Themis (owner, 2026-11-26, revision 2)
 
@@ -273,6 +276,94 @@ person who can edit a profile can otherwise name any job the connector's credent
 
 The Jenkins sender of M2-6 keeps its seven fixed parameters and does not read the profile.
 
+### D11 — Policy scope: installation, Product, Release (owner, 2026-11-27, revision 3)
+
+This replaces "one policy per installation at first" in D9 and removes the per-Product and
+per-Release policy from the list of things not decided.
+
+1. **Three levels.** One installation policy always exists. A Product may have its own. A
+   Release may have its own.
+2. **The nearest one wins, as a whole.** Release, else Product, else installation. There is no
+   Project level and **no field-by-field merge**: the policy in force for a release is always
+   one record that one person wrote, never a mix.
+3. **The effective policy is readable.** `GET` on a release returns the policy in force and the
+   level it came from. One list read returns every policy in the installation with its scope,
+   so all of them fit on one page. This is the answer to "a per-release setting nobody can
+   inventory" (EDR-DELIVERY-01 M2-8).
+4. **Each policy has its own version counter** and its change history with actor and time. The
+   event carries `policy_version` and `policy_scope`.
+5. **Who may write:** the installation policy, `admin` only. A Product or Release policy,
+   `admin` or that Product's `product:<id>` key.
+6. **The attempt limit is not a policy field.** `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`
+   stays installation-wide (M2-8 stands).
+7. **Tags still decide scope and mode** (D4). A tag says whether a release takes part; the
+   policy says when a rebuild is worth asking for. A policy's `mode` is the default for
+   releases whose tag is the plain `rebuild:auto` or `rebuild:ask`; the tag wins.
+
+Build order: the installation policy first (R1), then Product and Release overrides (R1a).
+
+### D12 — One request starts at most one build (revision 3)
+
+Themis delivers at least once and always repeats a request with the **same event id** (the
+intent id). The rest is the receiver's duty and part of the connector contract:
+
+1. The connector keeps a durable record per event id and writes it **before** it calls the
+   build system.
+2. An event id already recorded as started is acknowledged and starts nothing.
+3. An event id recorded but with an unknown outcome (a crash between the call and the record)
+   is **not** sent again blindly. The connector first asks the build system for a build that
+   carries this intent id. If it cannot tell, it reports the attempt as `uncertain` through the
+   callback and a person decides.
+4. The reference connector passes the intent id to the job as a parameter, so that step 3 can
+   find it.
+
+The same limit already stands for the built-in Jenkins sender (`buildWithParameters` is not
+idempotent); this decision does not change that sender.
+
+### D13 — One open cycle per Release, enforced by the database (revision 3)
+
+Governance publishes the request through its transactional outbox, and Communication consumes
+it through its inbox, idempotent on the originating event id (EDR-DELIVERY-01 M1a-2). New in
+this record: `rebuild_cycles` gets a **unique rule: at most one open cycle per Release**. A
+second request for a release with an open cycle joins that cycle and creates nothing.
+
+This also closes the two-node race listed under the honest limits of EDR-DELIVERY-01 and of
+this record.
+
+Governance does not publish the same request twice either: a request is keyed on the release,
+the policy scope and version, and the targeted set.
+
+### D14 — The cool-down counts from a successful dispatch (revision 3)
+
+1. The cool-down of D2 starts when the `rebuild_requested` event was **delivered** (the
+   receiver answered with success).
+2. A retry of the same request is never held back by the cool-down. It is the same intent.
+3. A request that could not be delivered and was given up does **not** start the cool-down.
+   The give-up notice goes to a person as for every delivery.
+4. The cool-down gates the **opening of a new cycle** only. Attempt 2 inside an open cycle
+   follows the loop (M2-8) and is not delayed.
+5. A request held back by the cool-down is not lost: the policy is evaluated again at the next
+   trigger, and the held-back state is shown on the release.
+
+### D15 — What an approval records in mode `ask` (revision 3)
+
+1. A recommendation freezes what the person is asked to approve: the release, the targeted
+   Findings, the policy scope and version, the build profile revision.
+2. The approval records the **actor, the time, the cycle** and those frozen facts. The request
+   that follows carries exactly them.
+3. A policy or profile change after the recommendation does not alter it. The next cycle uses
+   the new values.
+4. A recommendation nobody answered **expires after 7 days**. It is evaluated afresh at the
+   next trigger.
+5. Only a person may approve: `admin` or the Product's own key. The AI cannot.
+
+### D16 — The request names the build profile it used (revision 3)
+
+The event carries `build_profile_revision` and `build_profile_scope` (`project` or `release`)
+beside `policy_version` and `policy_scope`. With the intent id, these four answer "which policy
+and which configuration authorized this build" from the event alone. D10 item 5 already keeps
+every earlier profile value, so a revision can be read back.
+
 ## Choices for the owner
 
 | # | Choice | Assumed pick | State |
@@ -283,6 +374,7 @@ The Jenkins sender of M2-6 keeps its seven fixed parameters and does not read th
 | 4 | Default mode | `ask` (D5) | open |
 | 5 | Where the connector lives | its own repository (D8) | open |
 | 6 | Where the build configuration lives | in Themis, per Project and Release (D10) | **answered 2026-11-26** |
+| 7 | Policy scope | installation, Product and Release, nearest wins as a whole (D11) | **answered 2026-11-27** |
 
 ## Order of work (proposed; each step alone, on the owner's go)
 
@@ -290,11 +382,12 @@ The Jenkins sender of M2-6 keeps its seven fixed parameters and does not read th
 | --- | --- | --- |
 | R0 | this record and the backlog item | docs |
 | R1 | policy record, evaluation in the domain, read and write API | Governance domain, API, migration |
+| R1a | Product and Release policy overrides; the effective-policy read and the list read (D11) | Governance domain, API, migration; GUI |
 | R2 | evaluation on `new_sbom` and on `fix_available`; the two new events; tag scope | Governance, Registry read seam |
 | R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule | Communication |
 | R4 | mode `ask`: the "start rebuild" action in API and GUI | Governance or Communication API, GUI |
-| R5 | reference build connector | new repository |
+| R5 | reference build connector, with the durable event record of D12 | new repository |
 | R6 | VM check: one release tagged, one fix published, one build, one comparison | test VM |
 
 R1 changes the domain model and an API, R3 changes event contracts, R5 is a new repository. Each
@@ -309,13 +402,14 @@ is on the "must ask" list.
   that are switched on. A language package with no feed fix never triggers.
 - **The connector is outside Themis's guarantees.** Themis can prove what it asked for and what
   came back, not what the pipeline did in between.
-- **Two Communication nodes still race** on one release (EDR-DELIVERY-01 honest limits). The
-  cool-down narrows it and does not close it.
+- **Two Communication nodes racing on one release** is closed by D13 for cycle creation. Two
+  nodes may still both try to deliver one intent; the event id makes that harmless (D12).
+- **Three policy levels are more to keep in order than one.** The list read of D11 is the
+  control; a release-level policy should stay the exception.
 - **Tags opt in, and tags are editable by a product key.** See D4.
 
 ## What this record does NOT decide
 
-- A per-Product or per-Release policy.
 - A schema for the build profile. It stays opaque until a second build system shows which keys
   are common.
 - The pull transport of D1.
