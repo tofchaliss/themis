@@ -22,7 +22,8 @@ D44 (the states of a recommendation, and one standing recommendation enforced by
 and one more correction in D8. No new owner choice. A review of D44 gave D45: approval only
 while the effective mode is exactly `ask`, and what the notice rule does and does not promise.
 A review of D45 gave D46: the approval against a policy or tag change at the same moment, and
-expiry before withdrawal.
+expiry before withdrawal. A review of D46 added the expiry notice rule to D46 item 1, and the
+owner accepted the tag limit of D46 item 9 (choice 10).
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -982,7 +983,11 @@ the tags are in Registry and are read over the read seam.
 1. **Expiry comes first.** If the 7 days have passed, the approval is refused and the
    recommendation is recorded as `expired`, whatever the mode is now. A fact about time is not
    overwritten by `withdrawn`. The expiry event of D26 is recorded once, by the approval or by
-   the sweep, whichever sees it first. Nothing else follows; the next trigger evaluates (D26).
+   the sweep, whichever sees it first. **Whichever records it also writes the notice**: the
+   move `standing` → `expired`, the event and the notice to the outbox are one transaction, in
+   the approval path exactly as in the sweep (D32). The move is a conditional write, so only
+   one of the two can make it, and the other finds `expired` and writes nothing. One expiry,
+   one event, one notice. Nothing else follows; the next trigger evaluates (D26).
 2. **Only a recommendation still inside its 7 days is checked for the mode**, and D45 item 2
    (`withdrawn`, with an evaluation trigger) applies to that case only.
 
@@ -1010,7 +1015,9 @@ the tags are in Registry and are read over the read seam.
    approval's commit is not seen. No transaction spans the two stores, and this record does not
    add one. The result is the same as if the approval had come an instant earlier, and the
    record shows which tag values it rested on. The installation policy, the only input that
-   can **raise** the mode (D17), is in the exact part.
+   can **raise** the mode (D17), is in the exact part. **The owner accepted this limit on
+   2026-11-27 (choice 10).** A second tag check in Communication before the first event is
+   sent was offered and not taken: it narrows the window and cannot close it.
 
 **After the approval.**
 
@@ -1063,6 +1070,7 @@ not say which new rules reach it. Decided:
 | 7 | Policy scope | installation, Product and Release, nearest wins as a whole (D11) | **answered 2026-11-27** |
 | 8 | Mode: policy against tag | the installation policy is the ceiling, a tag only restricts (D17) | **answered 2026-11-27** |
 | 9 | Who may approve in mode `ask` | `admin` or the Product's key, with a named person (D22) | **answered 2026-11-27** |
+| 10 | A tag changed in the instant of an approval | accept the limit of D46 item 9; no second check | **answered 2026-11-27** |
 
 ## Order of work (proposed; each step alone, on the owner's go)
 
