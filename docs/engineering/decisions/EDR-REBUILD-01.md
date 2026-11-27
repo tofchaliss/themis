@@ -10,7 +10,8 @@ profile per Project and Release (D10). D10 replaces the mapping part of D8.
 Product and Release (D11). Five clarifications from that review are decided as D12 to D16. A
 second review the same day gave D17 to D21; the owner decided that the policy is the ceiling for
 automation and a tag can only restrict it (D17). A third review, of revision 3, gave D22 to
-D26; the owner decided who may approve in mode `ask` (D22).
+D26; the owner decided who may approve in mode `ask` (D22). A fourth review, of D1 to D26,
+gave D27 to D32; they align decisions already taken and add no new owner choice.
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -356,8 +357,9 @@ decided in D23.
 
 1. A recommendation freezes what the person is asked to approve: the release, the targeted
    Findings, the policy scope and version, the build profile revision.
-2. The approval records the **actor, the time, the cycle** and those frozen facts. The request
-   that follows carries exactly them.
+2. The approval records the **actor, the time, the decision id of the recommendation** (D27)
+   and those frozen facts. The request that follows carries exactly them. No cycle exists yet
+   at approval time; the cycle is opened after it and points back to the approval.
 3. A policy or profile change after the recommendation does not alter it. The next cycle uses
    the new values.
 4. A recommendation nobody answered **expires after 7 days**. It is evaluated afresh at the
@@ -370,8 +372,8 @@ decided in D23.
 The event carries `build_profile_revision`, `build_profile_scope` (`project` or `release`) and
 `build_profile_sha256` (over the stored bytes) beside `policy_version` and `policy_scope`, and
 the `cycle_id` that ties all attempts and callbacks together. Each targeted entry names its
-Finding. Positions are append-only, so the assessment behind each Finding at request time can
-be read back from the request's timestamp. With the intent id, these fields answer "which policy
+Finding and the facts the decision used for it (D29); nothing has to be rebuilt from a
+timestamp. With the intent id, these fields answer "which policy
 and which configuration authorized this build" from the event alone. D10 item 5 already keeps
 every earlier profile value, so a revision can be read back.
 
@@ -400,6 +402,19 @@ The modes are ordered **`off` < `ask` < `auto`**. The effective mode of a releas
 | `ask` | `rebuild:ask` | `ask` |
 | any | `rebuild:off` or none | `off` |
 
+With a Product or Release policy in force (all three values, lowest wins):
+
+| Installation policy | Policy in force | Tag | Effective mode |
+| --- | --- | --- | --- |
+| `auto` | Product: `ask` | `rebuild:auto` | `ask` |
+| `auto` | Release: `auto` | `rebuild:ask` | `ask` |
+| `ask` | Product: `auto` | `rebuild:auto` | `ask` |
+| `auto` | Product: `off` | `rebuild:auto` | `off` |
+| `auto` | Product: `auto` | `rebuild:auto` | `auto` |
+
+A policy's `mode` may therefore also be `off` (D2 listed `auto` and `ask` only): a Product or
+Release policy can switch rebuilds off for its scope whatever the tags say.
+
 The effective-policy read of D11 item 3 returns the effective mode and which of the three
 values set it.
 
@@ -412,8 +427,7 @@ contract, and the reference connector refuses to start without them configured:
 1. An allow-list of jobs, **per Product and Project**. A job not listed for the event's
    Product and Project is refused.
 2. An allow-list of parameter **names** per job. An unknown name is refused, not dropped.
-3. Value checks per parameter (type, length, a pattern), so a value cannot carry shell or
-   pipeline syntax.
+3. Value checks per parameter, from a schema per job (D31).
 4. A build-system credential that can start only the listed jobs.
 5. Replay checks: the event id must be new (D12), the `type` must be known, and the `time`
    must not be older than the connector's limit (default 24 hours, which is longer than
@@ -431,7 +445,8 @@ occurrence in that release**:
    distribution as the matched component (the per-world range of EDR-KNOWLEDGE-01 D13). A fix
    published for another distribution, or for the source package with no mapping to this binary
    package, does not count.
-2. The release's version of the component is below that fixed version.
+2. The release's version of the component is below that fixed version, by the comparison rule
+   of D30.
 3. The component is a carrier, or its claim class is unknown (`carrier_only`, D2).
 
 This is the same per-package fact that raises `governance.fix_available.v1`
@@ -450,9 +465,10 @@ Three counters are kept apart:
 | --- | --- | --- |
 | delivery retries | tries to hand one event to the receiver | the existing delivery budget |
 | refusals | answers "not started" from the connector (freeze window, job not allowed, D18) | 3 per cycle |
-| attempts | builds that were accepted | `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS` (2) |
+| attempts | builds that started, plus requests whose outcome is still open (D28) | `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS` (2) |
 
-1. The attempt is counted when the request is delivered. A refusal callback **gives it back**.
+1. An attempt is **reserved** when the request is delivered and **used** when the build is known
+   to have started; a refusal **gives it back**. D28 has the full table.
 2. A refusal is recorded on the cycle with its reason, and a person is told.
 3. After a refusal the request is made again at the next trigger, or by a person.
 4. After 3 refusals the cycle stops as `refused`, and a person is told. Nothing is retried
@@ -526,6 +542,7 @@ evidence allows:
 | --- | --- |
 | `requested` | the intent exists |
 | `delivered` | the receiver answered with success |
+| `started` | the connector reported that the build system took the build (D28) |
 | `refused` / `uncertain` | the connector said so (D20, D12) |
 | `build_reported` | the callback arrived with image digest and SBOM id (M2-7) |
 | `evaluated` | the new SBOM was evaluated and compared (M2-8) |
@@ -540,6 +557,109 @@ When a recommendation passes its 7 days (D15 item 4), Themis records
 `rebuild_recommended` route. The release shows "recommendation expired" until its next trigger.
 Expiry never approves and never builds. No timer re-evaluates the release; the next trigger of
 D3 does.
+
+### D27 — A recommendation is identified by its decision id; the cycle comes after approval (revision 3)
+
+D5, D15 and D23 together left one gap: an approval was said to record "the cycle", but in mode
+`ask` no cycle exists until a person approves. The decision id of D23 closes it. It is made by
+Governance for every trigger that ends in "request" or "recommend", so **a recommendation is a
+decision with outcome `recommend`, and its decision id is its identity**. No fifth id is needed.
+
+1. Governance evaluates, records a decision with outcome `recommend`, and freezes the facts of
+   D15 on it.
+2. A person approves **that decision id** (D22). The approval is recorded on the decision.
+3. Governance publishes the request, carrying the decision id and the approval.
+4. Communication opens the cycle (D13) and gives it a cycle id. The cycle stores the decision
+   id it came from.
+5. Each attempt gets its intent id.
+
+A recommendation that expires (D26) or is never approved has a decision id and no cycle. In
+mode `auto` step 2 is skipped and the rest is the same.
+
+**Where a trigger id comes from.** For a bus event of D3 it is that event's own id together
+with its source context, so a redelivered event is the same trigger. For a cycle closure (D21)
+the id is generated and stored **in the same transaction** that closes the cycle, so a crash
+and a replay cannot evaluate the closure twice.
+
+### D28 — When an attempt is reserved, used and given back (revision 3)
+
+D20 said both "builds that were accepted" and "counted when delivered"; D25 then showed that
+delivered is not built. This table is the one rule and replaces both sentences.
+
+| What Themis learns | State (D25) | The attempt is |
+| --- | --- | --- |
+| the intent is created | `requested` | not touched |
+| delivery fails and is given up | — | not touched |
+| the receiver stored the event | `delivered` | **reserved** |
+| the connector refuses | `refused` | given back |
+| the connector reports the build system took the build | `started` | **used** |
+| the connector cannot tell | `uncertain` | still reserved, until a person settles it (D24) |
+| a person settles `not_started` | — | given back |
+| a person settles `started` | `started` | used |
+| the build callback arrives | `build_reported` | used (if not already) |
+
+1. A reserved attempt counts against the limit while it is open. So a cycle never has more
+   requests in flight than attempts left.
+2. The connector reports `started`, `refused` or `uncertain` with one small status call on the
+   existing callback route, under the `delivery:callback` key, naming the intent id. It changes
+   no Finding, as every callback (M2-7).
+3. A reservation with no status and no build callback after the connector's time limit
+   (default 24 hours, the same as D18 item 5) is shown as `uncertain` and handled by D24.
+4. The cool-down still counts from `delivered` (D14).
+
+### D29 — The request carries the facts the decision used (revision 3)
+
+Positions are append-only, but the calculated assessment of a component can change with no new
+Position (a new vendor observation, a changed range, a calculator revision). So the request
+does not rely on reading history back. Each targeted entry carries, as decided:
+
+- the Finding id, the purl, the current and fixed version, the fix source (D19),
+- the severity and score used and their source, the known-exploited flag, the claim class,
+- the state of the Position (none, or which stance),
+- the revision of the component assessment (EDR-SCORING-01), where that record has one.
+
+These are frozen on the decision (D15) and copied to the intent snapshot. The decision record
+in Governance is the audit copy; the event is the transport copy.
+
+### D30 — "Below the fixed version" is Knowledge's verdict, not a new comparison (revision 3)
+
+Version order depends on the ecosystem (RPM epoch-version-release, Debian, Maven, Python, Go,
+distribution backports). Governance does **not** compare version strings for this policy.
+
+1. The verdict "this occurrence is below its fixed version" comes from Knowledge's
+   per-ecosystem comparison, the same one that gates a match and decides the version-range
+   rule (EDR-KNOWLEDGE-01 D13, D14).
+2. Where Knowledge cannot read a version or cannot order it (`value.VersionParsable` is false,
+   or no range for this component's world), the answer is **unknown**, and unknown is **not** a
+   known fix. The Finding stays open and counts for nothing under `fix_required`.
+3. This is the opposite default from attribution, on purpose: an unknown carrier is treated as
+   a carrier so that a flaw is not hidden, while an unknown fix starts no build so that a build
+   is not wasted. Neither hides the Finding.
+
+### D31 — A parameter schema per job, and values are never joined into a command (revision 3)
+
+This replaces the generic "type, length, a pattern" of D18 item 3. For each allowed job the
+connector configuration holds a schema:
+
+1. the exact parameter names (D18 item 2),
+2. for each name its type, its length limit and its own rule (a branch name, an image tag and a
+   registry path are checked differently),
+3. how a list or a structured value is passed, if the job takes one.
+
+The connector passes values to the build system **as parameters through its API**. It never
+builds a shell command or a script from event values. The reference connector has a test that
+tries a value with command syntax against each built-in rule.
+
+The least-privilege credential (D18 item 4) is checked against the build system, not only
+declared: at startup the reference connector tries to see a job outside its allow-list and
+warns loudly if it can.
+
+### D32 — Expiry is found by a sweep that evaluates nothing (revision 3)
+
+D26 says what expiry is; this says what notices it. A sweep in Governance, on the cadence of
+the existing review-by sweep (`THEMIS_REVIEW_BY_INTERVAL`, default 1h), finds recommendations
+older than 7 days, records `rebuild_recommendation_expired` once per decision id, and tells a
+person. It does not evaluate the policy, approve or build. The next trigger of D3 evaluates.
 
 ## Choices for the owner
 
