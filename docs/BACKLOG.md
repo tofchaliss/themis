@@ -366,6 +366,9 @@ three angles, and two of them proposed fixes that would not have worked.
   2026-11-26). Policy scope is installation, Product and Release, nearest wins as a whole (D11,
   owner pick 2026-11-27); review points decided as D12 to D16 (one build per request, one open
   cycle per release, cool-down from dispatch, approval record, profile revision on the event).
+  D17 to D21 from a second review: the installation policy is the ceiling for automation and a
+  tag only restricts (owner pick 2026-11-27), mandatory connector allow-lists, the exact meaning
+  of "fix known", a refusal is not an attempt, a new fix waits for the next cycle.
   Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6 plus R1a and R2a, one
   PR each on the owner's go (release freeze).
 

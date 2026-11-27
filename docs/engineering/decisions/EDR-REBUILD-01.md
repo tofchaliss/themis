@@ -7,7 +7,9 @@ go.
 **Revision 2, 2026-11-26:** the owner chose to keep the build configuration in Themis, as a build
 profile per Project and Release (D10). D10 replaces the mapping part of D8.
 **Revision 3, 2026-11-27:** after an outside review the owner chose a policy per installation,
-Product and Release (D11). Five clarifications from that review are decided as D12 to D16.
+Product and Release (D11). Five clarifications from that review are decided as D12 to D16. A
+second review the same day gave D17 to D21; the owner decided that the policy is the ceiling for
+automation and a tag can only restrict it (D17).
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -165,11 +167,14 @@ output):
     "project_id": "<uuid>", "project_name": "project-a",
     "release_id": "<uuid>", "release_version": "<version>",
     "prior_sbom_id": "<uuid>",
-    "attempt": 1, "max_attempts": 2,
+    "cycle_id": "<n>", "attempt": 1, "max_attempts": 2,
     "reason": "fix_available",
     "policy_version": "<n>", "policy_scope": "product",
     "build_profile_revision": "<n>", "build_profile_scope": "project",
-    "targeted": [ { "cve": "CVE-0000-0000", "package": "<name>", "fixed_version": "<version>" } ],
+    "build_profile_sha256": "<hex>",
+    "targeted": [ { "finding_id": "<uuid>", "cve": "CVE-0000-0000", "purl": "<purl>",
+                    "current_version": "<version>", "fixed_version": "<version>",
+                    "fix_source": "<feed>" } ],
     "build": { }
   }
 }
@@ -181,7 +186,8 @@ output):
   unsigned request to build is not sent.
 - Targets are `https` only, as for every webhook.
 - The event is a request, not a command. The connector may refuse (freeze window, missing
-  mapping); it reports that through the callback as a failed attempt.
+  mapping); it reports that through the callback as a **refusal**, which is not an attempt
+  (D20).
 
 The Jenkins sender of M2-6 stays as it is. An installation uses the Jenkins sender **or** the
 event route for a given release, never both; the route wins when both are configured, and the
@@ -271,8 +277,8 @@ other `data` fields as facts. The same block serves any other build system; only
 differ.
 
 What remains for the connector (D8): verify the signature, hold the credentials, start the job
-that `build` names. An allow-list of job names on the connector side is recommended, because a
-person who can edit a profile can otherwise name any job the connector's credential can start.
+that `build` names, **after the checks of D18**. A person who can edit a profile could otherwise
+name any job the connector's credential can start.
 
 The Jenkins sender of M2-6 keeps its seven fixed parameters and does not read the profile.
 
@@ -296,9 +302,8 @@ per-Release policy from the list of things not decided.
    `admin` or that Product's `product:<id>` key.
 6. **The attempt limit is not a policy field.** `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS`
    stays installation-wide (M2-8 stands).
-7. **Tags still decide scope and mode** (D4). A tag says whether a release takes part; the
-   policy says when a rebuild is worth asking for. A policy's `mode` is the default for
-   releases whose tag is the plain `rebuild:auto` or `rebuild:ask`; the tag wins.
+7. **Tags still decide scope** (D4): a tag says whether a release takes part, the policy says
+   when a rebuild is worth asking for. Which of the two sets the **mode** is decided in D17.
 
 Build order: the installation policy first (R1), then Product and Release overrides (R1a).
 
@@ -359,10 +364,104 @@ the policy scope and version, and the targeted set.
 
 ### D16 — The request names the build profile it used (revision 3)
 
-The event carries `build_profile_revision` and `build_profile_scope` (`project` or `release`)
-beside `policy_version` and `policy_scope`. With the intent id, these four answer "which policy
+The event carries `build_profile_revision`, `build_profile_scope` (`project` or `release`) and
+`build_profile_sha256` (over the stored bytes) beside `policy_version` and `policy_scope`, and
+the `cycle_id` that ties all attempts and callbacks together. Each targeted entry names its
+Finding. Positions are append-only, so the assessment behind each Finding at request time can
+be read back from the request's timestamp. With the intent id, these fields answer "which policy
 and which configuration authorized this build" from the event alone. D10 item 5 already keeps
 every earlier profile value, so a revision can be read back.
+
+### D17 — The policy is the ceiling for automation; a tag can only restrict (owner, 2026-11-27)
+
+Before this decision the mode had two authorities, the policy field `mode` (D2) and the tag
+(D4), and revision 3 first let the tag win. That is withdrawn. A tag and a Product or Release
+policy can be written with a `product:<id>` key; only the installation policy is `admin` only.
+So only the installation policy may allow automatic builds.
+
+The modes are ordered **`off` < `ask` < `auto`**. The effective mode of a release is the
+**lowest** of three values:
+
+1. the `mode` of the **installation** policy (the ceiling),
+2. the `mode` of the policy in force for the release (D11), when that is a Product or Release
+   policy,
+3. the release's tag: `rebuild:off` on the Release, its Project or its Product always gives
+   `off`; otherwise the nearest of `rebuild:auto` / `rebuild:ask` (Release, then Project, then
+   Product); no tag gives `off` (D4).
+
+| Installation policy | Tag | Effective mode |
+| --- | --- | --- |
+| `auto` | `rebuild:auto` | `auto` |
+| `auto` | `rebuild:ask` | `ask` |
+| `ask` | `rebuild:auto` | `ask` |
+| `ask` | `rebuild:ask` | `ask` |
+| any | `rebuild:off` or none | `off` |
+
+The effective-policy read of D11 item 3 returns the effective mode and which of the three
+values set it.
+
+### D18 — The connector must authorize the job; the signature is not enough (revision 3)
+
+The signature proves that the event came from Themis. It does not prove that the job named in
+`build` is allowed for that Product. These checks are a **required** part of the connector
+contract, and the reference connector refuses to start without them configured:
+
+1. An allow-list of jobs, **per Product and Project**. A job not listed for the event's
+   Product and Project is refused.
+2. An allow-list of parameter **names** per job. An unknown name is refused, not dropped.
+3. Value checks per parameter (type, length, a pattern), so a value cannot carry shell or
+   pipeline syntax.
+4. A build-system credential that can start only the listed jobs.
+5. Replay checks: the event id must be new (D12), the `type` must be known, and the `time`
+   must not be older than the connector's limit (default 24 hours, which is longer than
+   Themis's delivery retries).
+
+A refusal under this decision is reported as in D20. The profile configures an approved job; it
+does not grant the right to run one.
+
+### D19 — What "a fix is known" means for `fix_required` (revision 3)
+
+A Finding counts under `fix_required` only when all of these hold for **that component
+occurrence in that release**:
+
+1. Knowledge holds a fixed version for the same package identity and the same ecosystem or
+   distribution as the matched component (the per-world range of EDR-KNOWLEDGE-01 D13). A fix
+   published for another distribution, or for the source package with no mapping to this binary
+   package, does not count.
+2. The release's version of the component is below that fixed version.
+3. The component is a carrier, or its claim class is unknown (`carrier_only`, D2).
+
+This is the same per-package fact that raises `governance.fix_available.v1`
+(EDR-INCIDENT-01 D1). Each targeted entry carries the Finding id, the purl, the current and
+fixed version and the feed that stated the fix (D6).
+
+Themis does **not** know whether the fixed package is in the enterprise's own build
+repository, or whether the build profile picks it up. If it is not, the build runs, the
+comparison shows the Finding still open, and the loop stops at the attempt limit.
+
+### D20 — A refusal is not an attempt (revision 3)
+
+Three counters are kept apart:
+
+| Counter | Counts | Limit |
+| --- | --- | --- |
+| delivery retries | tries to hand one event to the receiver | the existing delivery budget |
+| refusals | answers "not started" from the connector (freeze window, job not allowed, D18) | 3 per cycle |
+| attempts | builds that were accepted | `THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS` (2) |
+
+1. The attempt is counted when the request is delivered. A refusal callback **gives it back**.
+2. A refusal is recorded on the cycle with its reason, and a person is told.
+3. After a refusal the request is made again at the next trigger, or by a person.
+4. After 3 refusals the cycle stops as `refused`, and a person is told. Nothing is retried
+   without end.
+5. An `uncertain` outcome (D12 item 3) keeps the attempt counted until a person settles it.
+
+### D21 — A new fix during an open cycle waits for the next cycle (revision 3)
+
+A `fix_available` or `new_sbom` trigger for a release with an open cycle joins that cycle
+(D13) and does not change its targeted set. When the cycle closes, the policy is evaluated
+once more for the release, so Findings that qualified in the meantime start the next cycle,
+subject to the cool-down (D14).
 
 ## Choices for the owner
 
@@ -375,6 +474,7 @@ every earlier profile value, so a revision can be read back.
 | 5 | Where the connector lives | its own repository (D8) | open |
 | 6 | Where the build configuration lives | in Themis, per Project and Release (D10) | **answered 2026-11-26** |
 | 7 | Policy scope | installation, Product and Release, nearest wins as a whole (D11) | **answered 2026-11-27** |
+| 8 | Mode: policy against tag | the installation policy is the ceiling, a tag only restricts (D17) | **answered 2026-11-27** |
 
 ## Order of work (proposed; each step alone, on the owner's go)
 
@@ -387,7 +487,7 @@ every earlier profile value, so a revision can be read back.
 | R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule | Communication |
 | R4 | mode `ask`: the "start rebuild" action in API and GUI | Governance or Communication API, GUI |
-| R5 | reference build connector, with the durable event record of D12 | new repository |
+| R5 | reference build connector, with the durable event record of D12 and the required checks of D18 | new repository |
 | R6 | VM check: one release tagged, one fix published, one build, one comparison | test VM |
 
 R1 changes the domain model and an API, R3 changes event contracts, R5 is a new repository. Each
