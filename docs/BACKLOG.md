@@ -380,7 +380,9 @@ three angles, and two of them proposed fixes that would not have worked.
   missing assessment revision means, one intent sends one payload byte for byte. D37 and D38
   from a sixth review, no new owner choice: the connector's stored states with a recovery worker
   after a restart, and the attempt is used at `submitted` (the build system accepted the build),
-  not at execution.
+  not at execution. D39 from a seventh review, no new owner choice: one worker per intent in the
+  connector (a conditional write claims it), and "no build found" is believed only where the
+  build system's search is complete.
   Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6 plus R1a and R2a, one
   PR each on the owner's go (release freeze).
 
