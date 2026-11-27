@@ -387,7 +387,8 @@ three angles, and two of them proposed fixes that would not have worked.
   receiver meets the connector contract (the "no connector needed" sentence is withdrawn), and
   which rules reach the built-in Jenkins sender. D44 from a review of D40 to D43: the states of
   a recommendation (an expired one is no longer standing), and one standing recommendation per
-  Release kept by a database unique rule.
+  Release kept by a database unique rule. D45 from a review of D44: approval only while the
+  effective mode is exactly `ask`, and one notice per created recommendation.
   Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6 plus R1a and R2a, one
   PR each on the owner's go (release freeze).
 

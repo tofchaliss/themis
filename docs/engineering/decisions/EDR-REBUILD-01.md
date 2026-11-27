@@ -19,7 +19,8 @@ gave D39: one worker per intent in the connector, and when "no build found" may 
 No new owner choice. An own read of D1 to D39 against each other, asked by the owner the same
 day, gave D40 to D43 and three corrections in place (D4, D8, D10). A review of D40 to D43 gave
 D44 (the states of a recommendation, and one standing recommendation enforced by the database)
-and one more correction in D8. No new owner choice.
+and one more correction in D8. No new owner choice. A review of D44 gave D45: approval only
+while the effective mode is exactly `ask`, and what the notice rule does and does not promise.
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -933,14 +934,39 @@ Every state except `standing` is final.
    the new one and writing the notice to the outbox happen in **one transaction**.
 5. **Two triggers at once.** The transaction that loses on the unique rule creates nothing and
    sends nothing. It evaluates again against the recommendation that won and applies D41
-   (`unchanged` or supersede). Because the notice is written in the winner's transaction, only
-   one notice leaves.
+   (`unchanged` or supersede). What this promises about notices is corrected in D45 item 2.
 6. **Approval is one conditional write**, `standing` → `approved`, that also checks the 7 days
-   and that the effective mode is not `off`. Of two approvals at once, one wins; the other is
+   and that the effective mode is still exactly `ask` (corrected in D45 item 1; the first text
+   said "not `off`"). Of two approvals at once, one wins; the other is
    refused as in D41 item 4.
 7. **After approval and until the cycle closes, no new recommendation is made** for the
    release. A trigger in that time joins the cycle (D13, D21). Governance learns that the
    cycle closed from the closure trigger (D21, D27) and evaluates then.
+
+### D45 — Approval only in mode `ask`; one notice per recommendation (review of D44)
+
+1. **Approval needs the effective mode to be exactly `ask`, now.** D44 item 6 checked only that
+   the mode was not `off`. If the mode changed to `auto` and no trigger had evaluated the
+   release yet, a person could still approve the old recommendation, beside the direct path of
+   D44 item 3. Corrected: the approval computes the effective mode (D17) at that moment and
+   succeeds only for `ask`. The mode check, the 7 days and the move `standing` → `approved` are
+   one conditional write in one transaction.
+2. **When the approval is refused for the mode,** the same transaction moves the
+   recommendation to `withdrawn` and records an evaluation trigger for the release (a trigger
+   id as in D27). The normal evaluation then decides: `off` does nothing, `auto` publishes the
+   request directly. The approval call itself never starts a build in that case. Its answer
+   says which mode is in force.
+3. **The notice promise, stated exactly.** D44 item 5 said "only one notice leaves". That is
+   true only when the second trigger's result is `unchanged`. If it differs, it supersedes the
+   first recommendation and sends its own notice, and the first notice may already be out.
+   The promise is: **one notice per recommendation that was created**, never two for the same
+   one, and none for an `unchanged` result.
+4. **A notice that replaces another says so.** It names the recommendation it supersedes. No
+   notice is called back or held: a person may see two notices close together, and the second
+   one is the valid one.
+5. **A late notice cannot mislead into a wrong approval.** Every notice names its decision id,
+   and an approval of a decision id that is not standing is refused with the id of the
+   standing one (D41 item 4).
 
 ### D42 — Every receiver of `rebuild_requested` meets the connector contract (own review)
 
@@ -995,7 +1021,7 @@ not say which new rules reach it. Decided:
 | R2 | evaluation on `new_sbom` and on `fix_available`; the two new events; tag scope | Governance, Registry read seam |
 | R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule; the status call, attempt reservation, refusal counter and try number (D20, D28, D40); settling `uncertain` (D24) | Communication, API |
-| R4 | mode `ask`: the "start rebuild" action in API and GUI; one standing recommendation and its states (D41, D44); the expiry sweep (D32) | Governance or Communication API, GUI |
+| R4 | mode `ask`: the "start rebuild" action in API and GUI; one standing recommendation and its states (D41, D44, D45); the expiry sweep (D32) | Governance or Communication API, GUI |
 | R5 | reference build connector, with the durable event record of D12, the stored states and recovery worker of D37, the per-intent claim of D39, and the required checks of D18 | new repository |
 | R6 | VM check: one release tagged, one fix published, one build, one comparison | test VM |
 
