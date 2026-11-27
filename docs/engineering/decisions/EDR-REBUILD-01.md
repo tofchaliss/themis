@@ -16,7 +16,8 @@ review, of D1 to D32, gave D33 to D36, again with no new owner choice. A sixth r
 to D36, gave D37 and D38: the connector's stored states with recovery after a restart, and the
 word `submitted` in place of `started`. No new owner choice. A seventh review, of D1 to D38,
 gave D39: one worker per intent in the connector, and when "no build found" may be believed.
-No new owner choice.
+No new owner choice. An own read of D1 to D39 against each other, asked by the owner the same
+day, gave D40 to D43 and three corrections in place (D4, D8, D10).
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -137,7 +138,8 @@ a person; a build does not answer it.
 
 A release is in scope only when it carries the tag **`rebuild:auto`** or **`rebuild:ask`**, its
 own or inherited from its Project or Product (EDR-REMEDIATION-01 D7). No tag means no rebuild
-request, ever. A release-level tag `rebuild:off` wins over an inherited one.
+request, ever. The tag `rebuild:off` on the Release, its Project or its Product always wins
+(corrected to match D17 item 3; the first text said only a release-level `off` wins).
 
 This uses a tag as a filter, which D7 allows. It does not weight priority. One honest limit: a
 `product:<id>` key may edit tags, so a product team can opt its own releases in. That is the
@@ -174,7 +176,7 @@ output):
     "project_id": "<uuid>", "project_name": "project-a",
     "release_id": "<uuid>", "release_version": "<version>",
     "prior_sbom_id": "<uuid>",
-    "decision_id": "<uuid>", "cycle_id": "<n>", "attempt": 1, "max_attempts": 2,
+    "decision_id": "<uuid>", "cycle_id": "<n>", "attempt": 1, "try": 1, "max_attempts": 2,
     "reason": "fix_available",
     "policy_version": "<n>", "policy_scope": "product",
     "build_profile_revision": "<n>", "build_profile_scope": "project",
@@ -228,9 +230,10 @@ allow-lists. It keeps no security state.
 
 - It lives in its own repository so that an enterprise can fork or replace it without touching
   Themis.
-- A reference connector covers the generic cases (a parameterized job, a pipeline trigger API,
-  a repository dispatch).
-- A CI system that can verify an HMAC webhook itself needs no connector at all.
+- The reference connector supports **one build system first** (corrected to match D33 item 5
+  and D39 item 5; the first text named three generic cases). Others follow as own connectors.
+- ~~A CI system that can verify an HMAC webhook itself needs no connector at all.~~
+  **Withdrawn**, see D42.
 - It holds no mapping from release to job. The job and its parameters come from the build
   profile in the event (D10); the connector only decides whether they are allowed (D18).
 
@@ -287,9 +290,9 @@ A suggested shape, which Themis does not enforce:
 }
 ```
 
-A Jenkins job with a webhook trigger reads `data.build.parameters` as its job parameters and the
-other `data` fields as facts. The same block serves any other build system; only its keys
-differ.
+The connector reads `data.build.parameters` as the job parameters and the other `data` fields
+as facts. The same block serves any other build system; only its keys differ. (The first text
+let a Jenkins job with a webhook trigger read the event directly. That is withdrawn, see D42.)
 
 What remains for the connector (D8): verify the signature, hold the credentials, start the job
 that `build` names, **after the checks of D18**. A person who can edit a profile could otherwise
@@ -461,7 +464,7 @@ occurrence in that release**:
    package, does not count.
 2. The release's version of the component is below that fixed version, by the comparison rule
    of D30.
-3. The component is a carrier, or its claim class is unknown (`carrier_only`, D2).
+3. While `carrier_only` is on (D2): the component is a carrier, or its claim class is unknown.
 
 This is the same per-package fact that raises `governance.fix_available.v1`
 (EDR-INCIDENT-01 D1). Each targeted entry carries the Finding id, the purl, the current and
@@ -529,7 +532,7 @@ apart:
 | trigger id | an event of D3 arrives, or a cycle closes (D21) | one evaluation of the policy |
 | decision id | Governance decides "request" or "recommend" for a trigger | trigger id |
 | cycle id | Communication opens a cycle | one open cycle per Release (D13) |
-| intent id | one attempt is to be delivered | cycle id and attempt number |
+| intent id | one attempt is to be delivered | cycle id, attempt number and try number (D40) |
 
 Duplicates are found on the **trigger id**: the same trigger delivered twice yields one
 decision. A new trigger always yields a new decision, even with the same policy version and the
@@ -856,6 +859,69 @@ Tests of step R5 for this decision: two workers and two instances on one `receiv
 give one call; a worker stopped inside the call, then a take-over, gives no second call before
 the question; an outcome write with an old counter is refused.
 
+### D40 — A request made again gets a new intent id (own review)
+
+D23 made the intent id unique per cycle and attempt number. D20 gives the attempt back after a
+refusal, and D24 after a person settles `not_submitted`, and both say the request is made
+again. With the same attempt number that would be the **same intent id**. The connector already
+holds that id as `refused` or `uncertain` (D37) and would do nothing with it. Decided:
+
+1. Each attempt number has a **try number**, starting at 1. A request made again after a
+   refusal or after `not_submitted` keeps the attempt number and takes the next try number.
+2. The intent id is unique per cycle id, attempt number and try number. So a request made
+   again is a **new event** for the connector, with a new stored record.
+3. The event carries `attempt` and `try` (D6).
+4. The new intent builds its own payload once (D36), from the same frozen decision. The facts
+   do not change inside a cycle (D21).
+5. The limits do not move: at most 3 refusals per cycle (D20), and the attempt limit counts
+   attempt numbers, not tries.
+6. A delivery retry is not a try. It repeats the same intent id (D12).
+
+### D41 — One standing recommendation per Release (own review)
+
+In mode `ask` every trigger makes a new decision (D23), and no cycle exists yet to join (D13).
+So five `fix_available` events in a week would leave five open recommendations for one release.
+Decided:
+
+1. A release has **at most one standing recommendation**.
+2. A new trigger whose result has the same targeted set, policy version and profile revision
+   as the standing recommendation records a decision with outcome `unchanged`. It points to
+   the standing one. Nobody is told again.
+3. A new trigger with a different result makes a new recommendation. The old one is marked
+   `superseded`, and a person is told once about the new one.
+4. Only the standing recommendation can be approved. An approval of a superseded or expired
+   decision id is refused, with the id of the standing one in the answer.
+5. The 7 days of D15 count from the standing recommendation's own time.
+
+### D42 — Every receiver of `rebuild_requested` meets the connector contract (own review)
+
+D8 said a CI system that can verify the signature "needs no connector at all", and D10 let a
+build job read the event directly. Later decisions made that false. A receiver must keep the
+allow-lists (D18), report `submitted`, `refused` or `uncertain` (D28), keep the stored states
+(D37) and the claim (D39). A plain webhook trigger does none of these. Decided:
+
+1. Both sentences are withdrawn (marked in D8 and D10).
+2. Whatever receives `rebuild_requested` must meet the whole connector contract: D12, D18,
+   D28 item 2, D31, D33, D37, D39. It may be the reference connector, a fork, or code inside a
+   build system. The name does not matter; the contract does.
+3. A receiver that never sends the status call is not harmful but is slow: every request
+   becomes `uncertain` after the time limit (D28 item 3) and waits for a person.
+
+### D43 — What the built-in Jenkins sender does under this record (own review)
+
+D6 keeps the sender of M2-6 for installations with no `rebuild_requested` route. The record did
+not say which new rules reach it. Decided:
+
+1. **Policy, tags, modes, approval, cool-down, one cycle per Release and the four ids apply.**
+   They are decided before any sender is chosen (D9).
+2. **The build profile does not apply** (D10). The sender keeps its seven fixed parameters and
+   the one configured job.
+3. **States.** The sender calls the build system itself, so `delivered` and `submitted` are
+   one moment: the build system answered the call with success. There is no `refused` from a
+   connector. A call whose result is not known is `uncertain` and goes to D24.
+4. The connector-side decisions (D18, D31, D33, D37, D39) do not apply. Its known limit stays:
+   the call is not idempotent (D12).
+
 ## Choices for the owner
 
 | # | Choice | Assumed pick | State |
@@ -879,8 +945,8 @@ the question; an outcome write with an old counter is refused.
 | R1a | Product and Release policy overrides; the effective-policy read and the list read (D11) | Governance domain, API, migration; GUI |
 | R2 | evaluation on `new_sbom` and on `fix_available`; the two new events; tag scope | Governance, Registry read seam |
 | R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form | Registry domain, API, migration; GUI |
-| R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule | Communication |
-| R4 | mode `ask`: the "start rebuild" action in API and GUI | Governance or Communication API, GUI |
+| R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule; the status call, attempt reservation, refusal counter and try number (D20, D28, D40); settling `uncertain` (D24) | Communication, API |
+| R4 | mode `ask`: the "start rebuild" action in API and GUI; one standing recommendation (D41); the expiry sweep (D32) | Governance or Communication API, GUI |
 | R5 | reference build connector, with the durable event record of D12, the stored states and recovery worker of D37, the per-intent claim of D39, and the required checks of D18 | new repository |
 | R6 | VM check: one release tagged, one fix published, one build, one comparison | test VM |
 
