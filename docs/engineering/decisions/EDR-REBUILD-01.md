@@ -9,7 +9,8 @@ profile per Project and Release (D10). D10 replaces the mapping part of D8.
 **Revision 3, 2026-11-27:** after an outside review the owner chose a policy per installation,
 Product and Release (D11). Five clarifications from that review are decided as D12 to D16. A
 second review the same day gave D17 to D21; the owner decided that the policy is the ceiling for
-automation and a tag can only restrict it (D17).
+automation and a tag can only restrict it (D17). A third review, of revision 3, gave D22 to
+D26; the owner decided who may approve in mode `ask` (D22).
 Date: 2026-11-26
 Author: the design discussion of 2026-11-26 (thread "Plan policy-driven image rebuild trigger").
 
@@ -167,7 +168,7 @@ output):
     "project_id": "<uuid>", "project_name": "project-a",
     "release_id": "<uuid>", "release_version": "<version>",
     "prior_sbom_id": "<uuid>",
-    "cycle_id": "<n>", "attempt": 1, "max_attempts": 2,
+    "decision_id": "<uuid>", "cycle_id": "<n>", "attempt": 1, "max_attempts": 2,
     "reason": "fix_available",
     "policy_version": "<n>", "policy_scope": "product",
     "build_profile_revision": "<n>", "build_profile_scope": "project",
@@ -208,16 +209,17 @@ A build system still cannot close a Finding. Only the evaluation of the new SBOM
 > **Revision 2 (2026-11-26):** the mapping no longer lives in the connector. D10 puts it in
 > Themis as a build profile. The connector keeps the credentials and the last step only.
 
-The connector is small: verify the signature, look up the release in a mapping file, start the
-pipeline, nothing else. It holds the CI credentials and the mapping. It keeps no security state.
+The connector is small: verify the signature, run the checks of D18 on the build profile the
+event carries, start the pipeline, nothing else. It holds the CI credentials and its own
+allow-lists. It keeps no security state.
 
 - It lives in its own repository so that an enterprise can fork or replace it without touching
   Themis.
 - A reference connector covers the generic cases (a parameterized job, a pipeline trigger API,
   a repository dispatch).
 - A CI system that can verify an HMAC webhook itself needs no connector at all.
-- The mapping is keyed on product and project **names** and on tags, with a default entry, so a
-  new release needs no new mapping line.
+- It holds no mapping from release to job. The job and its parameters come from the build
+  profile in the event (D10); the connector only decides whether they are allowed (D18).
 
 ### D9 — Where the policy lives and who evaluates it (assumed picks, choices 3 and 4)
 
@@ -335,8 +337,8 @@ second request for a release with an open cycle joins that cycle and creates not
 This also closes the two-node race listed under the honest limits of EDR-DELIVERY-01 and of
 this record.
 
-Governance does not publish the same request twice either: a request is keyed on the release,
-the policy scope and version, and the targeted set.
+Governance does not publish the same request twice either. How a request is identified is
+decided in D23.
 
 ### D14 — The cool-down counts from a successful dispatch (revision 3)
 
@@ -360,7 +362,8 @@ the policy scope and version, and the targeted set.
    the new values.
 4. A recommendation nobody answered **expires after 7 days**. It is evaluated afresh at the
    next trigger.
-5. Only a person may approve: `admin` or the Product's own key. The AI cannot.
+5. Only a person may approve; the AI cannot. Which key may carry the approval is decided in
+   D22.
 
 ### D16 — The request names the build profile it used (revision 3)
 
@@ -463,6 +466,81 @@ A `fix_available` or `new_sbom` trigger for a release with an open cycle joins t
 once more for the release, so Findings that qualified in the meantime start the next cycle,
 subject to the cool-down (D14).
 
+### D22 — Who may approve in mode `ask`: admin or product key, with a named person (owner, 2026-11-27)
+
+The owner's choice follows the rule that already holds for a decision on a Finding.
+
+1. The approval call must carry a **named human actor**. A call without one is refused. The
+   actor, the key's id and its scope are recorded with the approval (D15).
+2. The key may be `admin`, or `product:<id>` for the release's own Product.
+3. `delivery:callback` and `read` keys can never approve. The AI can never approve.
+
+**Honest limit, stated because it was weighed.** A key is a credential, not a person. The
+actor name is asserted by the caller; Themis has no user login to check it against. And the
+build job holds a `product:<id>` key to upload its SBOM (EDR-DELIVERY-01 M2-7), so a job that
+was changed to do so could approve a rebuild for its own Product. Two things keep this narrow:
+
+- **Use two product keys**: one for the CI job, one for the people who decide. The runbook
+  says so, and the approval record shows which key approved, so a CI key approving is visible.
+- The approval can only start a build of a job the connector allows for that Product (D18),
+  for a release an admin-owned policy lets build at all (D17).
+
+When Themis gets user logins with roles, the approval moves to a human identity and this
+decision is revisited.
+
+### D23 — Four identities, so that an equal request later is a new request (revision 3)
+
+Keying a request on the release, the policy version and the targeted set (D13, first draft)
+would treat a later, legitimate request with the same inputs as a duplicate. Four ids are kept
+apart:
+
+| Id | Made when | Unique per |
+| --- | --- | --- |
+| trigger id | an event of D3 arrives, or a cycle closes (D21) | one evaluation of the policy |
+| decision id | Governance decides "request" or "recommend" for a trigger | trigger id |
+| cycle id | Communication opens a cycle | one open cycle per Release (D13) |
+| intent id | one attempt is to be delivered | cycle id and attempt number |
+
+Duplicates are found on the **trigger id**: the same trigger delivered twice yields one
+decision. A new trigger always yields a new decision, even with the same policy version and the
+same Findings. Whether that decision opens a cycle is then a matter of D13 (a cycle is open)
+and D14 (the cool-down), not of equality with an earlier request. The event carries the
+decision id, the cycle id and the intent id.
+
+### D24 — Settling an uncertain build is recorded (revision 3)
+
+When the connector cannot tell whether a build started (D12 item 3), the cycle shows
+`uncertain` and waits. A person settles it through the API or the GUI with one of two answers,
+`started` or `not_started`, under the same rule as D22. The answer, the actor and the time are
+recorded on the cycle. `not_started` gives the attempt back (D20) and the request may be sent
+again; `started` keeps it. A build system with no way to search by intent id always ends here,
+and that is acceptable.
+
+### D25 — Delivered is not built: the words Themis uses (revision 3)
+
+A successful answer to the event means only that the receiver took it. The GUI, the ticket, the
+mail and the audit record use these states for one attempt and never a stronger word than the
+evidence allows:
+
+| State | Evidence |
+| --- | --- |
+| `requested` | the intent exists |
+| `delivered` | the receiver answered with success |
+| `refused` / `uncertain` | the connector said so (D20, D12) |
+| `build_reported` | the callback arrived with image digest and SBOM id (M2-7) |
+| `evaluated` | the new SBOM was evaluated and compared (M2-8) |
+
+The receiver answers with success only after it has stored the event (D12 item 1). The
+cool-down still counts from `delivered` (D14).
+
+### D26 — An expired recommendation is an event, and starts nothing (revision 3)
+
+When a recommendation passes its 7 days (D15 item 4), Themis records
+`rebuild_recommendation_expired` on the release and tells a person on the
+`rebuild_recommended` route. The release shows "recommendation expired" until its next trigger.
+Expiry never approves and never builds. No timer re-evaluates the release; the next trigger of
+D3 does.
+
 ## Choices for the owner
 
 | # | Choice | Assumed pick | State |
@@ -475,6 +553,7 @@ subject to the cool-down (D14).
 | 6 | Where the build configuration lives | in Themis, per Project and Release (D10) | **answered 2026-11-26** |
 | 7 | Policy scope | installation, Product and Release, nearest wins as a whole (D11) | **answered 2026-11-27** |
 | 8 | Mode: policy against tag | the installation policy is the ceiling, a tag only restricts (D17) | **answered 2026-11-27** |
+| 9 | Who may approve in mode `ask` | `admin` or the Product's key, with a named person (D22) | **answered 2026-11-27** |
 
 ## Order of work (proposed; each step alone, on the owner's go)
 
@@ -506,7 +585,8 @@ is on the "must ask" list.
   nodes may still both try to deliver one intent; the event id makes that harmless (D12).
 - **Three policy levels are more to keep in order than one.** The list read of D11 is the
   control; a release-level policy should stay the exception.
-- **Tags opt in, and tags are editable by a product key.** See D4.
+- **Tags opt in, and tags are editable by a product key.** See D4 and D17.
+- **An approval is as strong as the key and the name behind it.** See D22.
 
 ## What this record does NOT decide
 

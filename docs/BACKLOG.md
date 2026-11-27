@@ -369,6 +369,9 @@ three angles, and two of them proposed fixes that would not have worked.
   D17 to D21 from a second review: the installation policy is the ceiling for automation and a
   tag only restricts (owner pick 2026-11-27), mandatory connector allow-lists, the exact meaning
   of "fix known", a refusal is not an attempt, a new fix waits for the next cycle.
+  D22 to D26 from a third review: approval by admin or product key with a named person (owner
+  pick 2026-11-27), four ids so an equal later request is new, the record of a settled uncertain
+  build, the state words (delivered is not built), expiry of a recommendation as an event.
   Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6 plus R1a and R2a, one
   PR each on the owner's go (release freeze).
 
