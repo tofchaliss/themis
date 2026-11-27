@@ -391,6 +391,7 @@ three angles, and two of them proposed fixes that would not have worked.
   effective mode is exactly `ask`, and one notice per created recommendation. D46 from a review
   of D45: the approval locks the policies it checks, reads the tags fresh and fails closed, and
   expiry is recorded before withdrawal. Not decided: stopping an open cycle on mode `off`.
+  Owner choice 10 (2026-11-27): the tag limit of D46 item 9 is accepted.
   Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6 plus R1a and R2a, one
   PR each on the owner's go (release freeze).
 
