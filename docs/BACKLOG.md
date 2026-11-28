@@ -403,7 +403,8 @@ three angles, and two of them proposed fixes that would not have worked.
   the judgement of one Release as a read (`GET /releases/{id}/rebuild-evaluation`), and one new
   Knowledge read (`GET /releases/{id}/fix-verdicts`); no migration, nothing is sent; VM check
   PASSED 2026-11-28 on the second run (the first found a tag-read defect, fixed the same day). Next: R2 part 2 (the two triggers, the stored decision, the two events), which first
-  settles the open points of EDR "Step R2 part 1 as built", `KN-BEHIND-MODULE-1` first.
+  settles the open points of EDR "Step R2 part 1 as built"; the module-stream point
+  (`KN-BEHIND-MODULE-1`) was decided and built for the judgement 2026-11-28.
 
 - [ ] **A known fix for language packages** (id `KN-FIX-STANDING-LANG-1`, from EDR-REBUILD-01
   step R2 part 1, 2026-11-28, feature). Knowledge records the vendor bounds an open occurrence is
@@ -425,6 +426,11 @@ three angles, and two of them proposed fixes that would not have worked.
   up. To settle before R2 part 2 sends any event: keep reachable and unreachable bounds apart on
   the verdict (the open reason already tells them apart in prose), and let only a reachable
   bound make a known fix. Needs a `VerdictGeneration` bump.
+  **Judgement side done 2026-11-28** (owner decision: do not count, show as own group): the
+  fix-verdict read answers `other_stream`, derived on read with no stored change, and the
+  rebuild judgement lists such components apart. **Still open:** the fix-available alert
+  announces a bound of another stream like any other; give it the same rule, or say so on the
+  card.
 
 - [ ] **Registry's single-entity views list `tags` and never fill them** (id `RG-VIEW-TAGS-1`,
   from the same VM check, 2026-11-28, defect). `ProductView`, `ProjectView` and `ReleaseView`

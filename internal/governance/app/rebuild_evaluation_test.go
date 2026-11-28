@@ -253,3 +253,27 @@ func TestRebuildEvaluationRefusals(t *testing.T) {
 		t.Errorf("store down: %v", err)
 	}
 }
+
+// KN-BEHIND-MODULE-1: a component whose fix lives only in another module stream is not targeted
+// and is listed apart, with the builds of the other stream.
+func TestRebuildEvaluationListsOtherStream(t *testing.T) {
+	ctx := context.Background()
+	policy := app.NewRebuildPolicyService(&fakeRebuildPolicyStore{}, rebuildClock{}).WithTags(taggedRelease("rebuild:ask"))
+	facts := &rebuildFacts{rows: []app.RebuildFindingFacts{{
+		FindingID: "f1", FaultlineID: "fl-1", CVE: "CVE-2026-0001", Stage: "triage", BaseScore: 80,
+		Components: []domain.MatchedComponent{{PURL: "pkg:rpm/redhat/python3-ply@3.9-9.el8", Version: "3.9-9.el8", VerdictState: "open"}},
+	}}}
+	fixes := fixVerdicts{rows: []app.ReleaseFixVerdict{{
+		FaultlineID: "fl-1", PURL: "pkg:rpm/redhat/python3-ply@3.9-9.el8",
+		Fix: domain.RebuildFixOtherStream, FixedVersions: []string{"0:3.11-10.module+el8.10.0+1+a"},
+	}}}
+	got, err := app.NewRebuildEvaluationService(policy, facts, fixes, rebuildClock{}).Evaluate(ctx, "rel-1")
+	if err != nil || len(got.Targeted) != 0 || got.Outcome != domain.RebuildOutcomeNone || len(got.OtherStream) != 1 ||
+		got.Skipped[domain.RebuildSkippedOtherStream] != 1 {
+		t.Fatalf("judgement = %+v err %v", got, err)
+	}
+	if e := got.OtherStream[0]; e.FindingID != "f1" || e.CurrentVersion != "3.9-9.el8" || len(e.FixedVersions) != 1 ||
+		e.FixSource != app.RebuildFixSourceVerdict || e.Severity != domain.SLABucketHigh {
+		t.Errorf("entry = %+v", e)
+	}
+}

@@ -392,14 +392,21 @@ func toRebuildEvaluation(res app.RebuildEvaluation) gen.RebuildEvaluation {
 		Outcome:            gen.RebuildEvaluationOutcome(res.Outcome),
 		Considered:         res.Considered,
 		FixVerdictsRead:    res.FixVerdictsRead,
-		Targeted:           make([]gen.RebuildTargetEntry, 0, len(res.Targeted)),
 	}
 	out.Skipped.Decided = res.Skipped[domain.RebuildSkippedDecided]
 	out.Skipped.ScopeComponent = res.Skipped[domain.RebuildSkippedScope]
 	out.Skipped.NoFix = res.Skipped[domain.RebuildSkippedNoFix]
 	out.Skipped.FixUnknown = res.Skipped[domain.RebuildSkippedFixUnknown]
 	out.Skipped.BelowFloor = res.Skipped[domain.RebuildSkippedBelowFloor]
-	for _, t := range res.Targeted {
+	out.Skipped.FixOtherStream = res.Skipped[domain.RebuildSkippedOtherStream]
+	out.Targeted = toRebuildEntries(res.Targeted)
+	out.OtherStream = toRebuildEntries(res.OtherStream)
+	return out
+}
+
+func toRebuildEntries(entries []app.RebuildEvaluationEntry) []gen.RebuildTargetEntry {
+	out := make([]gen.RebuildTargetEntry, 0, len(entries))
+	for _, t := range entries {
 		e := gen.RebuildTargetEntry{
 			FindingId: string(t.FindingID), Cve: t.CVE, Purl: t.PURL,
 			CurrentVersion: t.CurrentVersion, FixedVersions: t.FixedVersions,
@@ -420,7 +427,7 @@ func toRebuildEvaluation(res app.RebuildEvaluation) gen.RebuildEvaluation {
 			e.CountedBecause = append(e.CountedBecause, gen.RebuildTargetEntryCountedBecause(b))
 		}
 		e.Assessment.State = gen.RebuildTargetEntryAssessmentState(t.AssessmentState)
-		out.Targeted = append(out.Targeted, e)
+		out = append(out, e)
 	}
 	return out
 }

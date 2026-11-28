@@ -239,6 +239,11 @@ func (c *Client) ReleaseFixVerdicts(ctx context.Context, releaseID string) ([]ap
 			if len(r.Behind) > 0 {
 				v.Fix, v.FixedVersions = domain.RebuildFixKnown, r.Behind
 			}
+		case domain.RebuildFixOtherStream:
+			// Same rule as a known fix: it must name the bounds it is about.
+			if len(r.Behind) > 0 {
+				v.Fix, v.FixedVersions = domain.RebuildFixOtherStream, r.Behind
+			}
 		case domain.RebuildFixNone:
 			v.Fix = domain.RebuildFixNone
 		}

@@ -1422,12 +1422,16 @@ export interface components {
                 no_fix: number;
                 /** @description Themis could not tell whether the occurrence is below a fixed version (fix_required). Unknown is not a known fix (D30). */
                 fix_unknown: number;
+                /** @description Severe enough to count, and the fix exists only as a build of another module stream, which a rebuild does not pick up (fix_required). Each one is listed in `other_stream`. */
+                fix_other_stream: number;
                 /** @description Below the severity floor and not counted as known exploited. */
                 below_floor: number;
             };
             /** @description False when Knowledge could not be asked. Every fix then reads unknown, so nothing counts while fix_required is on. */
             fix_verdicts_read: boolean;
             targeted: components["schemas"]["RebuildTargetEntry"][];
+            /** @description The components that would count, were their fix not published only for another module stream. They are NOT targeted and never part of a request - switching a module stream is a person's change, not a rebuild. Listed so that a person can act. `fixed_versions` are the builds of the other stream. */
+            other_stream: components["schemas"]["RebuildTargetEntry"][];
         };
         /** @description One counted component of one Finding (D34). The pair finding_id + purl is unique. */
         RebuildTargetEntry: {

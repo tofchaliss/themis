@@ -135,6 +135,10 @@ const (
 	RebuildFixNone RebuildFixVerdict = "none"
 	// RebuildFixUnknown: the version could not be read or ordered. Unknown is not a known fix.
 	RebuildFixUnknown RebuildFixVerdict = "unknown"
+	// RebuildFixOtherStream: a fixed version exists, but only as a build of another module
+	// stream. A rebuild does not pick it up, so it never counts under fix_required (owner
+	// decision 2026-11-28); it is listed apart so that a person can act on it.
+	RebuildFixOtherStream RebuildFixVerdict = "other_stream"
 )
 
 // RebuildCandidate is one matched component of one open Finding, with the facts the policy
@@ -167,6 +171,9 @@ type RebuildVerdict struct {
 	Mode RebuildMode
 	// Targeted are the counted candidates, in the order given.
 	Targeted []RebuildTarget
+	// OtherStream are the candidates that would have counted, were their fix not published only
+	// for another module stream. They are not targeted. Set only while fix_required is on.
+	OtherStream []RebuildTarget
 	// Skipped counts the candidates that did not count, by the FIRST rule that left each out
 	// (the RebuildSkipped* names). It exists so that "nothing counts" can say why.
 	Skipped map[string]int
@@ -179,6 +186,9 @@ const (
 	RebuildSkippedScope      = "scope_component"
 	RebuildSkippedNoFix      = "no_fix"
 	RebuildSkippedFixUnknown = "fix_unknown"
+	// RebuildSkippedOtherStream: severe enough to count, and the fix lives only in another
+	// module stream. Each one is also listed in RebuildVerdict.OtherStream.
+	RebuildSkippedOtherStream = "fix_other_stream"
 	RebuildSkippedBelowFloor = "below_floor"
 )
 
@@ -209,20 +219,27 @@ func EvaluateRebuild(p RebuildPolicy, candidates []RebuildCandidate) RebuildVerd
 			out.Skipped[RebuildSkippedScope]++
 			continue
 		}
-		if p.FixRequired && c.Fix != RebuildFixKnown {
-			if c.Fix == RebuildFixNone {
-				out.Skipped[RebuildSkippedNoFix]++
-			} else {
-				out.Skipped[RebuildSkippedFixUnknown]++
-			}
-			continue
-		}
 		var because []string
 		if rank := severityRank(c.Severity); floor > 0 && rank >= floor {
 			because = append(because, RebuildCountedSeverityFloor)
 		}
 		if p.CountKnownExploited && c.KnownExploited {
 			because = append(because, RebuildCountedKnownExploited)
+		}
+		if p.FixRequired && c.Fix != RebuildFixKnown {
+			switch {
+			case c.Fix == RebuildFixNone:
+				out.Skipped[RebuildSkippedNoFix]++
+			case c.Fix != RebuildFixOtherStream:
+				out.Skipped[RebuildSkippedFixUnknown]++
+			case len(because) == 0:
+				// Not severe enough to count anyway: the floor is the reason, not the stream.
+				out.Skipped[RebuildSkippedBelowFloor]++
+			default:
+				out.Skipped[RebuildSkippedOtherStream]++
+				out.OtherStream = append(out.OtherStream, RebuildTarget{RebuildCandidate: c, CountedBecause: because})
+			}
+			continue
 		}
 		if len(because) == 0 {
 			out.Skipped[RebuildSkippedBelowFloor]++
