@@ -108,8 +108,9 @@ Every step waits for the owner's go and lands as its own PR.
   PASS 2026-11-28 (EDR "VM check of R2a").
 - [x] 5.6a The same card in the React GUI (`/next/`), which is the GUI in daily use; #280 had
   it in the old GUI only. Component tests, `npm run check`, bundle rebuilt.
-- [ ] 5.7 Look at the build profile card in the React GUI on the VM (backlog
-  `GUI-BUILD-PROFILE-CHECK-1`).
+- [x] 5.7 Look at the build profile card in the React GUI on the VM. PASS 2026-11-28 after
+  #281: the card shows for a picked Project, and the owner saved and removed a profile through
+  it (EDR "VM check of R2a").
 
 ## Later groups
 

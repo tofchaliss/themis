@@ -1841,7 +1841,7 @@ rule is stated on the form (D10 item 3).
    query. The GUI always sends the signed-in user, but a hand-made request through the
    dashboard could name someone else. The API key name is recorded beside it either way
    (backlog `GUI-ACTOR-GATE-1`).
-3. Checked on the VM, see below. The form in the React GUI was not yet looked at there.
+3. Checked on the VM, see below.
 
 **VM check of R2a (2026-11-28, task 5.6): PASS.** Main after #280, auth on, the same Release
 as in the earlier checks, installation policy mode ask. Registry was restarted first, then
@@ -1869,8 +1869,13 @@ Governance and the dashboard. The two triggers were test rows written by hand in
   with a profile (the `rebuild_requested` event with `build`), and an unreachable Registry
   keeping a trigger open. These are covered by the tests.
 - **The form was looked for and not found:** the owner uses the React GUI, and #280 had the
-  card in the old GUI only. The React card was built after this check and still needs its own
-  look on the VM (task 5.7, backlog `GUI-BUILD-PROFILE-CHECK-1`).
+  card in the old GUI only. The React card followed in #281.
+- **The React card on the VM (2026-11-28, after #281): PASS.** The owner opened Estate,
+  picked a Project, and the "Build profile" card was there under the tag editor, with the
+  no-secrets rule and "No profile is stored on this project". The owner then saved a profile
+  and removed it through the card, and reported both as working. Registry's refusal of a
+  secret-like key was seen through the API in this check, and through the card only in the
+  tests.
 - The test profile was removed again; its two history rows and the two test triggers stay as
   the record of this check.
 
