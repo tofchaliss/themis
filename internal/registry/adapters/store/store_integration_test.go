@@ -161,6 +161,10 @@ func truncate(t *testing.T, pool *pgxpool.Pool) {
 		`DO $$ BEGIN IF to_regclass('registry_security_requirements') IS NOT NULL THEN TRUNCATE registry_security_requirements; END IF; END $$`); err != nil {
 		t.Fatalf("truncate requirements: %v", err)
 	}
+	if _, err := pool.Exec(context.Background(),
+		`DO $$ BEGIN IF to_regclass('registry_build_profiles') IS NOT NULL THEN TRUNCATE registry_build_profiles; END IF; END $$`); err != nil {
+		t.Fatalf("truncate build profiles: %v", err)
+	}
 }
 
 // seed inserts a Product → Project → Release chain and returns their ids.

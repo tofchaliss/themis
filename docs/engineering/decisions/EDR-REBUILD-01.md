@@ -1081,7 +1081,7 @@ not say which new rules reach it. Decided:
 | R1 | policy record, evaluation in the domain, read and write API | Governance domain, API, migration |
 | R1a | Product and Release policy overrides; the effective-policy read and the list read (D11). API built 2026-11-28; the GUI page follows as `GUI-REBUILD-POLICY-1` | Governance domain, API, migration; GUI |
 | R2 | evaluation on `new_sbom` and on `fix_available`; the two new events; tag scope. Built in two parts: part 1 (2026-11-28) is tag scope, effective mode and the judgement as a read; part 2 is the triggers, the stored decision and the events | Governance, Registry read seam; part 1 also adds one read to Knowledge |
-| R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form | Registry domain, API, migration; GUI |
+| R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form. Built 2026-11-28, with the copy onto the event and "no profile, no request" | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule; the status call, attempt reservation, refusal counter and try number (D20, D28, D40); settling `uncertain` (D24) | Communication, API |
 | R4 | mode `ask`: the "start rebuild" action in API and GUI; one standing recommendation and its states (D41, D44, D45, D46); the expiry sweep (D32) | Governance or Communication API, GUI |
 | R5 | reference build connector, with the durable event record of D12, the stored states and recovery worker of D37, the per-intent claim of D39, and the required checks of D18 | new repository |
@@ -1407,7 +1407,7 @@ types it does not know, and its own rebuild loop (EDR-DELIVERY-01 M2-8) is uncha
    then two triggers on one Release give two decisions and two events that nobody acts on.
 2. **No approval.** A recommendation is recorded and published; approving it (D22) is a later
    step.
-3. **No build profile on the event** (D10, step R2a).
+3. **No build profile on the event** (D10, step R2a). Added by step R2a, see below.
 4. **Mode `off` does not stop anything that is open**, because nothing is open yet. The
    question stays with the owner for R3.
 
@@ -1438,6 +1438,77 @@ new SBOM and no new fix arrived during the check.
   check of the write sites (backlog `GOV-REBUILD-TRIGGER-LIVE-1`).
 - The two test triggers and the one test decision stay in the VM database as the record of
   this check; they are marked by the source `vm-check`.
+
+### Step R2a as built (2026-11-28)
+
+Owner go 2026-11-28, scope chosen by the owner: all three parts (Registry, the copy onto the
+event, a form in the current GUI).
+
+**Registry (D10 items 1 to 5).**
+
+1. Table `registry_build_profiles` (Registry migration 6, reversible). Records are only added:
+   every save and every removal is a new row with its own revision number (counted per
+   Project or Release from 1), the actor, the name of the API key, and the time. The current
+   value of a level is its latest row.
+2. The profile is kept as TEXT in compact form, with the keys in the order they were written.
+   The SHA-256 is taken over exactly these bytes, and the read API serves exactly these bytes.
+3. Checks on write: one JSON object, at most 16 KiB, at most 5 levels deep, and no key named
+   like a secret (`password`, `token`, `secret`, `apikey`, `credential`; any case, `_` and `-`
+   ignored, at any depth). Values are never looked at: the check guards against a mistake and
+   proves nothing.
+4. Addresses, all under `/api/v1`:
+   - `GET`, `PUT`, `DELETE` `/projects/{id}/build-profile`
+   - `GET`, `PUT`, `DELETE` `/releases/{id}/build-profile`
+   - `GET /releases/{id}/build-profile/resolved`: the profile in force for the Release (its
+     own, else its Project's) with `found`, `scope`, revision and digest.
+   Writers are `admin` or the Product's own key, as for tags. `PUT` takes `{profile, actor}`;
+   `DELETE` takes `?actor=`.
+5. A Release profile replaces the Project's as a whole. A removed Release profile gives the
+   Release its Project's profile again.
+
+**Governance (D10 items 6 and 7, D16).**
+
+1. The trigger worker reads the resolved profile from Registry only when the judgement would
+   ask for something (outcome `recommend` or `request`). An outcome of `none` reads nothing.
+2. **No profile, no request.** Mode `auto` with no profile gives a recommendation. Every
+   recommendation now says why it is one, in the new field `recommend_reason`: `mode_ask` or
+   `no_build_profile`. With no profile the reason is `no_build_profile` in both modes, because
+   that is what must be fixed first.
+3. With a profile, the decision and its event carry `build` (the profile) and `build_profile`
+   (`scope`, `revision`, `sha256`). The value is frozen in the decision row: a later edit in
+   Registry changes the next decision and not this one.
+4. **The read fails closed.** A Registry that cannot be reached, an answer with no `found`
+   field, or a "found" answer with a part missing keeps the trigger open and it is tried again,
+   up to the 24 hour limit. Only an explicit `found: false` reads as "no profile". **An older
+   Registry without the new address therefore holds every counting trigger open: upgrade and
+   restart Registry before or together with Governance.**
+5. The two event schemas `governance.rebuild_recommended.v1` and
+   `governance.rebuild_requested.v1` gained fields and kept their version, because nothing
+   reads these events yet (Communication acts on them from R3). `rebuild_requested` now
+   requires `build` and `build_profile`; `rebuild_recommended` requires `recommend_reason`.
+
+**GUI.** The Estate page of the current GUI has a "Build profile" card under the tag editor.
+It follows the picked Project, or the Release whose "tags, build profile…" link was clicked. It
+shows the stored profile, which profile is in force for a Release, and the history; it saves
+and removes with the signed-in user as actor. The form checks only that the text is one JSON
+object; every other rule is Registry's, and its refusal is shown as it came. The no-secrets
+rule is stated on the form (D10 item 3).
+
+**Honest limits of this step.**
+
+1. **`build` on the event is the same JSON value, not the same bytes.** Governance keeps the
+   decision and the outbox payload in JSON columns, which reorder keys. So the `sha256` on the
+   event names the Registry revision and cannot be recomputed from the event's `build`. D36
+   (one payload, byte for byte) is Communication's rule for the intent in R3; whether the
+   receiver needs the stored bytes is to settle there (backlog `GOV-BUILD-BYTES-1`).
+2. **The dashboard does not check the actor of this form.** Its identity gate compares
+   `actor_id` and `proposer_id` in a body with the signed-in user. The build profile write uses
+   `actor` (as the rebuild policy and the requirements do), and `DELETE` carries it in the
+   query. The GUI always sends the signed-in user, but a hand-made request through the
+   dashboard could name someone else. The API key name is recorded beside it either way
+   (backlog `GUI-ACTOR-GATE-1`).
+3. The React GUI at `/next/` has no such form yet; it comes with that GUI's Estate work.
+4. Not yet checked on the VM (task 5.6).
 
 ## Honest limits
 

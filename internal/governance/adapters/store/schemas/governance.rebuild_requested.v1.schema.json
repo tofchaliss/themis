@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://themis-project.dev/schemas/governance/governance.rebuild_requested.v1.schema.json",
   "title": "governance.rebuild_requested.v1",
-  "description": "Integration-contract v1 for a rebuild request (EDR-REBUILD-01 D9, D27, D29): the effective mode of the Release is auto and at least one component counts. The facts are frozen as the decision read them (D29); the record in Governance is the audit copy. A FACT about a decision: no Finding, Position or proposal changes, and Governance starts no build.",
+  "description": "Integration-contract v1 for a rebuild request (EDR-REBUILD-01 D9, D27, D29): the effective mode of the Release is auto and at least one component counts, and a build profile applies to the Release (no profile, no request: D10 item 6). The facts are frozen as the decision read them (D29); the record in Governance is the audit copy. A FACT about a decision: no Finding, Position or proposal changes, and Governance starts no build.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -24,7 +24,9 @@
     "skipped",
     "targeted",
     "other_stream",
-    "decided_at"
+    "decided_at",
+    "build",
+    "build_profile"
   ],
   "properties": {
     "decision_id": {
@@ -326,6 +328,37 @@
     "decided_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "build": {
+      "type": "object",
+      "description": "The build profile that applies to the Release, copied as stored and frozen on the decision (D10). Opaque: Themis does not read inside it."
+    },
+    "build_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "revision",
+        "sha256"
+      ],
+      "description": "Names the build profile the decision used (D16).",
+      "properties": {
+        "scope": {
+          "enum": [
+            "project",
+            "release"
+          ],
+          "description": "Where the profile is stored."
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Hex SHA-256 of the stored profile bytes, which are the bytes of `build`."
+        }
+      }
     }
   }
 }

@@ -651,6 +651,23 @@ async function viewEstate() {
           <button class="btn btn-primary" id="tag-editor-save">Save tags</button>
           <span class="card-sub" id="tag-editor-note"></span>
         </div>
+      </div>
+      <div class="card" id="bp-editor" hidden>
+        <h2 class="card-title">Build profile — <span id="bp-name"></span></h2>
+        <p class="card-sub">Tells your build system how to rebuild the image of a release. Themis stores it and passes it on with a rebuild request; it does not read inside it.
+          A profile is stored on a project. A release may have its own, which then replaces the project's as a whole.
+          It must be one JSON object, at most 16 KiB and 5 levels deep. Needs a write-capable key.</p>
+        <p class="card-sub"><b>No secrets here.</b> Passwords, tokens and keys stay on the build side; a key named like one is refused.
+          With no profile, Themis only recommends a rebuild and never asks for one.</p>
+        <p class="card-sub" id="bp-status"></p>
+        <textarea id="bp-input" class="mono" rows="10" style="width:100%;box-sizing:border-box" spellcheck="false"
+          placeholder='{"image": "registry.example/app", "branch": "main"}'></textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+          <button class="btn btn-primary" id="bp-save">Save profile</button>
+          <button class="btn" id="bp-remove" hidden>Remove profile</button>
+          <span class="card-sub" id="bp-note"></span>
+        </div>
+        <div id="bp-history"></div>
       </div>`;
     $("#estate-tag-form").addEventListener("submit", (ev) => {
       ev.preventDefault();
@@ -670,6 +687,8 @@ async function viewEstate() {
       loadProjects(row.dataset.id, row.dataset.name);
     }));
     $("#tag-editor-save").addEventListener("click", saveTags);
+    $("#bp-save").addEventListener("click", saveBuildProfile);
+    $("#bp-remove").addEventListener("click", removeBuildProfile);
   } catch (e) {
     main.innerHTML = e instanceof NodeDown ? nodeDownCard(e) : `<div class="err">${esc(e.message)}</div>`;
   }
@@ -704,14 +723,14 @@ async function loadReleases(projectId, projectName) {
     });
     // A double purpose would be a trap: the row opens the release, the small link edits its tags.
     const tagLink = document.createElement("a");
-    tagLink.href = "#"; tagLink.className = "card-sub"; tagLink.textContent = " tags…";
+    tagLink.href = "#"; tagLink.className = "card-sub"; tagLink.textContent = " tags, build profile…";
     tagLink.addEventListener("click", (ev) => { ev.preventDefault(); ev.stopPropagation(); editTags("release", row.dataset.id, "v" + row.dataset.v); });
     row.appendChild(tagLink);
   });
 }
 
 /* EDR-REMEDIATION-01 D7: the tag editor follows the last product or project picked, or the
-   release whose "tags…" link was clicked. A PUT replaces the entity's own set. */
+   release whose "tags, build profile…" link was clicked. A PUT replaces the entity's own set. */
 let tagTarget = null;
 async function editTags(kind, id, name) {
   tagTarget = { kind, id };
@@ -727,6 +746,77 @@ async function editTags(kind, id, name) {
     const inherited = asArray(ts && ts.effective).filter((t) => !own.has(t));
     $("#tag-editor-inherited").textContent = inherited.length ? inherited.join(", ") : "none";
   } catch (e) { $("#tag-editor-note").textContent = `could not read tags: ${e.message}`; }
+  editBuildProfile(kind, id, name);
+}
+
+/* EDR-REBUILD-01 D10 (step R2a): the build profile editor follows the tag editor's target. A
+   product has no profile, so the card hides for one. Themis never reads inside the profile:
+   the form only checks that the text is one JSON object before it sends it. */
+let bpTarget = null;
+function bpPath(t) { return `/${t.kind}s/${encodeURIComponent(t.id)}/build-profile`; }
+async function editBuildProfile(kind, id, name) {
+  const card = $("#bp-editor");
+  if (!card) return;
+  if (kind !== "project" && kind !== "release") { bpTarget = null; card.hidden = true; return; }
+  bpTarget = { kind, id };
+  card.hidden = false;
+  $("#bp-name").textContent = `${kind} ${name}`;
+  $("#bp-note").textContent = "";
+  await showBuildProfile();
+}
+async function showBuildProfile() {
+  const t = bpTarget;
+  const status = $("#bp-status"), input = $("#bp-input"), hist = $("#bp-history");
+  status.textContent = "reading…"; hist.innerHTML = "";
+  try {
+    const got = await apiGET("registry", bpPath(t));
+    if (bpTarget !== t) return; // another row was picked while this one was read
+    if (!got) { status.textContent = "This Registry has no build profiles yet (upgrade the Registry node)."; return; }
+    const cur = got.current;
+    input.value = cur ? JSON.stringify(cur.profile, null, 2) : "";
+    $("#bp-remove").hidden = !cur;
+    let line = cur
+      ? `Stored here: revision ${cur.revision}, saved by ${cur.actor}, ${fmtWhen(cur.recorded_at)}.`
+      : `No profile is stored on this ${t.kind}.`;
+    if (t.kind === "release") {
+      const res = await apiGET("registry", `${bpPath(t)}/resolved`);
+      if (bpTarget !== t) return;
+      if (res && res.found) line += ` In force for this release: the ${res.scope}'s profile, revision ${res.record.revision}.`;
+      else if (res) line += " No profile is in force for this release: a rebuild can only be recommended.";
+    }
+    status.textContent = line;
+    const rows = asArray(got.history);
+    hist.innerHTML = rows.length ? `<h3 class="card-title" style="margin-top:14px">History</h3>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Revision</th><th>Change</th><th>By</th><th>When</th><th>SHA-256</th></tr></thead><tbody>${
+        rows.map((h) => `<tr><td>${esc(h.revision)}</td><td>${h.removed ? "removed" : "saved"}</td><td>${esc(h.actor)}</td>
+          <td>${esc(fmtWhen(h.recorded_at))}</td><td class="mono">${esc((h.sha256 || "").slice(0, 12))}</td></tr>`).join("")
+      }</tbody></table></div>` : "";
+  } catch (e) { status.textContent = `could not read the build profile: ${e.message}`; }
+}
+async function saveBuildProfile() {
+  if (!bpTarget) return;
+  const note = $("#bp-note");
+  let profile;
+  try { profile = JSON.parse($("#bp-input").value); }
+  catch (e) { note.textContent = `not saved: this is not valid JSON (${e.message})`; return; }
+  if (profile === null || typeof profile !== "object" || Array.isArray(profile)) {
+    note.textContent = "not saved: the profile must be one JSON object, in { }"; return;
+  }
+  note.textContent = "saving…";
+  const r = await apiPUT("registry", bpPath(bpTarget), { profile, actor: WHO });
+  if (r.status !== 200) { note.textContent = `not saved: ${await problemDetail(r)}`; return; }
+  await showBuildProfile();
+  note.textContent = "saved";
+}
+async function removeBuildProfile() {
+  if (!bpTarget) return;
+  const note = $("#bp-note");
+  if (!confirm(`Remove the build profile of this ${bpTarget.kind}? The history is kept.`)) return;
+  note.textContent = "removing…";
+  const r = await apiDELETE("registry", `${bpPath(bpTarget)}?actor=${encodeURIComponent(WHO)}`);
+  if (r.status !== 200) { note.textContent = `not removed: ${await problemDetail(r)}`; return; }
+  await showBuildProfile();
+  note.textContent = "removed";
 }
 async function saveTags() {
   if (!tagTarget) return;

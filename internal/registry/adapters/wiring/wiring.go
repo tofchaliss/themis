@@ -23,7 +23,9 @@ import (
 func RegistryAPI(pool *pgxpool.Pool) (http.Handler, *store.Store) {
 	st := store.New(pool)
 	// Security requirements (EDR-SCORING-01 S3) ride the same store and database.
-	svc := app.NewRegistryService(st, idGen{}).WithRequirements(st, func() time.Time { return time.Now().UTC() })
+	now := func() time.Time { return time.Now().UTC() }
+	// The build profiles (EDR-REBUILD-01 D10) ride it too.
+	svc := app.NewRegistryService(st, idGen{}).WithRequirements(st, now).WithBuildProfiles(st, now)
 	return reghttp.NewHandler(svc).Router(), st
 }
 

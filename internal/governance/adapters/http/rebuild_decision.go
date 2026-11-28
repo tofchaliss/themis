@@ -85,6 +85,21 @@ func toRebuildDecision(d domain.RebuildDecision) gen.RebuildDecision {
 	if out.Skipped == nil {
 		out.Skipped = map[string]int{}
 	}
+	if d.RecommendReason != "" {
+		why := gen.RebuildDecisionRecommendReason(d.RecommendReason)
+		out.RecommendReason = &why
+	}
+	// The build profile is served as it was frozen, and not read (D10). It is the same JSON
+	// value as stored in Registry; the key order may differ, so the digest names the revision.
+	if d.BuildProfile != nil {
+		build := d.Build
+		out.Build = &build
+		out.BuildProfile = &struct {
+			Revision int                                  `json:"revision"`
+			Scope    gen.RebuildDecisionBuildProfileScope `json:"scope"`
+			Sha256   string                               `json:"sha256"`
+		}{Revision: d.BuildProfile.Revision, Scope: gen.RebuildDecisionBuildProfileScope(d.BuildProfile.Scope), Sha256: d.BuildProfile.SHA256}
+	}
 	p := d.Policy
 	out.Policy.ScopeKind = gen.RebuildDecisionPolicyScopeKind(p.ScopeKind)
 	out.Policy.ScopeId = p.ScopeID

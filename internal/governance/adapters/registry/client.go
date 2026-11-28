@@ -217,11 +217,47 @@ func (c *Client) get(ctx context.Context, path string, into any) error {
 	return json.NewDecoder(resp.Body).Decode(into)
 }
 
+// resolvedBuildProfile is the part of Registry's resolved build profile read Governance needs.
+// The profile stays raw: Themis does not read inside it (EDR-REBUILD-01 D10).
+type resolvedBuildProfile struct {
+	Found  *bool  `json:"found"`
+	Scope  string `json:"scope"`
+	Record *struct {
+		Revision int             `json:"revision"`
+		Profile  json.RawMessage `json:"profile"`
+		SHA256   string          `json:"sha256"`
+	} `json:"record"`
+}
+
+// ReleaseBuildProfile reads the build profile that applies to a Release (the
+// app.BuildProfileReader port). It fails CLOSED: a transport failure, a non-200, an answer
+// with no `found` field, or a "found" answer that names no scope, revision, digest or profile
+// is an error. Only an explicit `found: false` reads as "no profile", because that answer
+// turns a request into a recommendation.
+func (c *Client) ReleaseBuildProfile(ctx context.Context, releaseID string) (app.ReleaseBuildProfile, error) {
+	var res resolvedBuildProfile
+	if err := c.get(ctx, "/api/v1/releases/"+url.PathEscape(releaseID)+"/build-profile/resolved", &res); err != nil {
+		return app.ReleaseBuildProfile{}, fmt.Errorf("registry: build profile of release %s: %w", releaseID, err)
+	}
+	if res.Found == nil {
+		return app.ReleaseBuildProfile{}, fmt.Errorf("registry: build profile of release %s: the answer carries no found field", releaseID)
+	}
+	if !*res.Found {
+		return app.ReleaseBuildProfile{}, nil
+	}
+	rec := res.Record
+	if rec == nil || res.Scope == "" || rec.Revision <= 0 || rec.SHA256 == "" || len(rec.Profile) == 0 {
+		return app.ReleaseBuildProfile{}, fmt.Errorf("registry: build profile of release %s: the answer is incomplete", releaseID)
+	}
+	return app.ReleaseBuildProfile{Found: true, Profile: rec.Profile, Scope: res.Scope, Revision: rec.Revision, SHA256: rec.SHA256}, nil
+}
+
 var (
 	_ app.BlastRadiusReader       = (*Client)(nil)
 	_ app.ReleaseIdentityResolver = (*Client)(nil)
 	_ app.ReleaseOwnerResolver    = (*Client)(nil)
 	_ app.ReleaseTagReader        = (*Client)(nil)
+	_ app.BuildProfileReader      = (*Client)(nil)
 )
 
 // ReleaseProducts walks the estate — products, their projects, their releases — and maps every

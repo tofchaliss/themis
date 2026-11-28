@@ -145,7 +145,7 @@ func contractRebuildDecision(outcome string, at time.Time) domain.RebuildDecisio
 		ClaimClass: "carrier", Position: "none", AssessmentState: app.RebuildAssessmentNotAssessed,
 		CountedBecause: []string{"severity_floor"},
 	}
-	return domain.RebuildDecision{
+	d := domain.RebuildDecision{
 		DecisionID: "dec-1", ReleaseID: "rel-1", ProductID: "prod-1", ProjectID: "prj-1",
 		TriggerID: "evt-1", TriggerSource: "governance", TriggerType: domain.RebuildTriggerFixAvailable,
 		Outcome: outcome, EffectiveMode: mode, EffectiveModeSetBy: "tag", InstallationMode: mode,
@@ -156,5 +156,35 @@ func contractRebuildDecision(outcome string, at time.Time) domain.RebuildDecisio
 		Considered: 3, Skipped: map[string]int{domain.RebuildSkippedBelowFloor: 1},
 		Targeted: []domain.RebuildDecisionEntry{entry}, OtherStream: []domain.RebuildDecisionEntry{entry},
 		DecidedAt: at,
+	}
+	d.Build = json.RawMessage(`{"job":"team/build-image","parameters":{"BRANCH":"release/1"}}`)
+	d.BuildProfile = &domain.RebuildDecisionBuildProfile{Scope: "project", Revision: 2, SHA256: "ab12"}
+	if outcome == domain.RebuildOutcomeRecommend {
+		d.RecommendReason = domain.RebuildRecommendModeAsk
+	}
+	return d
+}
+
+// D10 item 6: a recommendation held by a missing build profile carries no profile; a request
+// without one does not satisfy the contract.
+func TestIntegrationContractV1_RebuildWithoutBuildProfile(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	d := contractRebuildDecision(domain.RebuildOutcomeRecommend, now)
+	d.Build, d.BuildProfile, d.RecommendReason = nil, nil, domain.RebuildRecommendNoBuildProfile
+	raw, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertValidContract(t, schemaRefFor(app.EventRebuildRecommended), raw)
+
+	req := contractRebuildDecision(domain.RebuildOutcomeRequest, now)
+	req.Build, req.BuildProfile = nil, nil
+	raw, _ = json.Marshal(req)
+	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compileContract(t, schemaRefFor(app.EventRebuildRequested)).Validate(inst); err == nil {
+		t.Error("a rebuild request with no build profile must not satisfy the contract")
 	}
 }

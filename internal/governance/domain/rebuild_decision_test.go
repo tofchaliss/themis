@@ -36,3 +36,25 @@ func TestRebuildEntryNames(t *testing.T) {
 		t.Error("position names")
 	}
 }
+
+// D10 item 6, no profile, no request.
+func TestRebuildOutcomeWithProfile(t *testing.T) {
+	cases := []struct {
+		outcome string
+		found   bool
+		out     string
+		why     string
+	}{
+		{RebuildOutcomeRequest, true, RebuildOutcomeRequest, ""},
+		{RebuildOutcomeRequest, false, RebuildOutcomeRecommend, RebuildRecommendNoBuildProfile},
+		{RebuildOutcomeRecommend, true, RebuildOutcomeRecommend, RebuildRecommendModeAsk},
+		{RebuildOutcomeRecommend, false, RebuildOutcomeRecommend, RebuildRecommendNoBuildProfile},
+		{RebuildOutcomeNone, true, RebuildOutcomeNone, ""},
+		{RebuildOutcomeNone, false, RebuildOutcomeNone, ""},
+	}
+	for _, c := range cases {
+		if out, why := RebuildOutcomeWithProfile(c.outcome, c.found); out != c.out || why != c.why {
+			t.Errorf("%s found=%v: %q %q, want %q %q", c.outcome, c.found, out, why, c.out, c.why)
+		}
+	}
+}
