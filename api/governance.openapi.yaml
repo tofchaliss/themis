@@ -864,6 +864,71 @@ paths:
           $ref: '#/components/responses/Problem'
         '500':
           $ref: '#/components/responses/Problem'
+  /rebuild-policy:
+    get:
+      operationId: getRebuildPolicy
+      summary: >-
+        The installation rebuild policy (EDR-REBUILD-01 D2) - the fixed-field record that says
+        when an image rebuild is worth asking for. With nothing stored it reads the shipped
+        defaults at version 0. Read scope. Step R1 stores the record only - nothing is evaluated
+        against a Release and no build is asked for yet.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildPolicyRecord'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: putRebuildPolicy
+      summary: >-
+        Store a new version of the installation rebuild policy. Admin scope only, and the change
+        must name its actor (D9). Every field is required - a switch left out is refused, never
+        read as off. Each change adds one to the version and is kept in the history.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RebuildPolicyPut'
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildPolicyRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /rebuild-policy/history:
+    get:
+      operationId: getRebuildPolicyHistory
+      summary: >-
+        Every stored version of the installation rebuild policy, newest first, with who changed
+        it and when (EDR-REBUILD-01 D9). Empty when the policy was never set. Read scope.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RebuildPolicyRecord'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /faultlines/{faultlineId}/findings:
     get:
       operationId: getFaultlineFindings
@@ -1897,6 +1962,88 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SLAPolicyRecord'
+    RebuildPolicyPut:
+      type: object
+      required: [fix_required, severity_floor, count_known_exploited, skip_decided, carrier_only, cool_down_seconds, mode, updated_by]
+      properties:
+        fix_required:
+          type: boolean
+          description: Count a Finding only when a fixed version is known for its component.
+        severity_floor:
+          type: string
+          enum: [low, medium, high, critical]
+          description: The lowest severity that counts.
+        count_known_exploited:
+          type: boolean
+          description: Count a known-exploited Finding whatever its severity.
+        skip_decided:
+          type: boolean
+          description: Do not count a Finding decided not_affected or accepted_risk.
+        carrier_only:
+          type: boolean
+          description: Do not count scope-class components; unknown counts as carrier.
+        cool_down_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 31536000
+          description: The shortest time between two rebuild requests for one Release. 0 = none.
+        mode:
+          type: string
+          enum: ['off', ask, auto]
+          description: >-
+            off = no rebuild is asked for; ask = a person is told and a person starts the build;
+            auto = the request is sent without asking.
+        updated_by:
+          type: string
+          description: The person changing the policy, recorded with the version.
+    RebuildPolicyRecord:
+      type: object
+      required: [scope_kind, scope_id, version, fix_required, severity_floor, count_known_exploited, skip_decided, carrier_only, cool_down_seconds, mode]
+      properties:
+        scope_kind:
+          type: string
+          description: Whose policy this is. Step R1 serves `installation` only.
+        scope_id:
+          type: string
+          description: Empty for the installation policy.
+        version:
+          type: integer
+          description: Counts the changes from 1. 0 = nothing stored, the shipped defaults are in force.
+        fix_required:
+          type: boolean
+          description: Count a Finding only when a fixed version is known for its component.
+        severity_floor:
+          type: string
+          enum: [low, medium, high, critical]
+          description: The lowest severity that counts.
+        count_known_exploited:
+          type: boolean
+          description: Count a known-exploited Finding whatever its severity.
+        skip_decided:
+          type: boolean
+          description: Do not count a Finding decided not_affected or accepted_risk.
+        carrier_only:
+          type: boolean
+          description: Do not count scope-class components; unknown counts as carrier.
+        cool_down_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 31536000
+          description: The shortest time between two rebuild requests for one Release. 0 = none.
+        mode:
+          type: string
+          enum: ['off', ask, auto]
+          description: >-
+            off = no rebuild is asked for; ask = a person is told and a person starts the build;
+            auto = the request is sent without asking.
+        updated_at:
+          type: string
+          format: date-time
+          description: Absent for the shipped defaults (nothing stored yet).
+        updated_by:
+          type: string
     SLAAcceptancePeriod:
       type: object
       required: [start, position_version]

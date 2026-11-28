@@ -1503,3 +1503,68 @@ func TestWatchRoundTrip(t *testing.T) {
 		t.Errorf("after delete = %d", len(list))
 	}
 }
+
+// EDR-REBUILD-01 step R1: the rebuild policy store. Nothing stored reads as not found; each
+// change is the next version of its scope and one history row, in one transaction; the history
+// reads newest first; one scope never shows in another.
+func TestRebuildPolicyStore(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	if _, found, err := st.RebuildPolicy(ctx, app.RebuildScopeInstallation, ""); err != nil || found {
+		t.Fatalf("empty: found=%v err=%v", found, err)
+	}
+	if hist, err := st.RebuildPolicyHistory(ctx, app.RebuildScopeInstallation, ""); err != nil || len(hist) != 0 {
+		t.Fatalf("empty history = %+v %v", hist, err)
+	}
+
+	first := domain.DefaultRebuildPolicy()
+	first.CoolDown = 90*time.Minute + 500*time.Millisecond // stored in whole seconds
+	v1, err := st.PutRebuildPolicy(ctx, app.RebuildPolicyRecord{
+		ScopeKind: app.RebuildScopeInstallation, Version: 99, Policy: first, UpdatedAt: epoch, UpdatedBy: "alice",
+	})
+	if err != nil || v1.Version != 1 || v1.Policy.CoolDown != 90*time.Minute {
+		t.Fatalf("v1 = %+v %v", v1, err)
+	}
+	second := domain.RebuildPolicy{SeverityFloor: domain.SLABucketLow, Mode: domain.RebuildModeAuto}
+	v2, err := st.PutRebuildPolicy(ctx, app.RebuildPolicyRecord{
+		ScopeKind: app.RebuildScopeInstallation, Policy: second, UpdatedAt: epoch.Add(time.Hour), UpdatedBy: "bob",
+	})
+	if err != nil || v2.Version != 2 {
+		t.Fatalf("v2 = %+v %v", v2, err)
+	}
+	// Another scope starts its own count and is not seen from the installation scope.
+	other, err := st.PutRebuildPolicy(ctx, app.RebuildPolicyRecord{
+		ScopeKind: "product", ScopeID: "prod-1", Policy: first, UpdatedAt: epoch, UpdatedBy: "alice",
+	})
+	if err != nil || other.Version != 1 {
+		t.Fatalf("other scope = %+v %v", other, err)
+	}
+
+	cur, found, err := st.RebuildPolicy(ctx, app.RebuildScopeInstallation, "")
+	if err != nil || !found || cur != v2 || cur.Policy != second || cur.UpdatedBy != "bob" || !cur.UpdatedAt.Equal(epoch.Add(time.Hour)) {
+		t.Fatalf("current = %+v found=%v err=%v, want %+v", cur, found, err, v2)
+	}
+	hist, err := st.RebuildPolicyHistory(ctx, app.RebuildScopeInstallation, "")
+	if err != nil || len(hist) != 2 || hist[0] != v2 || hist[1] != v1 {
+		t.Fatalf("history = %+v %v", hist, err)
+	}
+
+	// The database refuses what the service would refuse, and a refused change leaves no trace.
+	for name, bad := range map[string]app.RebuildPolicyRecord{
+		"unknown mode":  {ScopeKind: app.RebuildScopeInstallation, Policy: domain.RebuildPolicy{SeverityFloor: domain.SLABucketHigh, Mode: "always"}, UpdatedAt: epoch, UpdatedBy: "alice"},
+		"unknown floor": {ScopeKind: app.RebuildScopeInstallation, Policy: domain.RebuildPolicy{SeverityFloor: "severe", Mode: domain.RebuildModeAsk}, UpdatedAt: epoch, UpdatedBy: "alice"},
+		"no actor":      {ScopeKind: app.RebuildScopeInstallation, Policy: domain.DefaultRebuildPolicy(), UpdatedAt: epoch},
+	} {
+		if _, err := st.PutRebuildPolicy(ctx, bad); err == nil {
+			t.Errorf("%s: stored, want a refusal", name)
+		}
+	}
+	if cur, _, _ := st.RebuildPolicy(ctx, app.RebuildScopeInstallation, ""); cur != v2 {
+		t.Fatalf("after refusals current = %+v, want %+v", cur, v2)
+	}
+	if hist, _ := st.RebuildPolicyHistory(ctx, app.RebuildScopeInstallation, ""); len(hist) != 2 {
+		t.Fatalf("after refusals history has %d rows, want 2", len(hist))
+	}
+}

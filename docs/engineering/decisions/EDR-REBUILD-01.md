@@ -1,9 +1,10 @@
 # EDR-REBUILD-01 — A policy decides the image rebuild, a signed event carries it, a build connector starts it
 
-Status: **PROPOSED — 2026-11-26.** Design only, no code. The owner picked the form factor the
-same day (choice 1 below: signed event plus build connector). Choices 2 to 5 carry an assumed pick
-and wait for the owner. Feature work stays behind the release freeze: each step needs the owner's
-go.
+Status: **PROPOSED — 2026-11-26. Step R1 built 2026-11-27**, on the owner's go; every later step
+is design only. The owner picked the form factor on 2026-11-26 (choice 1 below: signed event plus
+build connector) and accepted the picks of choices 2, 3 and 4 on 2026-11-27. Choice 5 carries an
+assumed pick and is asked again at step R5. Feature work stays behind the release freeze: each
+step needs the owner's go.
 **Revision 2, 2026-11-26:** the owner chose to keep the build configuration in Themis, as a build
 profile per Project and Release (D10). D10 replaces the mapping part of D8.
 **Revision 3, 2026-11-27:** after an outside review the owner chose a policy per installation,
@@ -1062,10 +1063,10 @@ not say which new rules reach it. Decided:
 | # | Choice | Assumed pick | State |
 | --- | --- | --- | --- |
 | 1 | Form factor | signed event plus build connector | **answered 2026-11-26** |
-| 2 | Policy language | fixed fields (D2) | open |
-| 3 | Where the policy is stored | Governance database with API and audit (D9) | open |
-| 4 | Default mode | `ask` (D5) | open |
-| 5 | Where the connector lives | its own repository (D8) | open |
+| 2 | Policy language | fixed fields (D2) | **answered 2026-11-27** |
+| 3 | Where the policy is stored | Governance database with API and audit (D9) | **answered 2026-11-27** |
+| 4 | Default mode | `ask` (D5) | **answered 2026-11-27** |
+| 5 | Where the connector lives | its own repository (D8) | open; asked again at R5 |
 | 6 | Where the build configuration lives | in Themis, per Project and Release (D10) | **answered 2026-11-26** |
 | 7 | Policy scope | installation, Product and Release, nearest wins as a whole (D11) | **answered 2026-11-27** |
 | 8 | Mode: policy against tag | the installation policy is the ceiling, a tag only restricts (D17) | **answered 2026-11-27** |
@@ -1088,6 +1089,35 @@ not say which new rules reach it. Decided:
 
 R1 changes the domain model and an API, R3 changes event contracts, R5 is a new repository. Each
 is on the "must ask" list.
+
+### Step R1 as built (2026-11-27)
+
+The owner gave the go for R1 on 2026-11-27. The tasks are in
+`openspec/changes/phase3-image-rebuild`.
+
+- **Domain** (`internal/governance/domain/rebuild_policy.go`). The record has the seven fields of
+  D2. The shipped default is: fix required, floor `high`, known exploited counts, decided
+  Findings and scope components do not count, cool-down 24 hours, mode `ask`. The modes are
+  ordered off < ask < auto, and a mode the code cannot read is treated as `off`, so an unknown
+  value never allows a build. `EvaluateRebuild` is a pure function: it takes the policy and the
+  candidates (one matched component of one open Finding, with its severity bucket, its known
+  exploited mark, its Position, its claim class and Knowledge's fix verdict of D30) and returns
+  the counted components with `counted_because` (D34). It compares no version strings and reads
+  no clock.
+- **Store** (Governance migration 28). `rebuild_policies` holds the policy in force, one row per
+  scope, with a version that counts the changes from 1. `rebuild_policy_history` holds every
+  version with who changed it and when. A change writes both in one transaction. The scope
+  columns are there from the start, so R1a needs no second table.
+- **API.** `GET /rebuild-policy` (read scope; the defaults at version 0 when nothing is stored),
+  `PUT /rebuild-policy` (admin only; `updated_by` is required; every field is required, because a
+  switch left out and read as `false` would loosen the policy without anybody choosing it),
+  `GET /rebuild-policy/history` (newest first).
+- **Not in R1.** Nothing evaluates a Release, nothing is published and no build is asked for. The
+  rule gets its trigger in R2. Product and Release policies are R1a. The cool-down is stored and
+  not yet applied (D14 applies it when a cycle opens).
+- **The cool-down is stored in whole seconds**, from 0 to one year. The upper bound only stops a
+  typing mistake.
+- **Open test:** the VM check (task 1.6).
 
 ## Honest limits
 
