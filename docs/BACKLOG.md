@@ -434,7 +434,8 @@ three angles, and two of them proposed fixes that would not have worked.
   on the scope sweep, governance migration 000026; see the C1 realization note; VM check PASS 2026-11-25. **C2 (GUI) built
   2026-11-25**: "Copy to" pick list on the decision page in place of "Applies to", asks before
   a decision is replaced. **C4 built 2026-11-25** (the owner-set severity goes with the
-  copy). Open: C3 (VM check of a real copy from the GUI), a link from a copy to its source.
+  copy). **C3 VM check PASS 2026-11-26** (a real copy from the GUI to 14 more Findings, owner's
+  word; see the C3 note). Open: a link from a copy to its source.
 
 - [ ] **Owner-set severity** (id `GOV-SEVERITY-OWNER-1`, owner 2026-11-25, feature). The
   product owner decides the severity that counts for the product, whatever the original score
@@ -448,8 +449,34 @@ three angles, and two of them proposed fixes that would not have worked.
   `/findings/{id}/severity` routes, the read columns priority and deadline use, the "Severity"
   card on the decision page; see the realization note in section 7.1. **V3 built 2026-11-25**:
   the "severity to review" notice when the original changes (derived on read, with "Keep it"),
-  and the severity travelling with a copied decision. Open: V4 (VM check), an event when a
-  severity is set, offering the severity with a roll-forward proposal on a later upload.
+  and the severity travelling with a copied decision. **V4 VM check 2026-11-26, part done**:
+  migration 27 and the reads from the GUI pass; a save from the GUI is still to be shown (see
+  the V4 note in section 7.1). Open: the rest of V4, an event when a severity is set, offering
+  the severity with a roll-forward proposal on a later upload.
+
+- [ ] **The pick list of releases is slow** (id `GOV-COPY-PICKLIST-SLOW-1`, found 2026-11-26
+  on the test VM, S3). Opening "Copy to" on the decision page, or "Also set on" in the
+  Severity card, took about 16 seconds for one CVE. `ScopePropagation.CopyCandidates` loads
+  each sibling Finding and asks Registry for its owners one at a time. Fix idea: read the
+  siblings in one query and ask Registry once per release (or keep the answers for the
+  request). Measure first on the VM, with the count of siblings.
+
+- [ ] **The severity form is easy to miss** (id `GUI-SEVERITY-FORM-1`, found 2026-11-26, S4).
+  On the decision page the owner recorded the decision and took the severity as saved with
+  it; the severity form opens only after "Set severity" and has its own Save. To decide with
+  the owner: open the form by default for an admin, or say on the card that it is saved
+  apart from the decision.
+
+- [ ] **A model that is not in memory can cost the whole AI wait** (id `AI-COLDSTART-1`, found
+  2026-11-26 on the test VM, S3). "Ask the AI" answered "Intelligence unreachable" after the
+  full 300 seconds, twice, with 0 tokens. The model server was up, the model was installed
+  and fast when asked directly (the same chat call in JSON mode answered in about 3 seconds),
+  but it was not loaded in memory at that time. After one direct call had loaded it, the GUI
+  got its answer again. The cause is not proven: the model server's log of the failed calls
+  was not captured. Next time: read that log straight after the error. Possible fixes: keep
+  the model loaded (`OLLAMA_KEEP_ALIVE=-1` on the model server), or have the Intelligence
+  node warm the model at start; and the message could tell "the model did not answer in
+  time" apart from "the node is unreachable".
 
 - [ ] **Assessment-type detail per release** (id `GUI-ASSESS-TYPE-1`, owner 2026-11-23, later
   feature). The owner's reference table shows per-release assessment-type markers (five status
