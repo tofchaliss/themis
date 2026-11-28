@@ -481,9 +481,13 @@ three angles, and two of them proposed fixes that would not have worked.
   write-capable user could record another name. Add `actor` (body and query) to the gate's
   check; this changes the security model, so it needs the owner's go.
 
-- [ ] **Build profile form in the React GUI** (id `GUI-NEXT-BUILD-PROFILE-1`, from EDR-REBUILD-01
-  step R2a, 2026-11-28, feature). The form exists in the current GUI only. Add it to the Estate
-  page at `/next/` when that page gets its edit actions.
+- [ ] **Look at the build profile form on a deployment** (id `GUI-BUILD-PROFILE-CHECK-1`, from the
+  VM check of EDR-REBUILD-01 step R2a, 2026-11-28, check). The API was checked on the VM. The
+  card on the Estate page of the React GUI was driven only in a headless browser against a
+  mocked Registry. Open Estate, pick a product and a project, and confirm the "Build profile"
+  card shows the history, saves a profile, shows Registry's refusal for a secret-like key, and
+  removes it. Also not exercised outside the tests: a Release's own profile, and mode `auto`
+  with a profile.
 
 - [ ] **GUI page for the rebuild policies** (id `GUI-REBUILD-POLICY-1`, from EDR-REBUILD-01 step
   R1a, 2026-11-28, feature). One page that lists every policy in force (`GET /rebuild-policies`),

@@ -102,10 +102,14 @@ Every step waits for the owner's go and lands as its own PR.
   no-secrets rule on the form.
 - [x] 5.5 Gates: unit tests, `make vet-tags`, `make lint`, `make clean-arch`, `make arch-test`,
   Registry and Governance integration tests on embedded Postgres.
-- [ ] 5.6 VM check: Registry migration 6 applies; a Project profile is saved and read back; a
+- [x] 5.6 VM check: Registry migration 6 applies; a Project profile is saved and read back; a
   profile with a secret-like key is refused; a forced trigger on a tagged Release gives a
-  decision with `build`; with the profile removed the decision says `no_build_profile`; the
-  form works in the GUI.
+  decision with `build`; with the profile removed the decision says `no_build_profile`.
+  PASS 2026-11-28 (EDR "VM check of R2a").
+- [x] 5.6a The same card in the React GUI (`/next/`), which is the GUI in daily use; #280 had
+  it in the old GUI only. Component tests, `npm run check`, bundle rebuilt.
+- [ ] 5.7 Look at the build profile card in the React GUI on the VM (backlog
+  `GUI-BUILD-PROFILE-CHECK-1`).
 
 ## Later groups
 
