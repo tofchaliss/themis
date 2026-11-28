@@ -63,53 +63,62 @@ func (c *Client) BlastRadius(ctx context.Context, releaseID string) (int, error)
 }
 
 type releaseView struct {
-	ProjectID string   `json:"project_id"`
-	Version   string   `json:"version"`
-	Tags      []string `json:"tags"`
+	ProjectID string `json:"project_id"`
+	Version   string `json:"version"`
 }
 
 type projectView struct {
-	ProductID string   `json:"product_id"`
-	Name      string   `json:"name"`
-	Tags      []string `json:"tags"`
+	ProductID string `json:"product_id"`
+	Name      string `json:"name"`
 }
 
 type productView struct {
-	Name string   `json:"name"`
-	Tags []string `json:"tags"`
+	Name string `json:"name"`
+}
+
+// tagSet mirrors Registry's TagSet. Tags is a pointer so that an answer WITHOUT the field can be
+// told apart from an entity with no tags: the single-entity views carry no tags at all, and
+// reading them as "no tag" is exactly the mistake this type exists to refuse.
+type tagSet struct {
+	Tags *[]string `json:"tags"`
+}
+
+// ownTags reads one entity's OWN tags from Registry's tag read (`/<kind>/{id}/tags`). A missing
+// `tags` field is an error, never an empty list.
+func (c *Client) ownTags(ctx context.Context, kind, id string) ([]string, error) {
+	var set tagSet
+	if err := c.get(ctx, "/api/v1/"+kind+"/"+url.PathEscape(id)+"/tags", &set); err != nil {
+		return nil, fmt.Errorf("registry: tags of %s %s: %w", kind, id, err)
+	}
+	if set.Tags == nil {
+		return nil, fmt.Errorf("registry: tags of %s %s: the answer carries no tags field", kind, id)
+	}
+	return *set.Tags, nil
 }
 
 // ReleaseTagLevels walks release → project → product and returns each level's OWN tags with the
 // two owner ids (the app.ReleaseTagReader port, EDR-REBUILD-01 D4). The levels are kept apart
 // because the rebuild tag rule reads them in order: `rebuild:off` anywhere wins, otherwise the
-// nearest level decides. Fails CLOSED at every step, like ReleaseOwners: a tag list that could
-// not be read must never look like "no tag".
+// nearest level decides. The tags come from the tag reads, not from the entity views: the
+// single-entity views do not carry them (found on the VM check of step R2 part 1, where a
+// tagged Release read as untagged). Fails CLOSED at every step, like ReleaseOwners: a tag list
+// that could not be read must never look like "no tag".
 func (c *Client) ReleaseTagLevels(ctx context.Context, releaseID string) (app.ReleaseTagLevels, error) {
-	if releaseID == "" {
-		return app.ReleaseTagLevels{}, fmt.Errorf("registry: release-tags: no release id")
+	productID, projectID, err := c.ProductAndProjectOfRelease(ctx, releaseID)
+	if err != nil {
+		return app.ReleaseTagLevels{}, err
 	}
-	var rel releaseView
-	if err := c.get(ctx, "/api/v1/releases/"+url.PathEscape(releaseID), &rel); err != nil {
-		return app.ReleaseTagLevels{}, fmt.Errorf("registry: release %s: %w", releaseID, err)
+	out := app.ReleaseTagLevels{ProductID: productID, ProjectID: projectID}
+	if out.Release, err = c.ownTags(ctx, "releases", releaseID); err != nil {
+		return app.ReleaseTagLevels{}, err
 	}
-	if rel.ProjectID == "" {
-		return app.ReleaseTagLevels{}, fmt.Errorf("registry: release %s: no project id", releaseID)
+	if out.Project, err = c.ownTags(ctx, "projects", projectID); err != nil {
+		return app.ReleaseTagLevels{}, err
 	}
-	var proj projectView
-	if err := c.get(ctx, "/api/v1/projects/"+url.PathEscape(rel.ProjectID), &proj); err != nil {
-		return app.ReleaseTagLevels{}, fmt.Errorf("registry: project %s: %w", rel.ProjectID, err)
+	if out.Product, err = c.ownTags(ctx, "products", productID); err != nil {
+		return app.ReleaseTagLevels{}, err
 	}
-	if proj.ProductID == "" {
-		return app.ReleaseTagLevels{}, fmt.Errorf("registry: project %s: no product id", rel.ProjectID)
-	}
-	var prod productView
-	if err := c.get(ctx, "/api/v1/products/"+url.PathEscape(proj.ProductID), &prod); err != nil {
-		return app.ReleaseTagLevels{}, fmt.Errorf("registry: product %s: %w", proj.ProductID, err)
-	}
-	return app.ReleaseTagLevels{
-		ProductID: proj.ProductID, ProjectID: rel.ProjectID,
-		Release: rel.Tags, Project: proj.Tags, Product: prod.Tags,
-	}, nil
+	return out, nil
 }
 
 // ReleaseOwners walks release → project → product and returns the ids AND the names (the

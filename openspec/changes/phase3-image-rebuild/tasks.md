@@ -51,10 +51,17 @@ Every step waits for the owner's go and lands as its own PR.
   `effective_mode_set_by` on the in-force read; tests; lint, vet-tags, clean-arch, arch-test
   and the dashboard's generated API types green.
 - [ ] 3.5 VM check: a Release with no tag, with `rebuild:ask`, with `rebuild:off` on its
-  Product; the judgement of a real Release (counted components, skip counts).
+  Product; the judgement of a real Release (counted components, skip counts). First run
+  2026-11-28: the no-tag case and the judgement PASSED; the tag cases FAILED (a tagged Release
+  read as untagged), see 3.6. To run again after 3.6.
+- [x] 3.6 Fix from the VM check: the Registry client reads each level's own tags from the tag
+  reads, and refuses an answer with no `tags` field (the single-entity views do not carry
+  tags; backlog `RG-VIEW-TAGS-1`).
 
 ## Group 4 — R2 part 2: triggers, decision record, events (same owner go)
 
+- [ ] 4.0 Settle `KN-BEHIND-MODULE-1` (a module-stream bound must not make a known fix for an
+  install outside that stream) before any event is sent.
 - [ ] 4.1 Settle the six open points of "Step R2 part 1 as built" that touch the event
   contract (one fixed version or a list, `fix_source`).
 - [ ] 4.2 Trigger queue written with the outbox notes of `release_evaluated` (cause `new_sbom`)

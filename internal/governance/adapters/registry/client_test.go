@@ -293,19 +293,28 @@ func TestClient_ReleaseOwners(t *testing.T) {
 	}
 }
 
-// EDR-REBUILD-01 D4: each level's OWN tags come back apart, with the owner ids, and every hop
-// fails closed — a tag list that could not be read must never look like "no tag".
+// EDR-REBUILD-01 D4: each level's OWN tags come back apart, with the owner ids, read from the
+// tag reads (the entity views carry no tags). Every hop fails closed, and an answer with no
+// `tags` field is an error — a tag list that could not be read must never look like "no tag".
 func TestClient_ReleaseTagLevels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, ok := map[string]string{
-			"/api/v1/releases/rel-1":       `{"id":"rel-1","project_id":"proj-1","tags":["rebuild:auto"]}`,
-			"/api/v1/releases/rel-noproj":  `{"id":"rel-noproj","project_id":""}`,
-			"/api/v1/releases/rel-2":       `{"id":"rel-2","project_id":"proj-noprod"}`,
-			"/api/v1/releases/rel-3":       `{"id":"rel-3","project_id":"proj-2"}`,
-			"/api/v1/projects/proj-1":      `{"id":"proj-1","product_id":"prod-1","tags":["team:a"]}`,
-			"/api/v1/projects/proj-noprod": `{"id":"proj-noprod","product_id":""}`,
-			"/api/v1/projects/proj-2":      `{"id":"proj-2","product_id":"prod-missing"}`,
-			"/api/v1/products/prod-1":      `{"id":"prod-1","name":"P1","tags":["rebuild:off","tier:1"]}`,
+			"/api/v1/releases/rel-1":         `{"id":"rel-1","project_id":"proj-1"}`,
+			"/api/v1/releases/rel-1/tags":    `{"tags":["rebuild:auto"],"effective":["rebuild:auto","team:a","rebuild:off","tier:1"]}`,
+			"/api/v1/projects/proj-1":        `{"id":"proj-1","product_id":"prod-1"}`,
+			"/api/v1/projects/proj-1/tags":   `{"tags":["team:a"],"effective":["team:a","rebuild:off","tier:1"]}`,
+			"/api/v1/products/prod-1/tags":   `{"tags":["rebuild:off","tier:1"],"effective":["rebuild:off","tier:1"]}`,
+			"/api/v1/releases/rel-noproj":    `{"id":"rel-noproj","project_id":""}`,
+			"/api/v1/releases/rel-notags":    `{"id":"rel-notags","project_id":"proj-1"}`,
+			"/api/v1/releases/rel-view":      `{"id":"rel-view","project_id":"proj-1"}`,
+			"/api/v1/releases/rel-view/tags": `{"id":"rel-view"}`,
+			"/api/v1/releases/rel-2":         `{"id":"rel-2","project_id":"proj-2"}`,
+			"/api/v1/releases/rel-2/tags":    `{"tags":[],"effective":[]}`,
+			"/api/v1/projects/proj-2":        `{"id":"proj-2","product_id":"prod-2"}`,
+			"/api/v1/releases/rel-3":         `{"id":"rel-3","project_id":"proj-3"}`,
+			"/api/v1/releases/rel-3/tags":    `{"tags":[],"effective":[]}`,
+			"/api/v1/projects/proj-3":        `{"id":"proj-3","product_id":"prod-3"}`,
+			"/api/v1/projects/proj-3/tags":   `{"tags":[],"effective":[]}`,
 		}[r.URL.Path]
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
@@ -324,7 +333,9 @@ func TestClient_ReleaseTagLevels(t *testing.T) {
 		len(got.Project) != 1 || got.Project[0] != "team:a" || len(got.Product) != 2 || got.Product[0] != "rebuild:off" {
 		t.Errorf("levels = %+v", got)
 	}
-	for _, id := range []string{"", "missing", "rel-noproj", "rel-2", "rel-3"} {
+	// no id · unknown release · blank project · release tags unreadable · release tags answer
+	// with no tags field · project tags unreadable · product tags unreadable.
+	for _, id := range []string{"", "missing", "rel-noproj", "rel-notags", "rel-view", "rel-2", "rel-3"} {
 		if _, err := c.ReleaseTagLevels(context.Background(), id); err == nil {
 			t.Errorf("release %q: want an error, got tags", id)
 		}
