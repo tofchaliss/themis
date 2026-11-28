@@ -95,7 +95,7 @@ func newPool(t *testing.T) *pgxpool.Pool {
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
-		`TRUNCATE finding_owner_severities, component_score_revisions, finding_score_revisions, review_warnings, sla_breaches, sla_policies, processed_events, governance_outbox, release_evaluations_pending, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE rebuild_policies, rebuild_policy_history, finding_owner_severities, component_score_revisions, finding_score_revisions, review_warnings, sla_breaches, sla_policies, processed_events, governance_outbox, release_evaluations_pending, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -1566,5 +1566,91 @@ func TestRebuildPolicyStore(t *testing.T) {
 	}
 	if hist, _ := st.RebuildPolicyHistory(ctx, app.RebuildScopeInstallation, ""); len(hist) != 2 {
 		t.Fatalf("after refusals history has %d rows, want 2", len(hist))
+	}
+}
+
+// EDR-REBUILD-01 step R1a: Product and Release policies. Each scope has its own count; a
+// removal leaves the table of policies in force, stays in the history as the next version, and
+// the count goes on when the scope gets a policy again; the list reads installation, Products,
+// Releases.
+func TestRebuildPolicyStoreOverrides(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	p := domain.DefaultRebuildPolicy()
+	put := func(kind, id, by string, at time.Time) app.RebuildPolicyRecord {
+		t.Helper()
+		rec, err := st.PutRebuildPolicy(ctx, app.RebuildPolicyRecord{ScopeKind: kind, ScopeID: id, Policy: p, UpdatedAt: at, UpdatedBy: by})
+		if err != nil {
+			t.Fatalf("put %s/%s: %v", kind, id, err)
+		}
+		return rec
+	}
+
+	if recs, err := st.RebuildPolicies(ctx); err != nil || len(recs) != 0 {
+		t.Fatalf("empty list = %+v %v", recs, err)
+	}
+	if _, found, err := st.RemoveRebuildPolicy(ctx, app.RebuildScopeProduct, "prod-1", epoch, "alice"); err != nil || found {
+		t.Fatalf("remove nothing: found=%v err=%v", found, err)
+	}
+
+	put(app.RebuildScopeRelease, "rel-1", "alice", epoch)
+	put(app.RebuildScopeProduct, "prod-2", "alice", epoch)
+	v1 := put(app.RebuildScopeProduct, "prod-1", "alice", epoch)
+	put(app.RebuildScopeInstallation, "", "alice", epoch)
+	recs, err := st.RebuildPolicies(ctx)
+	if err != nil || len(recs) != 4 || recs[0].ScopeKind != app.RebuildScopeInstallation || recs[1].ScopeID != "prod-1" ||
+		recs[2].ScopeID != "prod-2" || recs[3].ScopeKind != app.RebuildScopeRelease {
+		t.Fatalf("list = %+v %v", recs, err)
+	}
+
+	removed, found, err := st.RemoveRebuildPolicy(ctx, app.RebuildScopeProduct, "prod-1", epoch.Add(time.Hour), "carol")
+	if err != nil || !found || !removed.Removed || removed.Version != 2 || removed.UpdatedBy != "carol" ||
+		!removed.UpdatedAt.Equal(epoch.Add(time.Hour)) || removed.Policy != p {
+		t.Fatalf("removal = %+v found=%v err=%v", removed, found, err)
+	}
+	if _, found, _ := st.RebuildPolicy(ctx, app.RebuildScopeProduct, "prod-1"); found {
+		t.Fatal("a removed policy is still in force")
+	}
+	if recs, _ := st.RebuildPolicies(ctx); len(recs) != 3 {
+		t.Fatalf("list after removal has %d rows, want 3", len(recs))
+	}
+	// The scope's count goes on across the removal.
+	v3 := put(app.RebuildScopeProduct, "prod-1", "alice", epoch.Add(2*time.Hour))
+	if v3.Version != 3 || v3.Removed {
+		t.Fatalf("put after removal = %+v, want version 3", v3)
+	}
+	hist, err := st.RebuildPolicyHistory(ctx, app.RebuildScopeProduct, "prod-1")
+	if err != nil || len(hist) != 3 || hist[0] != v3 || hist[1] != removed || hist[2] != v1 {
+		t.Fatalf("history = %+v %v", hist, err)
+	}
+
+	// The database refuses a scope it does not know, an override with no id, and an installation
+	// policy with one.
+	for name, bad := range map[string]app.RebuildPolicyRecord{
+		"unknown kind":         {ScopeKind: "project", ScopeID: "proj-1", Policy: p, UpdatedAt: epoch, UpdatedBy: "alice"},
+		"product without id":   {ScopeKind: app.RebuildScopeProduct, Policy: p, UpdatedAt: epoch, UpdatedBy: "alice"},
+		"installation with id": {ScopeKind: app.RebuildScopeInstallation, ScopeID: "x", Policy: p, UpdatedAt: epoch, UpdatedBy: "alice"},
+	} {
+		if _, err := st.PutRebuildPolicy(ctx, bad); err == nil {
+			t.Errorf("%s: stored, want a refusal", name)
+		}
+	}
+
+	// Two changes of one scope at the same time get two consecutive versions; neither is lost.
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		go func() {
+			_, err := st.PutRebuildPolicy(ctx, app.RebuildPolicyRecord{ScopeKind: app.RebuildScopeRelease, ScopeID: "rel-busy", Policy: p, UpdatedAt: epoch, UpdatedBy: "alice"})
+			errs <- err
+		}()
+	}
+	for i := 0; i < 8; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent put: %v", err)
+		}
+	}
+	if hist, _ := st.RebuildPolicyHistory(ctx, app.RebuildScopeRelease, "rel-busy"); len(hist) != 8 || hist[0].Version != 8 || hist[7].Version != 1 {
+		t.Fatalf("concurrent history has %d rows", len(hist))
 	}
 }

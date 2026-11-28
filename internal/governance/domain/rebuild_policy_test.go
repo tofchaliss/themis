@@ -195,3 +195,55 @@ func TestEvaluateRebuildModeAndOrder(t *testing.T) {
 		t.Fatalf("unreadable floor: counted %+v, want nothing", v.Targeted)
 	}
 }
+
+func TestRebuildPolicyLevelValid(t *testing.T) {
+	for _, l := range []domain.RebuildPolicyLevel{domain.RebuildLevelInstallation, domain.RebuildLevelProduct, domain.RebuildLevelRelease} {
+		if !l.Valid() {
+			t.Errorf("%q must be valid", l)
+		}
+	}
+	if domain.RebuildPolicyLevel("project").Valid() {
+		t.Error("there is no project level")
+	}
+}
+
+func TestResolveRebuildPolicyNearestWinsWhole(t *testing.T) {
+	withMode := func(m domain.RebuildMode, floor string) domain.RebuildPolicy {
+		p := domain.DefaultRebuildPolicy()
+		p.Mode, p.SeverityFloor = m, floor
+		return p
+	}
+	ptr := func(p domain.RebuildPolicy) *domain.RebuildPolicy { return &p }
+	inst := withMode(domain.RebuildModeAuto, domain.SLABucketHigh)
+	prod := withMode(domain.RebuildModeAsk, domain.SLABucketMedium)
+	rel := withMode(domain.RebuildModeAuto, domain.SLABucketLow)
+
+	cases := []struct {
+		name             string
+		inst             domain.RebuildPolicy
+		product, release *domain.RebuildPolicy
+		level            domain.RebuildPolicyLevel
+		floor            string
+		ceiling          domain.RebuildMode
+		setBy            string
+	}{
+		{"installation only", inst, nil, nil, domain.RebuildLevelInstallation, domain.SLABucketHigh, domain.RebuildModeAuto, domain.RebuildModeSetByInstallation},
+		{"product restricts", inst, ptr(prod), nil, domain.RebuildLevelProduct, domain.SLABucketMedium, domain.RebuildModeAsk, domain.RebuildModeSetByPolicy},
+		{"release beats product, whole record", inst, ptr(prod), ptr(rel), domain.RebuildLevelRelease, domain.SLABucketLow, domain.RebuildModeAuto, domain.RebuildModeSetByInstallation},
+		{"release alone", inst, nil, ptr(rel), domain.RebuildLevelRelease, domain.SLABucketLow, domain.RebuildModeAuto, domain.RebuildModeSetByInstallation},
+		// D17: a Product policy cannot lift the installation's ceiling.
+		{"product auto under installation ask", withMode(domain.RebuildModeAsk, domain.SLABucketHigh), ptr(rel), nil,
+			domain.RebuildLevelProduct, domain.SLABucketLow, domain.RebuildModeAsk, domain.RebuildModeSetByInstallation},
+		{"product off", inst, ptr(withMode(domain.RebuildModeOff, domain.SLABucketHigh)), nil,
+			domain.RebuildLevelProduct, domain.SLABucketHigh, domain.RebuildModeOff, domain.RebuildModeSetByPolicy},
+		// A mode this code cannot read never allows a build.
+		{"unreadable release mode", inst, nil, ptr(withMode("always", domain.SLABucketHigh)),
+			domain.RebuildLevelRelease, domain.SLABucketHigh, domain.RebuildModeOff, domain.RebuildModeSetByPolicy},
+	}
+	for _, c := range cases {
+		got := domain.ResolveRebuildPolicy(c.inst, c.product, c.release)
+		if got.Level != c.level || got.Policy.SeverityFloor != c.floor || got.ModeCeiling != c.ceiling || got.ModeSetBy != c.setBy {
+			t.Errorf("%s: got %+v, want level %s floor %s ceiling %s set by %s", c.name, got, c.level, c.floor, c.ceiling, c.setBy)
+		}
+	}
+}

@@ -396,7 +396,15 @@ three angles, and two of them proposed fixes that would not have worked.
   asked again at R5. Steps R1-R6 plus R1a and R2a, one PR each on the owner's go (release
   freeze). **R1 built 2026-11-27** (installation policy record, pure evaluation rule, Governance
   migration 28, `GET/PUT /rebuild-policy` and `/rebuild-policy/history`; nothing triggers a build
-  yet); VM check PASSED 2026-11-28 (EDR "Step R1 as built"). Next: R1a, on the owner's go.
+  yet); VM check PASSED 2026-11-28 (EDR "Step R1 as built"). **R1a API built 2026-11-28**
+  (Product and Release policies, removal with history, list read, in-force read with the mode
+  ceiling; Governance migration 29); its VM check is task 2.4. Next: R2, on the owner's go.
+
+- [ ] **GUI page for the rebuild policies** (id `GUI-REBUILD-POLICY-1`, from EDR-REBUILD-01 step
+  R1a, 2026-11-28, feature). One page that lists every policy in force (`GET /rebuild-policies`),
+  shows the policy in force for a Release with its level and mode ceiling, and lets an admin
+  set, change and remove a policy with a named actor and the change history. Backend is done;
+  the page waits for the owner's go.
 
 - [ ] **PSIRT early alert on the Overview** (id `GUI-PSIRT-1`, owner 2026-11-23, feature).
   Newly published critical/high CVEs in the world (original source score, no Themis score),

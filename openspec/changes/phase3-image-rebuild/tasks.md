@@ -23,9 +23,18 @@ Every step waits for the owner's go and lands as its own PR.
   (field left out, 400), history newest first. A read-only key was not tried on the VM; the
   handler tests cover it. Result in the EDR, "Step R1 as built".
 
-## Group 2 — R1a Product and Release overrides
+## Group 2 — R1a Product and Release overrides (owner go 2026-11-28)
 
-- [ ] 2.1 Waits for the owner's go.
+- [x] 2.1 Domain: `ResolveRebuildPolicy` (nearest wins whole, mode ceiling of D17). App: set,
+  read, remove, history, list, in force for a Release. 100% coverage.
+- [x] 2.2 Store + migration 29 (up / down): three scope kinds, removal kept in the history,
+  version counted per scope across removals; integration test with concurrent changes.
+- [x] 2.3 API: `/rebuild-policies`, `/products/{id}/rebuild-policy`, `/releases/{id}/rebuild-policy`
+  (+ `/history`, `/in-force`); admin or the Product's key to change; tests; `make check` parts
+  and the dashboard's generated API types green.
+- [ ] 2.4 VM check: a Product policy and a Release policy, the in-force read for three
+  releases, the list, a removal, the history.
+- [ ] 2.5 GUI page for the policies (`GUI-REBUILD-POLICY-1`), on the owner's go.
 
 ## Later groups
 
