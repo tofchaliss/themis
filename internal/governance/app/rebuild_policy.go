@@ -76,7 +76,8 @@ func (s *RebuildPolicyService) Installation(ctx context.Context) (RebuildPolicyR
 	return rec, nil
 }
 
-// PutInstallation stores a new version of the installation policy.
+// PutInstallation stores a new version of the installation policy. The time is cut to the
+// microsecond, the database's precision, so the answer to a change and a later read agree.
 func (s *RebuildPolicyService) PutInstallation(ctx context.Context, p domain.RebuildPolicy, actor string) (RebuildPolicyRecord, error) {
 	actor = strings.TrimSpace(actor)
 	if actor == "" {
@@ -86,7 +87,7 @@ func (s *RebuildPolicyService) PutInstallation(ctx context.Context, p domain.Reb
 		return RebuildPolicyRecord{}, ErrInvalidRebuildPolicy
 	}
 	return s.store.PutRebuildPolicy(ctx, RebuildPolicyRecord{
-		ScopeKind: RebuildScopeInstallation, Policy: p, UpdatedAt: s.clock.Now().UTC(), UpdatedBy: actor,
+		ScopeKind: RebuildScopeInstallation, Policy: p, UpdatedAt: s.clock.Now().UTC().Truncate(time.Microsecond), UpdatedBy: actor,
 	})
 }
 
