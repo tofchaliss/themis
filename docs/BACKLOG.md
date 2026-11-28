@@ -398,7 +398,8 @@ three angles, and two of them proposed fixes that would not have worked.
   migration 28, `GET/PUT /rebuild-policy` and `/rebuild-policy/history`; nothing triggers a build
   yet); VM check PASSED 2026-11-28 (EDR "Step R1 as built"). **R1a API built 2026-11-28**
   (Product and Release policies, removal with history, list read, in-force read with the mode
-  ceiling; Governance migration 29); its VM check is task 2.4. Next: R2, on the owner's go.
+  ceiling; Governance migration 29); VM check PASSED 2026-11-28 (EDR "Step R1a as built").
+  Next: R2, on the owner's go.
 
 - [ ] **GUI page for the rebuild policies** (id `GUI-REBUILD-POLICY-1`, from EDR-REBUILD-01 step
   R1a, 2026-11-28, feature). One page that lists every policy in force (`GET /rebuild-policies`),

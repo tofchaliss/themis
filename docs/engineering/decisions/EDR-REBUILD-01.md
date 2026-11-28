@@ -1170,7 +1170,21 @@ Release beside the installation policy.
   id that does not exist applies to nothing; it shows on the list read and can be removed.
 - **Not in R1a.** The GUI page for the policies (backlog `GUI-REBUILD-POLICY-1`). Nothing
   evaluates a Release and no build is asked for; that is still R2.
-- **Open test:** the VM check (task 2.4).
+- **VM check PASSED 2026-11-28** (task 2.4, main `f90b036`, auth on, admin key; one Product,
+  two Releases of two of its Projects). Governance applied migration 29. In order:
+  1. Before any change both Releases took the installation policy, ceiling `ask`.
+  2. A Product policy with mode `off` and floor `medium` got version 1. Both Releases then took
+     it: level `product`, ceiling `off`, set by `policy`.
+  3. A Release policy with mode `auto` and floor `low` on the first Release got version 1. That
+     Release took its own policy whole (floor `low`), and its ceiling was `ask`, set by
+     `installation`: the Release asked for `auto` and the installation's `ask` held (D17).
+  4. The second Release still took the Product policy.
+  5. The list showed three entries: installation, product, release.
+  6. Both removals answered `removed: true` as version 2 with the actor. The Product history
+     showed the removal first, then version 1.
+  7. After the removals the first Release was back on the installation policy.
+  Every answer carried `tags_applied: false`. Not tried on the VM: a `product:<id>` key (none is
+  at hand there); the handler tests cover who may change.
 
 ## Honest limits
 
