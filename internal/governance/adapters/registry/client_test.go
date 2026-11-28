@@ -292,3 +292,96 @@ func TestClient_ReleaseOwners(t *testing.T) {
 		}
 	}
 }
+
+// EDR-REBUILD-01 D4: each level's OWN tags come back apart, with the owner ids, read from the
+// tag reads (the entity views carry no tags). Every hop fails closed, and an answer with no
+// `tags` field is an error — a tag list that could not be read must never look like "no tag".
+func TestClient_ReleaseTagLevels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := map[string]string{
+			"/api/v1/releases/rel-1":         `{"id":"rel-1","project_id":"proj-1"}`,
+			"/api/v1/releases/rel-1/tags":    `{"tags":["rebuild:auto"],"effective":["rebuild:auto","team:a","rebuild:off","tier:1"]}`,
+			"/api/v1/projects/proj-1":        `{"id":"proj-1","product_id":"prod-1"}`,
+			"/api/v1/projects/proj-1/tags":   `{"tags":["team:a"],"effective":["team:a","rebuild:off","tier:1"]}`,
+			"/api/v1/products/prod-1/tags":   `{"tags":["rebuild:off","tier:1"],"effective":["rebuild:off","tier:1"]}`,
+			"/api/v1/releases/rel-noproj":    `{"id":"rel-noproj","project_id":""}`,
+			"/api/v1/releases/rel-notags":    `{"id":"rel-notags","project_id":"proj-1"}`,
+			"/api/v1/releases/rel-view":      `{"id":"rel-view","project_id":"proj-1"}`,
+			"/api/v1/releases/rel-view/tags": `{"id":"rel-view"}`,
+			"/api/v1/releases/rel-2":         `{"id":"rel-2","project_id":"proj-2"}`,
+			"/api/v1/releases/rel-2/tags":    `{"tags":[],"effective":[]}`,
+			"/api/v1/projects/proj-2":        `{"id":"proj-2","product_id":"prod-2"}`,
+			"/api/v1/releases/rel-3":         `{"id":"rel-3","project_id":"proj-3"}`,
+			"/api/v1/releases/rel-3/tags":    `{"tags":[],"effective":[]}`,
+			"/api/v1/projects/proj-3":        `{"id":"proj-3","product_id":"prod-3"}`,
+			"/api/v1/projects/proj-3/tags":   `{"tags":[],"effective":[]}`,
+		}[r.URL.Path]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	c := registry.NewClient(srv.URL, srv.Client())
+
+	got, err := c.ReleaseTagLevels(context.Background(), "rel-1")
+	if err != nil {
+		t.Fatalf("ReleaseTagLevels: %v", err)
+	}
+	if got.ProductID != "prod-1" || got.ProjectID != "proj-1" || len(got.Release) != 1 || got.Release[0] != "rebuild:auto" ||
+		len(got.Project) != 1 || got.Project[0] != "team:a" || len(got.Product) != 2 || got.Product[0] != "rebuild:off" {
+		t.Errorf("levels = %+v", got)
+	}
+	// no id · unknown release · blank project · release tags unreadable · release tags answer
+	// with no tags field · project tags unreadable · product tags unreadable.
+	for _, id := range []string{"", "missing", "rel-noproj", "rel-notags", "rel-view", "rel-2", "rel-3"} {
+		if _, err := c.ReleaseTagLevels(context.Background(), id); err == nil {
+			t.Errorf("release %q: want an error, got tags", id)
+		}
+	}
+}
+
+// EDR-REBUILD-01 D10: the build profile of a Release is read raw and named by scope, revision
+// and digest. The read fails closed: only an explicit `found: false` is "no profile".
+func TestClient_ReleaseBuildProfile(t *testing.T) {
+	const profile = `{"image":"registry.example/app","args":{"BASE":"el8"}}`
+	rec := `{"revision":4,"sha256":"abc123","profile":` + profile + `}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := map[string]string{
+			"/api/v1/releases/rel-1/build-profile/resolved":       `{"release_id":"rel-1","project_id":"proj-1","found":true,"scope":"project","record":` + rec + `}`,
+			"/api/v1/releases/rel-none/build-profile/resolved":    `{"release_id":"rel-none","project_id":"proj-1","found":false}`,
+			"/api/v1/releases/rel-nofound/build-profile/resolved": `{"release_id":"rel-nofound"}`,
+			"/api/v1/releases/rel-norec/build-profile/resolved":   `{"found":true,"scope":"project"}`,
+			"/api/v1/releases/rel-noscope/build-profile/resolved": `{"found":true,"record":` + rec + `}`,
+			"/api/v1/releases/rel-norev/build-profile/resolved":   `{"found":true,"scope":"release","record":{"sha256":"abc123","profile":{}}}`,
+			"/api/v1/releases/rel-nosha/build-profile/resolved":   `{"found":true,"scope":"release","record":{"revision":1,"profile":{}}}`,
+			"/api/v1/releases/rel-noprof/build-profile/resolved":  `{"found":true,"scope":"release","record":{"revision":1,"sha256":"abc123"}}`,
+		}[r.URL.Path]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	c := registry.NewClient(srv.URL, srv.Client())
+	ctx := context.Background()
+
+	got, err := c.ReleaseBuildProfile(ctx, "rel-1")
+	if err != nil {
+		t.Fatalf("ReleaseBuildProfile: %v", err)
+	}
+	if !got.Found || got.Scope != "project" || got.Revision != 4 || got.SHA256 != "abc123" || string(got.Profile) != profile {
+		t.Errorf("profile = %+v (%s)", got, got.Profile)
+	}
+	if got, err := c.ReleaseBuildProfile(ctx, "rel-none"); err != nil || got.Found || got.Profile != nil {
+		t.Errorf("no profile = %+v %v", got, err)
+	}
+	// an older Registry without the address · no found field · found with parts missing.
+	for _, id := range []string{"missing", "rel-nofound", "rel-norec", "rel-noscope", "rel-norev", "rel-nosha", "rel-noprof"} {
+		if got, err := c.ReleaseBuildProfile(ctx, id); err == nil || got.Found {
+			t.Errorf("release %q: want an error, got %+v", id, got)
+		}
+	}
+}

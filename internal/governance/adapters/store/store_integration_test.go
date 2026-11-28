@@ -95,7 +95,7 @@ func newPool(t *testing.T) *pgxpool.Pool {
 func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
-		`TRUNCATE finding_owner_severities, component_score_revisions, finding_score_revisions, review_warnings, sla_breaches, sla_policies, processed_events, governance_outbox, release_evaluations_pending, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`); err != nil {
+		`TRUNCATE rebuild_triggers, rebuild_decisions, release_evaluated_events, fix_notices, rebuild_policies, rebuild_policy_history, finding_owner_severities, component_score_revisions, finding_score_revisions, review_warnings, sla_breaches, sla_policies, processed_events, governance_outbox, release_evaluations_pending, finding_positions, finding_proposals, finding_components, findings RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }
@@ -1501,5 +1501,217 @@ func TestWatchRoundTrip(t *testing.T) {
 	}
 	if list, _ := st.ListWatches(ctx); len(list) != 1 {
 		t.Errorf("after delete = %d", len(list))
+	}
+}
+
+// EDR-REBUILD-01 step R1: the rebuild policy store. Nothing stored reads as not found; each
+// change is the next version of its scope and one history row, in one transaction; the history
+// reads newest first; one scope never shows in another.
+func TestRebuildPolicyStore(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	if _, found, err := st.RebuildPolicy(ctx, app.RebuildScopeInstallation, ""); err != nil || found {
+		t.Fatalf("empty: found=%v err=%v", found, err)
+	}
+	if hist, err := st.RebuildPolicyHistory(ctx, app.RebuildScopeInstallation, ""); err != nil || len(hist) != 0 {
+		t.Fatalf("empty history = %+v %v", hist, err)
+	}
+
+	first := domain.DefaultRebuildPolicy()
+	first.CoolDown = 90*time.Minute + 500*time.Millisecond // stored in whole seconds
+	v1, err := st.PutRebuildPolicy(ctx, app.RebuildPolicyRecord{
+		ScopeKind: app.RebuildScopeInstallation, Version: 99, Policy: first, UpdatedAt: epoch, UpdatedBy: "alice",
+	})
+	if err != nil || v1.Version != 1 || v1.Policy.CoolDown != 90*time.Minute {
+		t.Fatalf("v1 = %+v %v", v1, err)
+	}
+	second := domain.RebuildPolicy{SeverityFloor: domain.SLABucketLow, Mode: domain.RebuildModeAuto}
+	v2, err := st.PutRebuildPolicy(ctx, app.RebuildPolicyRecord{
+		ScopeKind: app.RebuildScopeInstallation, Policy: second, UpdatedAt: epoch.Add(time.Hour), UpdatedBy: "bob",
+	})
+	if err != nil || v2.Version != 2 {
+		t.Fatalf("v2 = %+v %v", v2, err)
+	}
+	// Another scope starts its own count and is not seen from the installation scope.
+	other, err := st.PutRebuildPolicy(ctx, app.RebuildPolicyRecord{
+		ScopeKind: "product", ScopeID: "prod-1", Policy: first, UpdatedAt: epoch, UpdatedBy: "alice",
+	})
+	if err != nil || other.Version != 1 {
+		t.Fatalf("other scope = %+v %v", other, err)
+	}
+
+	cur, found, err := st.RebuildPolicy(ctx, app.RebuildScopeInstallation, "")
+	if err != nil || !found || cur != v2 || cur.Policy != second || cur.UpdatedBy != "bob" || !cur.UpdatedAt.Equal(epoch.Add(time.Hour)) {
+		t.Fatalf("current = %+v found=%v err=%v, want %+v", cur, found, err, v2)
+	}
+	hist, err := st.RebuildPolicyHistory(ctx, app.RebuildScopeInstallation, "")
+	if err != nil || len(hist) != 2 || hist[0] != v2 || hist[1] != v1 {
+		t.Fatalf("history = %+v %v", hist, err)
+	}
+
+	// The database refuses what the service would refuse, and a refused change leaves no trace.
+	for name, bad := range map[string]app.RebuildPolicyRecord{
+		"unknown mode":  {ScopeKind: app.RebuildScopeInstallation, Policy: domain.RebuildPolicy{SeverityFloor: domain.SLABucketHigh, Mode: "always"}, UpdatedAt: epoch, UpdatedBy: "alice"},
+		"unknown floor": {ScopeKind: app.RebuildScopeInstallation, Policy: domain.RebuildPolicy{SeverityFloor: "severe", Mode: domain.RebuildModeAsk}, UpdatedAt: epoch, UpdatedBy: "alice"},
+		"no actor":      {ScopeKind: app.RebuildScopeInstallation, Policy: domain.DefaultRebuildPolicy(), UpdatedAt: epoch},
+	} {
+		if _, err := st.PutRebuildPolicy(ctx, bad); err == nil {
+			t.Errorf("%s: stored, want a refusal", name)
+		}
+	}
+	if cur, _, _ := st.RebuildPolicy(ctx, app.RebuildScopeInstallation, ""); cur != v2 {
+		t.Fatalf("after refusals current = %+v, want %+v", cur, v2)
+	}
+	if hist, _ := st.RebuildPolicyHistory(ctx, app.RebuildScopeInstallation, ""); len(hist) != 2 {
+		t.Fatalf("after refusals history has %d rows, want 2", len(hist))
+	}
+}
+
+// EDR-REBUILD-01 step R1a: Product and Release policies. Each scope has its own count; a
+// removal leaves the table of policies in force, stays in the history as the next version, and
+// the count goes on when the scope gets a policy again; the list reads installation, Products,
+// Releases.
+func TestRebuildPolicyStoreOverrides(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	p := domain.DefaultRebuildPolicy()
+	put := func(kind, id, by string, at time.Time) app.RebuildPolicyRecord {
+		t.Helper()
+		rec, err := st.PutRebuildPolicy(ctx, app.RebuildPolicyRecord{ScopeKind: kind, ScopeID: id, Policy: p, UpdatedAt: at, UpdatedBy: by})
+		if err != nil {
+			t.Fatalf("put %s/%s: %v", kind, id, err)
+		}
+		return rec
+	}
+
+	if recs, err := st.RebuildPolicies(ctx); err != nil || len(recs) != 0 {
+		t.Fatalf("empty list = %+v %v", recs, err)
+	}
+	if _, found, err := st.RemoveRebuildPolicy(ctx, app.RebuildScopeProduct, "prod-1", epoch, "alice"); err != nil || found {
+		t.Fatalf("remove nothing: found=%v err=%v", found, err)
+	}
+
+	put(app.RebuildScopeRelease, "rel-1", "alice", epoch)
+	put(app.RebuildScopeProduct, "prod-2", "alice", epoch)
+	v1 := put(app.RebuildScopeProduct, "prod-1", "alice", epoch)
+	put(app.RebuildScopeInstallation, "", "alice", epoch)
+	recs, err := st.RebuildPolicies(ctx)
+	if err != nil || len(recs) != 4 || recs[0].ScopeKind != app.RebuildScopeInstallation || recs[1].ScopeID != "prod-1" ||
+		recs[2].ScopeID != "prod-2" || recs[3].ScopeKind != app.RebuildScopeRelease {
+		t.Fatalf("list = %+v %v", recs, err)
+	}
+
+	removed, found, err := st.RemoveRebuildPolicy(ctx, app.RebuildScopeProduct, "prod-1", epoch.Add(time.Hour), "carol")
+	if err != nil || !found || !removed.Removed || removed.Version != 2 || removed.UpdatedBy != "carol" ||
+		!removed.UpdatedAt.Equal(epoch.Add(time.Hour)) || removed.Policy != p {
+		t.Fatalf("removal = %+v found=%v err=%v", removed, found, err)
+	}
+	if _, found, _ := st.RebuildPolicy(ctx, app.RebuildScopeProduct, "prod-1"); found {
+		t.Fatal("a removed policy is still in force")
+	}
+	if recs, _ := st.RebuildPolicies(ctx); len(recs) != 3 {
+		t.Fatalf("list after removal has %d rows, want 3", len(recs))
+	}
+	// The scope's count goes on across the removal.
+	v3 := put(app.RebuildScopeProduct, "prod-1", "alice", epoch.Add(2*time.Hour))
+	if v3.Version != 3 || v3.Removed {
+		t.Fatalf("put after removal = %+v, want version 3", v3)
+	}
+	hist, err := st.RebuildPolicyHistory(ctx, app.RebuildScopeProduct, "prod-1")
+	if err != nil || len(hist) != 3 || hist[0] != v3 || hist[1] != removed || hist[2] != v1 {
+		t.Fatalf("history = %+v %v", hist, err)
+	}
+
+	// The database refuses a scope it does not know, an override with no id, and an installation
+	// policy with one.
+	for name, bad := range map[string]app.RebuildPolicyRecord{
+		"unknown kind":         {ScopeKind: "project", ScopeID: "proj-1", Policy: p, UpdatedAt: epoch, UpdatedBy: "alice"},
+		"product without id":   {ScopeKind: app.RebuildScopeProduct, Policy: p, UpdatedAt: epoch, UpdatedBy: "alice"},
+		"installation with id": {ScopeKind: app.RebuildScopeInstallation, ScopeID: "x", Policy: p, UpdatedAt: epoch, UpdatedBy: "alice"},
+	} {
+		if _, err := st.PutRebuildPolicy(ctx, bad); err == nil {
+			t.Errorf("%s: stored, want a refusal", name)
+		}
+	}
+
+	// Two changes of one scope at the same time get two consecutive versions; neither is lost.
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		go func() {
+			_, err := st.PutRebuildPolicy(ctx, app.RebuildPolicyRecord{ScopeKind: app.RebuildScopeRelease, ScopeID: "rel-busy", Policy: p, UpdatedAt: epoch, UpdatedBy: "alice"})
+			errs <- err
+		}()
+	}
+	for i := 0; i < 8; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent put: %v", err)
+		}
+	}
+	if hist, _ := st.RebuildPolicyHistory(ctx, app.RebuildScopeRelease, "rel-busy"); len(hist) != 8 || hist[0].Version != 8 || hist[7].Version != 1 {
+		t.Fatalf("concurrent history has %d rows", len(hist))
+	}
+}
+
+// EDR-REBUILD-01 step R2 part 1: the facts the rebuild policy reads, for one Release — every
+// Finding in id order with its stage, stance, the score priority reads (the owner-set one when
+// set), the known-exploited signal, and its live components. A retired component is not served,
+// another Release's Findings are not either, and an unknown Release is empty.
+func TestRebuildFacts(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	if got, err := st.RebuildFacts(ctx, "rel-r"); err != nil || len(got) != 0 {
+		t.Fatalf("empty release = %+v %v", got, err)
+	}
+	seed := func(id, rel, fl, cve string, comps ...domain.MatchedComponent) {
+		t.Helper()
+		f := newFinding(t, id, rel, fl, cve)
+		for _, c := range comps {
+			if _, err := f.AbsorbComponent(c); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := st.Save(ctx, f, true, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed("r-a", "rel-r", "fl-a", "CVE-2026-0001",
+		domain.MatchedComponent{PURL: "pkg:rpm/redhat/kernel@4.18.0-1.el8", Name: "kernel", Version: "4.18.0-1.el8", Ecosystem: "rpm", ClaimClass: "carrier", VerdictState: "open"},
+		domain.MatchedComponent{PURL: "pkg:rpm/redhat/kernel-core@4.18.0-2.el8", Name: "kernel-core", Version: "4.18.0-2.el8", Ecosystem: "rpm", VerdictState: "cleared_vendor_fix"},
+		domain.MatchedComponent{PURL: "app:kernel@4.18.0-1.el8", Name: "kernel", Version: "4.18.0-1.el8"})
+	seed("r-b", "rel-r", "fl-b", "CVE-2026-0002")
+	seed("r-z", "rel-other", "fl-a", "CVE-2026-0001",
+		domain.MatchedComponent{PURL: "pkg:rpm/redhat/kernel@4.18.0-1.el8", Name: "kernel", Version: "4.18.0-1.el8", Ecosystem: "rpm"})
+	for _, q := range []string{
+		`UPDATE findings SET base_score = 80, signal_kev = true WHERE id = 'r-a'`,
+		`UPDATE findings SET base_score = 95, owner_base_score = 20, current_stance = 'accepted_risk' WHERE id = 'r-b'`,
+		`UPDATE finding_components SET retired_at = now() WHERE finding_id = 'r-a' AND purl LIKE 'app:%'`,
+	} {
+		if _, err := pool.Exec(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+
+	got, err := st.RebuildFacts(ctx, "rel-r")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("facts = %+v %v", got, err)
+	}
+	a, b := got[0], got[1]
+	if a.FindingID != "r-a" || a.FaultlineID != "fl-a" || a.CVE != "CVE-2026-0001" || a.Stance != "" || a.BaseScore != 80 ||
+		a.OwnerSet || !a.KnownExploited || a.Stage == "" || len(a.Components) != 2 {
+		t.Fatalf("a = %+v", a)
+	}
+	if c := a.Components[0]; c.PURL != "pkg:rpm/redhat/kernel-core@4.18.0-2.el8" || c.VerdictIsOpen() || c.Version != "4.18.0-2.el8" {
+		t.Errorf("cleared component = %+v", c)
+	}
+	if c := a.Components[1]; c.PURL != "pkg:rpm/redhat/kernel@4.18.0-1.el8" || !c.VerdictIsOpen() || c.ClaimClass != "carrier" || c.Ecosystem != "rpm" || c.Name != "kernel" {
+		t.Errorf("open component = %+v", c)
+	}
+	if b.FindingID != "r-b" || b.Stance != domain.StanceAcceptedRisk || b.BaseScore != 20 || !b.OwnerSet || b.KnownExploited || len(b.Components) != 0 {
+		t.Errorf("b = %+v", b)
 	}
 }

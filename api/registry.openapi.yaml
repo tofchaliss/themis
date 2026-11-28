@@ -607,6 +607,197 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /projects/{id}/build-profile:
+    get:
+      operationId: getProjectBuildProfile
+      summary: >-
+        A project's own build profile - the current value and every earlier one, newest first
+        (EDR-REBUILD-01 D10, D16). `current` is absent when the project states none.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildProfileHistory'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: putProjectBuildProfile
+      summary: >-
+        Store a new build profile for this project, as its next revision. Admin, or a key scoped
+        to the owning product. The profile must be a JSON object of at most 16 KiB and 5 levels,
+        with no key named like a secret (password, token, secret, api_key, credential).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildProfilePut'
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildProfileRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteProjectBuildProfile
+      summary: >-
+        Remove this project's build profile. The removal is kept in the history with its actor.
+        Admin, or a key scoped to the owning product. 404 when the project states none.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: actor
+          in: query
+          required: true
+          description: The person removing the profile, recorded with the removal.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Removed. The body is the history entry of the removal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildProfileRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /releases/{id}/build-profile:
+    get:
+      operationId: getReleaseBuildProfile
+      summary: >-
+        A release's own build profile - the current value and every earlier one, newest first
+        (EDR-REBUILD-01 D10, D16). `current` is absent when the release states none.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildProfileHistory'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: putReleaseBuildProfile
+      summary: >-
+        Store a new build profile for this release, as its next revision. Admin, or a key scoped
+        to the owning product. The profile must be a JSON object of at most 16 KiB and 5 levels,
+        with no key named like a secret (password, token, secret, api_key, credential).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuildProfilePut'
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildProfileRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteReleaseBuildProfile
+      summary: >-
+        Remove this release's build profile. The removal is kept in the history with its actor.
+        Admin, or a key scoped to the owning product. 404 when the release states none.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: actor
+          in: query
+          required: true
+          description: The person removing the profile, recorded with the removal.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Removed. The body is the history entry of the removal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuildProfileRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /releases/{id}/build-profile/resolved:
+    get:
+      operationId: getReleaseResolvedBuildProfile
+      summary: >-
+        The build profile that applies to this release and where it comes from: the release's
+        own, else its project's (EDR-REBUILD-01 D10). The release's own replaces the project's
+        as a whole; nothing is merged. `found` is false when neither states one.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResolvedBuildProfile'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /products/{id}/tags:
     get:
       operationId: getProductTags
@@ -910,6 +1101,74 @@ components:
         release: { $ref: '#/components/schemas/RequirementRecord' }
         project: { $ref: '#/components/schemas/RequirementRecord' }
         product: { $ref: '#/components/schemas/RequirementRecord' }
+    BuildProfile:
+      type: object
+      description: >-
+        The build profile itself: a JSON object Themis stores and passes on without reading
+        inside it. Served byte for byte as stored (compact form, keys in the order written).
+      additionalProperties: true
+      x-go-type: json.RawMessage
+    BuildProfilePut:
+      type: object
+      required: [profile, actor]
+      properties:
+        profile:
+          $ref: '#/components/schemas/BuildProfile'
+        actor:
+          type: string
+          description: Who made the change. Required.
+    BuildProfileRecord:
+      type: object
+      description: One recorded change of a build profile. Records are never edited.
+      required: [level, entity_id, revision, removed, actor, recorded_at]
+      properties:
+        level:
+          type: string
+          enum: [project, release]
+        entity_id: { type: string }
+        revision:
+          type: integer
+          description: Counts the changes of this entity's profile from 1.
+        removed:
+          type: boolean
+          description: True on the record that took the profile away; it carries no profile.
+        profile:
+          $ref: '#/components/schemas/BuildProfile'
+        sha256:
+          type: string
+          description: Hex SHA-256 of the stored profile bytes. Absent on a removal.
+        actor: { type: string }
+        via:
+          type: string
+          description: The name of the API key that made the change, when auth is on.
+        recorded_at:
+          type: string
+          format: date-time
+    BuildProfileHistory:
+      type: object
+      required: [history]
+      properties:
+        current:
+          $ref: '#/components/schemas/BuildProfileRecord'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/BuildProfileRecord'
+    ResolvedBuildProfile:
+      type: object
+      required: [release_id, project_id, found]
+      properties:
+        release_id: { type: string }
+        project_id: { type: string }
+        found:
+          type: boolean
+          description: False when neither the release nor its project states a profile.
+        scope:
+          type: string
+          enum: [project, release]
+          description: Where the profile in force is stored. Absent when none is found.
+        record:
+          $ref: '#/components/schemas/BuildProfileRecord'
     TagSet:
       type: object
       required: [tags, effective]

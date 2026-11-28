@@ -515,6 +515,181 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rebuild-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The installation rebuild policy (EDR-REBUILD-01 D2) - the fixed-field record that says when an image rebuild is worth asking for. With nothing stored it reads the shipped defaults at version 0. Read scope. Step R1 stores the record only - nothing is evaluated against a Release and no build is asked for yet. */
+        get: operations["getRebuildPolicy"];
+        /** Store a new version of the installation rebuild policy. Admin scope only, and the change must name its actor (D9). Every field is required - a switch left out is refused, never read as off. Each change adds one to the version and is kept in the history. */
+        put: operations["putRebuildPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rebuild-policy/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every stored version of the installation rebuild policy, newest first, with who changed it and when (EDR-REBUILD-01 D9). Empty when the policy was never set. Read scope. */
+        get: operations["getRebuildPolicyHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rebuild-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every rebuild policy in force in the installation on one page (EDR-REBUILD-01 D11 item 3) - the installation policy first, then the Product policies, then the Release policies. Read scope. */
+        get: operations["listRebuildPolicies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/products/{productId}/rebuild-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The rebuild policy stored for this Product (EDR-REBUILD-01 D11). 404 when the Product has none and takes the installation policy. Read scope. */
+        get: operations["getProductRebuildPolicy"];
+        /** Store a new version of this Product's rebuild policy. The record is whole - it takes no single field from the level above (D11 item 2). Admin scope, or that Product's own `product:<id>` key. The change must name its actor and carry every field. A Product policy can lower the mode and can never lift it above the installation policy's (D17). */
+        put: operations["putProductRebuildPolicy"];
+        post?: never;
+        /** Remove this Product's rebuild policy, so the Product takes the installation policy again. Admin scope, or that Product's own `product:<id>` key. The removal is kept in the history with its actor. 404 when there is none. */
+        delete: operations["deleteProductRebuildPolicy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/products/{productId}/rebuild-policy/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every version of this Product's rebuild policy, newest first, removals included. Read scope. */
+        get: operations["getProductRebuildPolicyHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{releaseId}/rebuild-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The rebuild policy stored for this Release (EDR-REBUILD-01 D11). 404 when the Release has none and takes its Product's policy or the installation policy. Read scope. */
+        get: operations["getReleaseRebuildPolicy"];
+        /** Store a new version of this Release's rebuild policy. The record is whole - it takes no single field from the level above (D11 item 2). Admin scope, or the `product:<id>` key of the Product that owns the Release. The change must name its actor and carry every field. A Release policy can lower the mode and can never lift it above the installation policy's (D17). */
+        put: operations["putReleaseRebuildPolicy"];
+        post?: never;
+        /** Remove this Release's rebuild policy, so the Release takes its Product's policy or the installation policy again. Admin scope, or the `product:<id>` key of the Product that owns the Release. The removal is kept in the history with its actor. 404 when there is none. */
+        delete: operations["deleteReleaseRebuildPolicy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{releaseId}/rebuild-policy/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every version of this Release's rebuild policy, newest first, removals included. Read scope. */
+        get: operations["getReleaseRebuildPolicyHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{releaseId}/rebuild-policy/in-force": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The rebuild policy that applies to this Release and the level it comes from - the Release's own, else its Product's, else the installation's (EDR-REBUILD-01 D11 item 3) - with the highest mode the policies allow (D17). 503 when the Release's Product cannot be read from Registry - the installation policy is never shown in place of a Product policy that could not be looked up. Read scope. */
+        get: operations["getReleaseRebuildPolicyInForce"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{releaseId}/rebuild-evaluation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What the rebuild policy says about this Release right now (EDR-REBUILD-01 step R2, part 1) - a dry run. It applies the policy in force, the tags (D4) and the effective mode (D17) to the facts on record and lists the components that count and why (D34). It stores nothing, publishes nothing and starts no build. 503 when the Release's Product or tags cannot be read from Registry. When Knowledge cannot be asked the read still answers, with `fix_verdicts_read` false and every fix unknown (D30). Read scope. */
+        get: operations["getReleaseRebuildEvaluation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{releaseId}/rebuild-decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The rebuild triggers of this Release and how each ended (EDR-REBUILD-01 step R2, part 2), newest first. A trigger is a new SBOM that was judged, or a fix that became available (D3). Each one is judged once. It ends in `none` with the reason, or in `recommend` or `request` with the recorded decision and its frozen facts (D27, D29). A trigger not judged yet reads `settled` false. Reading starts nothing. Read scope. */
+        get: operations["getReleaseRebuildDecisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/faultlines/{faultlineId}/findings": {
         parameters: {
             query?: never;
@@ -1110,6 +1285,297 @@ export interface components {
         SLAPolicySet: {
             estate: components["schemas"]["SLAPolicyRecord"];
             overrides: components["schemas"]["SLAPolicyRecord"][];
+        };
+        RebuildPolicyPut: {
+            /** @description Count a Finding only when a fixed version is known for its component. */
+            fix_required: boolean;
+            /**
+             * @description The lowest severity that counts.
+             * @enum {string}
+             */
+            severity_floor: "low" | "medium" | "high" | "critical";
+            /** @description Count a known-exploited Finding whatever its severity. */
+            count_known_exploited: boolean;
+            /** @description Do not count a Finding decided not_affected or accepted_risk. */
+            skip_decided: boolean;
+            /** @description Do not count scope-class components; unknown counts as carrier. */
+            carrier_only: boolean;
+            /**
+             * Format: int64
+             * @description The shortest time between two rebuild requests for one Release. 0 = none.
+             */
+            cool_down_seconds: number;
+            /**
+             * @description off = no rebuild is asked for; ask = a person is told and a person starts the build; auto = the request is sent without asking.
+             * @enum {string}
+             */
+            mode: "off" | "ask" | "auto";
+            /** @description The person changing the policy, recorded with the version. */
+            updated_by: string;
+        };
+        RebuildPolicyRecord: {
+            /**
+             * @description The level this policy sits at (D11).
+             * @enum {string}
+             */
+            scope_kind: "installation" | "product" | "release";
+            /** @description Empty for the installation policy; otherwise the Product id or the Release id. */
+            scope_id: string;
+            /** @description Only in a history: true on the entry that records the removal of a Product or Release policy. Its values are the removed policy's, its actor and time the removal's. */
+            removed?: boolean;
+            /** @description Counts the changes from 1. 0 = nothing stored, the shipped defaults are in force. */
+            version: number;
+            /** @description Count a Finding only when a fixed version is known for its component. */
+            fix_required: boolean;
+            /**
+             * @description The lowest severity that counts.
+             * @enum {string}
+             */
+            severity_floor: "low" | "medium" | "high" | "critical";
+            /** @description Count a known-exploited Finding whatever its severity. */
+            count_known_exploited: boolean;
+            /** @description Do not count a Finding decided not_affected or accepted_risk. */
+            skip_decided: boolean;
+            /** @description Do not count scope-class components; unknown counts as carrier. */
+            carrier_only: boolean;
+            /**
+             * Format: int64
+             * @description The shortest time between two rebuild requests for one Release. 0 = none.
+             */
+            cool_down_seconds: number;
+            /**
+             * @description off = no rebuild is asked for; ask = a person is told and a person starts the build; auto = the request is sent without asking.
+             * @enum {string}
+             */
+            mode: "off" | "ask" | "auto";
+            /**
+             * Format: date-time
+             * @description Absent for the shipped defaults (nothing stored yet).
+             */
+            updated_at?: string;
+            updated_by?: string;
+        };
+        RebuildPolicyInForce: {
+            release_id: string;
+            /** @description The Product that owns the Release, as Registry names it. */
+            product_id: string;
+            policy: components["schemas"]["RebuildPolicyRecord"];
+            /**
+             * @description The installation policy's mode - the ceiling nothing below can lift (D17).
+             * @enum {string}
+             */
+            installation_mode: "off" | "ask" | "auto";
+            /**
+             * @description The highest mode the policies allow for this Release - the lower of the installation policy's mode and the mode of the policy in force.
+             * @enum {string}
+             */
+            mode_ceiling: "off" | "ask" | "auto";
+            /**
+             * @description Which of the two set mode_ceiling.
+             * @enum {string}
+             */
+            mode_set_by: "installation" | "policy";
+            /** @description Whether the Release's tags were read. When true, `tag`, `effective_mode` and `effective_mode_set_by` are present. A tag can only lower mode_ceiling, and a Release with no rebuild tag takes no part at all (D4, D17). */
+            tags_applied: boolean;
+            /** @description The Project of the Release. Present when tags_applied is true. */
+            project_id?: string;
+            tag?: components["schemas"]["RebuildTagMode"];
+            /**
+             * @description The mode that applies to this Release - the lowest of the installation mode, the mode of the policy in force and the tag (D17).
+             * @enum {string}
+             */
+            effective_mode?: "off" | "ask" | "auto";
+            /**
+             * @description Which of the three set effective_mode. `tag` also covers a Release with no rebuild tag at all - the missing tag is what keeps it out.
+             * @enum {string}
+             */
+            effective_mode_set_by?: "installation" | "policy" | "tag";
+        };
+        /** @description What the tags of the Release, its Project and its Product say (D4, D17). */
+        RebuildTagMode: {
+            /**
+             * @description `off` when `rebuild:off` sits on any level or when no rebuild tag exists; otherwise from the nearest level carrying `rebuild:ask` or `rebuild:auto`.
+             * @enum {string}
+             */
+            mode: "off" | "ask" | "auto";
+            /** @description The tag that decided. Absent when no rebuild tag exists on any level. */
+            tag?: string;
+            /**
+             * @description Where that tag sits.
+             * @enum {string}
+             */
+            level?: "release" | "project" | "product";
+        };
+        RebuildEvaluation: {
+            release_id: string;
+            product_id: string;
+            project_id: string;
+            /** Format: date-time */
+            evaluated_at: string;
+            policy: components["schemas"]["RebuildPolicyRecord"];
+            /** @enum {string} */
+            installation_mode: "off" | "ask" | "auto";
+            /** @enum {string} */
+            mode_ceiling: "off" | "ask" | "auto";
+            tag: components["schemas"]["RebuildTagMode"];
+            /** @enum {string} */
+            effective_mode: "off" | "ask" | "auto";
+            /** @enum {string} */
+            effective_mode_set_by: "installation" | "policy" | "tag";
+            /**
+             * @description What the policy would do now. `recommend` - mode ask and at least one component counts, a person decides. `request` - mode auto and at least one counts. `none` - nothing counts, or the effective mode is off. Nothing is sent in any case.
+             * @enum {string}
+             */
+            outcome: "none" | "recommend" | "request";
+            /** @description The open component occurrences of open Findings the policy looked at. */
+            considered: number;
+            /** @description The occurrences that did not count, by the first rule that left each out. */
+            skipped: {
+                /** @description The Finding's Position is not_affected or accepted_risk (skip_decided). */
+                decided: number;
+                /** @description A scope-class component (carrier_only). */
+                scope_component: number;
+                /** @description No fixed version applies to the occurrence (fix_required). */
+                no_fix: number;
+                /** @description Themis could not tell whether the occurrence is below a fixed version (fix_required). Unknown is not a known fix (D30). */
+                fix_unknown: number;
+                /** @description Severe enough to count, and the fix exists only as a build of another module stream, which a rebuild does not pick up (fix_required). Each one is listed in `other_stream`. */
+                fix_other_stream: number;
+                /** @description Below the severity floor and not counted as known exploited. */
+                below_floor: number;
+            };
+            /** @description False when Knowledge could not be asked. Every fix then reads unknown, so nothing counts while fix_required is on. */
+            fix_verdicts_read: boolean;
+            targeted: components["schemas"]["RebuildTargetEntry"][];
+            /** @description The components that would count, were their fix not published only for another module stream. They are NOT targeted and never part of a request - switching a module stream is a person's change, not a rebuild. Listed so that a person can act. `fixed_versions` are the builds of the other stream. */
+            other_stream: components["schemas"]["RebuildTargetEntry"][];
+        };
+        RebuildTriggerList: {
+            items: components["schemas"]["RebuildTriggerRecord"][];
+        };
+        /** @description One rebuild trigger of a Release and how it ended. */
+        RebuildTriggerRecord: {
+            /** @description The id of the event that caused the judgement (D27). */
+            trigger_id: string;
+            trigger_source: string;
+            /** @enum {string} */
+            trigger_type: "new_sbom" | "fix_available";
+            release_id: string;
+            /** Format: date-time */
+            received_at: string;
+            /** @description False while the trigger waits to be judged. The fields below are then absent or zero. */
+            settled: boolean;
+            /** Format: date-time */
+            settled_at?: string;
+            /** @enum {string} */
+            outcome?: "none" | "recommend" | "request";
+            /**
+             * @description Set with outcome `none`. `mode_off` - the effective mode of the Release is off (no rebuild tag, or a level says off). `nothing_counts` - the mode allows a rebuild and no component counts. `gave_up` - the Release could not be judged for 24 hours and the trigger was closed unjudged.
+             * @enum {string}
+             */
+            reason?: "mode_off" | "nothing_counts" | "gave_up";
+            /** @enum {string} */
+            effective_mode?: "off" | "ask" | "auto";
+            /** @enum {string} */
+            effective_mode_set_by?: "installation" | "policy" | "tag";
+            considered: number;
+            targeted_count: number;
+            decision?: components["schemas"]["RebuildDecision"];
+        };
+        /** @description One recorded rebuild decision with the facts frozen as they were read (D29). It is also what `governance.rebuild_recommended.v1` and `governance.rebuild_requested.v1` carry. A decision starts no build. */
+        RebuildDecision: {
+            decision_id: string;
+            /** @enum {string} */
+            outcome: "recommend" | "request";
+            /**
+             * @description Why the outcome is `recommend`. `mode_ask` - the effective mode is ask, a person decides. `no_build_profile` - no build profile applies to the Release, own or inherited, so no build could be asked for whatever the mode (D10 item 6). Absent on a request.
+             * @enum {string}
+             */
+            recommend_reason?: "mode_ask" | "no_build_profile";
+            /** @description The build profile that applied to the Release, copied as stored and frozen on the decision (D10). Themis does not read inside it. Absent when no profile applied. */
+            build?: {
+                [key: string]: unknown;
+            };
+            /** @description Names that profile (D16). Present exactly when `build` is. */
+            build_profile?: {
+                /** @enum {string} */
+                scope: "project" | "release";
+                revision: number;
+                sha256: string;
+            };
+            /** Format: date-time */
+            decided_at: string;
+            product_id: string;
+            project_id: string;
+            /** @enum {string} */
+            installation_mode: "off" | "ask" | "auto";
+            /** @enum {string} */
+            effective_mode: "ask" | "auto";
+            /** @enum {string} */
+            effective_mode_set_by: "installation" | "policy" | "tag";
+            /** @description The rebuild tag that applied. */
+            tag: string;
+            /** @description Where that tag was read (release, project or product). */
+            tag_level: string;
+            /** @description The policy in force as the decision read it - which record, which version, its values. */
+            policy: {
+                /** @enum {string} */
+                scope_kind: "installation" | "product" | "release";
+                scope_id: string;
+                version: number;
+                fix_required: boolean;
+                severity_floor: string;
+                count_known_exploited: boolean;
+                skip_decided: boolean;
+                carrier_only: boolean;
+                /** Format: int64 */
+                cool_down_seconds: number;
+                /** @enum {string} */
+                mode: "off" | "ask" | "auto";
+            };
+            considered: number;
+            /** @description How many occurrences did not count, by reason. */
+            skipped: {
+                [key: string]: number;
+            };
+            targeted: components["schemas"]["RebuildTargetEntry"][];
+            other_stream: components["schemas"]["RebuildTargetEntry"][];
+        };
+        /** @description One counted component of one Finding (D34). The pair finding_id + purl is unique. */
+        RebuildTargetEntry: {
+            finding_id: string;
+            cve: string;
+            purl: string;
+            current_version: string;
+            /** @description The vendor fix bounds the installed version is below, as Knowledge recorded them. Empty only when fix_required is off and no fix is known. */
+            fixed_versions: string[];
+            /** @description Where the fix comes from. `knowledge_verdict` - the bound Knowledge recorded on the occurrence verdict. Absent when no fix is known. */
+            fix_source?: string;
+            /** @description The severity bucket the policy compared with its floor; empty with no severity evidence. */
+            severity: string;
+            /**
+             * @description Where the severity came from - the score priority and the SLA read, or the one a person set. The calculated component assessment is in shadow and is not read.
+             * @enum {string}
+             */
+            score_source: "base_score" | "owner_set";
+            /** @description That score on the 0-100 scale. */
+            score: number;
+            known_exploited: boolean;
+            /**
+             * @description `scope` can occur only while carrier_only is off.
+             * @enum {string}
+             */
+            claim_class: "carrier" | "unknown" | "scope";
+            /** @description `none`, or the stance in force. */
+            position: string;
+            counted_because: ("severity_floor" | "known_exploited")[];
+            assessment: {
+                /**
+                 * @description D35. `not_assessed` - the component assessment's severity was not used. `not_eligible` - a scope-class component. `assessed` does not occur while the assessment is in shadow.
+                 * @enum {string}
+                 */
+                state: "assessed" | "not_assessed" | "not_eligible";
+            };
         };
         SLAAcceptancePeriod: {
             /** Format: date-time */
@@ -2267,6 +2733,393 @@ export interface operations {
             400: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             500: components["responses"]["Problem"];
+        };
+    };
+    getRebuildPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    putRebuildPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildPolicyPut"];
+            };
+        };
+        responses: {
+            /** @description Stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getRebuildPolicyHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"][];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listRebuildPolicies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"][];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getProductRebuildPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    putProductRebuildPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildPolicyPut"];
+            };
+        };
+        responses: {
+            /** @description Stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteProductRebuildPolicy: {
+        parameters: {
+            query: {
+                /** @description The person removing the policy, recorded with the removal. */
+                updated_by: string;
+            };
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. The body is the history entry of the removal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getProductRebuildPolicyHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"][];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseRebuildPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    putReleaseRebuildPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildPolicyPut"];
+            };
+        };
+        responses: {
+            /** @description Stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteReleaseRebuildPolicy: {
+        parameters: {
+            query: {
+                /** @description The person removing the policy, recorded with the removal. */
+                updated_by: string;
+            };
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. The body is the history entry of the removal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseRebuildPolicyHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"][];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseRebuildPolicyInForce: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyInForce"];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseRebuildEvaluation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildEvaluation"];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseRebuildDecisions: {
+        parameters: {
+            query?: {
+                /** @description How many triggers to return. Default 20, at most 200. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildTriggerList"];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
         };
     };
     getFaultlineFindings: {

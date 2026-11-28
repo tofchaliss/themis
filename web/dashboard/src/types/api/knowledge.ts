@@ -250,6 +250,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/releases/{releaseId}/fix-verdicts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * For every live occurrence of one release, whether a published fix exists that the install has not picked up (EDR-REBUILD-01 D19, D30).
+         * @description Serves the RECORDED occurrence verdict, so a consumer in another context never orders version strings itself. `fix` is `known` when the occurrence is open and below at least one vendor bound for its own package and world, `other_stream` when every such bound is a build of another module stream (a fix exists, a rebuild does not pick it up), `none` when there is nothing to pick up (already cleared, or compared with no bound on record), and `unknown` when Themis could not compare (an ecosystem the fixed-verdict does not cover, or an rpm build that names no EL stream). Unknown is not a known fix. Read-only; a release with no match is an empty list. 503 when the read is not wired.
+         */
+        get: operations["getReleaseFixVerdicts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/scanner-reports/{evidenceId}/unresolved": {
         parameters: {
             query?: never;
@@ -542,6 +562,23 @@ export interface components {
             version?: string;
             /** @description Canonical ecosystem the fix was published for (rpm, apk, npm, ...). Absent when the source did not say; a consumer must treat an absent ecosystem as matching any component (only positive evidence of mismatch excludes). */
             ecosystem?: string;
+        };
+        FixVerdict: {
+            faultline_id: string;
+            cve: string;
+            purl: string;
+            /** @description The component version the occurrence was judged with. */
+            version: string;
+            ecosystem: string;
+            /** @description The recorded occurrence verdict (`open` or `cleared_vendor_fix`). */
+            state: string;
+            /**
+             * @description `other_stream` - the occurrence is below vendor bounds, and every one of them is a build of another module stream, which a plain update or rebuild never reaches.
+             * @enum {string}
+             */
+            fix: "known" | "other_stream" | "none" | "unknown";
+            /** @description The vendor fix bounds the open occurrence is below; empty unless `fix` is `known`. */
+            behind: string[];
         };
         SanityFlag: {
             release_id: string;
@@ -1052,6 +1089,31 @@ export interface operations {
                     "application/json": components["schemas"]["SanityFlag"][];
                 };
             };
+        };
+    };
+    getReleaseFixVerdicts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FixVerdict"][];
+                };
+            };
+            400: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
         };
     };
     getUnresolvedComponents: {

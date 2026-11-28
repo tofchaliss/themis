@@ -76,6 +76,51 @@ type productView struct {
 	Name string `json:"name"`
 }
 
+// tagSet mirrors Registry's TagSet. Tags is a pointer so that an answer WITHOUT the field can be
+// told apart from an entity with no tags: the single-entity views carry no tags at all, and
+// reading them as "no tag" is exactly the mistake this type exists to refuse.
+type tagSet struct {
+	Tags *[]string `json:"tags"`
+}
+
+// ownTags reads one entity's OWN tags from Registry's tag read (`/<kind>/{id}/tags`). A missing
+// `tags` field is an error, never an empty list.
+func (c *Client) ownTags(ctx context.Context, kind, id string) ([]string, error) {
+	var set tagSet
+	if err := c.get(ctx, "/api/v1/"+kind+"/"+url.PathEscape(id)+"/tags", &set); err != nil {
+		return nil, fmt.Errorf("registry: tags of %s %s: %w", kind, id, err)
+	}
+	if set.Tags == nil {
+		return nil, fmt.Errorf("registry: tags of %s %s: the answer carries no tags field", kind, id)
+	}
+	return *set.Tags, nil
+}
+
+// ReleaseTagLevels walks release → project → product and returns each level's OWN tags with the
+// two owner ids (the app.ReleaseTagReader port, EDR-REBUILD-01 D4). The levels are kept apart
+// because the rebuild tag rule reads them in order: `rebuild:off` anywhere wins, otherwise the
+// nearest level decides. The tags come from the tag reads, not from the entity views: the
+// single-entity views do not carry them (found on the VM check of step R2 part 1, where a
+// tagged Release read as untagged). Fails CLOSED at every step, like ReleaseOwners: a tag list
+// that could not be read must never look like "no tag".
+func (c *Client) ReleaseTagLevels(ctx context.Context, releaseID string) (app.ReleaseTagLevels, error) {
+	productID, projectID, err := c.ProductAndProjectOfRelease(ctx, releaseID)
+	if err != nil {
+		return app.ReleaseTagLevels{}, err
+	}
+	out := app.ReleaseTagLevels{ProductID: productID, ProjectID: projectID}
+	if out.Release, err = c.ownTags(ctx, "releases", releaseID); err != nil {
+		return app.ReleaseTagLevels{}, err
+	}
+	if out.Project, err = c.ownTags(ctx, "projects", projectID); err != nil {
+		return app.ReleaseTagLevels{}, err
+	}
+	if out.Product, err = c.ownTags(ctx, "products", productID); err != nil {
+		return app.ReleaseTagLevels{}, err
+	}
+	return out, nil
+}
+
 // ReleaseOwners walks release → project → product and returns the ids AND the names (the
 // app.ReleaseOwnerResolver port): scope decides on the ids, a person reads the names. Fails
 // CLOSED on a transport failure, a non-200 or a blank id, like ProductAndProjectOfRelease;
@@ -172,10 +217,47 @@ func (c *Client) get(ctx context.Context, path string, into any) error {
 	return json.NewDecoder(resp.Body).Decode(into)
 }
 
+// resolvedBuildProfile is the part of Registry's resolved build profile read Governance needs.
+// The profile stays raw: Themis does not read inside it (EDR-REBUILD-01 D10).
+type resolvedBuildProfile struct {
+	Found  *bool  `json:"found"`
+	Scope  string `json:"scope"`
+	Record *struct {
+		Revision int             `json:"revision"`
+		Profile  json.RawMessage `json:"profile"`
+		SHA256   string          `json:"sha256"`
+	} `json:"record"`
+}
+
+// ReleaseBuildProfile reads the build profile that applies to a Release (the
+// app.BuildProfileReader port). It fails CLOSED: a transport failure, a non-200, an answer
+// with no `found` field, or a "found" answer that names no scope, revision, digest or profile
+// is an error. Only an explicit `found: false` reads as "no profile", because that answer
+// turns a request into a recommendation.
+func (c *Client) ReleaseBuildProfile(ctx context.Context, releaseID string) (app.ReleaseBuildProfile, error) {
+	var res resolvedBuildProfile
+	if err := c.get(ctx, "/api/v1/releases/"+url.PathEscape(releaseID)+"/build-profile/resolved", &res); err != nil {
+		return app.ReleaseBuildProfile{}, fmt.Errorf("registry: build profile of release %s: %w", releaseID, err)
+	}
+	if res.Found == nil {
+		return app.ReleaseBuildProfile{}, fmt.Errorf("registry: build profile of release %s: the answer carries no found field", releaseID)
+	}
+	if !*res.Found {
+		return app.ReleaseBuildProfile{}, nil
+	}
+	rec := res.Record
+	if rec == nil || res.Scope == "" || rec.Revision <= 0 || rec.SHA256 == "" || len(rec.Profile) == 0 {
+		return app.ReleaseBuildProfile{}, fmt.Errorf("registry: build profile of release %s: the answer is incomplete", releaseID)
+	}
+	return app.ReleaseBuildProfile{Found: true, Profile: rec.Profile, Scope: res.Scope, Revision: rec.Revision, SHA256: rec.SHA256}, nil
+}
+
 var (
 	_ app.BlastRadiusReader       = (*Client)(nil)
 	_ app.ReleaseIdentityResolver = (*Client)(nil)
 	_ app.ReleaseOwnerResolver    = (*Client)(nil)
+	_ app.ReleaseTagReader        = (*Client)(nil)
+	_ app.BuildProfileReader      = (*Client)(nil)
 )
 
 // ReleaseProducts walks the estate — products, their projects, their releases — and maps every

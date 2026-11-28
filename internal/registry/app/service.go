@@ -26,6 +26,9 @@ type RegistryService struct {
 	// reqs is optional (nil = security requirements are not served; EDR-SCORING-01 S3).
 	reqs  RequirementStore
 	clock func() time.Time
+	// profiles is optional (nil = build profiles are not served; EDR-REBUILD-01 D10).
+	profiles     BuildProfileStore
+	profileClock func() time.Time
 }
 
 // NewRegistryService wires the use-case ports.

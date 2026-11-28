@@ -1,0 +1,364 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.rebuild_requested.v1.schema.json",
+  "title": "governance.rebuild_requested.v1",
+  "description": "Integration-contract v1 for a rebuild request (EDR-REBUILD-01 D9, D27, D29): the effective mode of the Release is auto and at least one component counts, and a build profile applies to the Release (no profile, no request: D10 item 6). The facts are frozen as the decision read them (D29); the record in Governance is the audit copy. A FACT about a decision: no Finding, Position or proposal changes, and Governance starts no build.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision_id",
+    "release_id",
+    "product_id",
+    "project_id",
+    "trigger_id",
+    "trigger_source",
+    "trigger_type",
+    "outcome",
+    "effective_mode",
+    "effective_mode_set_by",
+    "installation_mode",
+    "tag",
+    "tag_level",
+    "policy",
+    "considered",
+    "skipped",
+    "targeted",
+    "other_stream",
+    "decided_at",
+    "build",
+    "build_profile"
+  ],
+  "properties": {
+    "decision_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The identity of this decision (D27)."
+    },
+    "release_id": {
+      "type": "string"
+    },
+    "product_id": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "trigger_id": {
+      "type": "string",
+      "description": "The id of the event that caused the judgement."
+    },
+    "trigger_source": {
+      "type": "string"
+    },
+    "trigger_type": {
+      "enum": [
+        "new_sbom",
+        "fix_available"
+      ]
+    },
+    "outcome": {
+      "const": "request"
+    },
+    "effective_mode": {
+      "enum": [
+        "ask",
+        "auto"
+      ]
+    },
+    "effective_mode_set_by": {
+      "type": "string"
+    },
+    "installation_mode": {
+      "enum": [
+        "off",
+        "ask",
+        "auto"
+      ]
+    },
+    "tag": {
+      "type": "string"
+    },
+    "tag_level": {
+      "type": "string"
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope_kind",
+        "scope_id",
+        "version",
+        "fix_required",
+        "severity_floor",
+        "count_known_exploited",
+        "skip_decided",
+        "carrier_only",
+        "cool_down_seconds",
+        "mode"
+      ],
+      "properties": {
+        "scope_kind": {
+          "enum": [
+            "installation",
+            "product",
+            "release"
+          ]
+        },
+        "scope_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer",
+          "description": "0 when no policy is stored and the shipped defaults are in force."
+        },
+        "fix_required": {
+          "type": "boolean"
+        },
+        "severity_floor": {
+          "type": "string"
+        },
+        "count_known_exploited": {
+          "type": "boolean"
+        },
+        "skip_decided": {
+          "type": "boolean"
+        },
+        "carrier_only": {
+          "type": "boolean"
+        },
+        "cool_down_seconds": {
+          "type": "integer"
+        },
+        "mode": {
+          "enum": [
+            "off",
+            "ask",
+            "auto"
+          ]
+        }
+      }
+    },
+    "considered": {
+      "type": "integer"
+    },
+    "skipped": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "description": "How many occurrences did not count, by reason."
+    },
+    "targeted": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "finding_id",
+          "cve",
+          "purl",
+          "current_version",
+          "fixed_versions",
+          "fix_source",
+          "severity",
+          "score",
+          "score_source",
+          "known_exploited",
+          "claim_class",
+          "position",
+          "assessment_state",
+          "counted_because"
+        ],
+        "properties": {
+          "finding_id": {
+            "type": "string"
+          },
+          "cve": {
+            "type": "string"
+          },
+          "purl": {
+            "type": "string"
+          },
+          "current_version": {
+            "type": "string"
+          },
+          "fixed_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The vendor bounds the installed build is below, as Knowledge recorded them. A list: Governance orders no version strings (D30)."
+          },
+          "fix_source": {
+            "type": "string",
+            "description": "knowledge_verdict, or empty when no fix is known (possible only with fix_required off)."
+          },
+          "severity": {
+            "type": "string"
+          },
+          "score": {
+            "type": "integer"
+          },
+          "score_source": {
+            "enum": [
+              "base_score",
+              "owner_set"
+            ]
+          },
+          "known_exploited": {
+            "type": "boolean"
+          },
+          "claim_class": {
+            "enum": [
+              "carrier",
+              "scope",
+              "unknown"
+            ]
+          },
+          "position": {
+            "type": "string",
+            "description": "none, or the stance in force."
+          },
+          "assessment_state": {
+            "enum": [
+              "not_assessed",
+              "not_eligible",
+              "assessed"
+            ]
+          },
+          "counted_because": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "The components the rebuild is about (D29, D34)."
+    },
+    "other_stream": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "finding_id",
+          "cve",
+          "purl",
+          "current_version",
+          "fixed_versions",
+          "fix_source",
+          "severity",
+          "score",
+          "score_source",
+          "known_exploited",
+          "claim_class",
+          "position",
+          "assessment_state",
+          "counted_because"
+        ],
+        "properties": {
+          "finding_id": {
+            "type": "string"
+          },
+          "cve": {
+            "type": "string"
+          },
+          "purl": {
+            "type": "string"
+          },
+          "current_version": {
+            "type": "string"
+          },
+          "fixed_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The vendor bounds the installed build is below, as Knowledge recorded them. A list: Governance orders no version strings (D30)."
+          },
+          "fix_source": {
+            "type": "string",
+            "description": "knowledge_verdict, or empty when no fix is known (possible only with fix_required off)."
+          },
+          "severity": {
+            "type": "string"
+          },
+          "score": {
+            "type": "integer"
+          },
+          "score_source": {
+            "enum": [
+              "base_score",
+              "owner_set"
+            ]
+          },
+          "known_exploited": {
+            "type": "boolean"
+          },
+          "claim_class": {
+            "enum": [
+              "carrier",
+              "scope",
+              "unknown"
+            ]
+          },
+          "position": {
+            "type": "string",
+            "description": "none, or the stance in force."
+          },
+          "assessment_state": {
+            "enum": [
+              "not_assessed",
+              "not_eligible",
+              "assessed"
+            ]
+          },
+          "counted_because": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "description": "Components whose fix exists only in another module stream. Not part of the ask."
+    },
+    "decided_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "build": {
+      "type": "object",
+      "description": "The build profile that applies to the Release, copied as stored and frozen on the decision (D10). Opaque: Themis does not read inside it."
+    },
+    "build_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "revision",
+        "sha256"
+      ],
+      "description": "Names the build profile the decision used (D16).",
+      "properties": {
+        "scope": {
+          "enum": [
+            "project",
+            "release"
+          ],
+          "description": "Where the profile is stored."
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Hex SHA-256 of the stored profile bytes, which are the bytes of `build`."
+        }
+      }
+    }
+  }
+}

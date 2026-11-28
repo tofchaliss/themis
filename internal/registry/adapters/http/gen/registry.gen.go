@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,6 +20,24 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/oapi-codegen/runtime"
 )
+
+// Defines values for BuildProfileRecordLevel.
+const (
+	BuildProfileRecordLevelProject BuildProfileRecordLevel = "project"
+	BuildProfileRecordLevelRelease BuildProfileRecordLevel = "release"
+)
+
+// Valid indicates whether the value is a known member of the BuildProfileRecordLevel enum.
+func (e BuildProfileRecordLevel) Valid() bool {
+	switch e {
+	case BuildProfileRecordLevelProject:
+		return true
+	case BuildProfileRecordLevelRelease:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for RequirementRecordLevel.
 const (
@@ -65,6 +84,24 @@ func (e RequirementValue) Valid() bool {
 	}
 }
 
+// Defines values for ResolvedBuildProfileScope.
+const (
+	ResolvedBuildProfileScopeProject ResolvedBuildProfileScope = "project"
+	ResolvedBuildProfileScopeRelease ResolvedBuildProfileScope = "release"
+)
+
+// Valid indicates whether the value is a known member of the ResolvedBuildProfileScope enum.
+func (e ResolvedBuildProfileScope) Valid() bool {
+	switch e {
+	case ResolvedBuildProfileScopeProject:
+		return true
+	case ResolvedBuildProfileScopeRelease:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ResolvedRequirementLevel.
 const (
 	ResolvedRequirementLevelDefault ResolvedRequirementLevel = "default"
@@ -94,6 +131,51 @@ type BlastRadius struct {
 	ReleaseId       string `json:"release_id"`
 	UniqueCustomers int    `json:"unique_customers"`
 }
+
+// BuildProfile The build profile itself: a JSON object Themis stores and passes on without reading inside it. Served byte for byte as stored (compact form, keys in the order written).
+type BuildProfile = json.RawMessage
+
+// BuildProfileHistory defines model for BuildProfileHistory.
+type BuildProfileHistory struct {
+	// Current One recorded change of a build profile. Records are never edited.
+	Current *BuildProfileRecord  `json:"current,omitempty"`
+	History []BuildProfileRecord `json:"history"`
+}
+
+// BuildProfilePut defines model for BuildProfilePut.
+type BuildProfilePut struct {
+	// Actor Who made the change. Required.
+	Actor string `json:"actor"`
+
+	// Profile The build profile itself: a JSON object Themis stores and passes on without reading inside it. Served byte for byte as stored (compact form, keys in the order written).
+	Profile BuildProfile `json:"profile"`
+}
+
+// BuildProfileRecord One recorded change of a build profile. Records are never edited.
+type BuildProfileRecord struct {
+	Actor    string                  `json:"actor"`
+	EntityId string                  `json:"entity_id"`
+	Level    BuildProfileRecordLevel `json:"level"`
+
+	// Profile The build profile itself: a JSON object Themis stores and passes on without reading inside it. Served byte for byte as stored (compact form, keys in the order written).
+	Profile    *BuildProfile `json:"profile,omitempty"`
+	RecordedAt time.Time     `json:"recorded_at"`
+
+	// Removed True on the record that took the profile away; it carries no profile.
+	Removed bool `json:"removed"`
+
+	// Revision Counts the changes of this entity's profile from 1.
+	Revision int `json:"revision"`
+
+	// Sha256 Hex SHA-256 of the stored profile bytes. Absent on a removal.
+	Sha256 *string `json:"sha256,omitempty"`
+
+	// Via The name of the API key that made the change, when auth is on.
+	Via *string `json:"via,omitempty"`
+}
+
+// BuildProfileRecordLevel defines model for BuildProfileRecord.Level.
+type BuildProfileRecordLevel string
 
 // FindOrCreateResponse defines model for FindOrCreateResponse.
 type FindOrCreateResponse struct {
@@ -222,6 +304,23 @@ type RequirementRecordLevel string
 // RequirementValue defines model for RequirementValue.
 type RequirementValue string
 
+// ResolvedBuildProfile defines model for ResolvedBuildProfile.
+type ResolvedBuildProfile struct {
+	// Found False when neither the release nor its project states a profile.
+	Found     bool   `json:"found"`
+	ProjectId string `json:"project_id"`
+
+	// Record One recorded change of a build profile. Records are never edited.
+	Record    *BuildProfileRecord `json:"record,omitempty"`
+	ReleaseId string              `json:"release_id"`
+
+	// Scope Where the profile in force is stored. Absent when none is found.
+	Scope *ResolvedBuildProfileScope `json:"scope,omitempty"`
+}
+
+// ResolvedBuildProfileScope Where the profile in force is stored. Absent when none is found.
+type ResolvedBuildProfileScope string
+
 // ResolvedRequirement defines model for ResolvedRequirement.
 type ResolvedRequirement struct {
 	// Level The level the value came from; default when no level states it (X).
@@ -275,6 +374,12 @@ type ListProjectsOfProductParams struct {
 	Tag *string `form:"tag,omitempty" json:"tag,omitempty"`
 }
 
+// DeleteProjectBuildProfileParams defines parameters for DeleteProjectBuildProfile.
+type DeleteProjectBuildProfileParams struct {
+	// Actor The person removing the profile, recorded with the removal.
+	Actor string `form:"actor" json:"actor"`
+}
+
 // ListReleasesOfProjectParams defines parameters for ListReleasesOfProject.
 type ListReleasesOfProjectParams struct {
 	// Version Exact release version — completes the product/project/version traversal a human actually has.
@@ -287,6 +392,12 @@ type ListReleasesOfProjectParams struct {
 // ListReleasesParams defines parameters for ListReleases.
 type ListReleasesParams struct {
 	Project string `form:"project" json:"project"`
+}
+
+// DeleteReleaseBuildProfileParams defines parameters for DeleteReleaseBuildProfile.
+type DeleteReleaseBuildProfileParams struct {
+	// Actor The person removing the profile, recorded with the removal.
+	Actor string `form:"actor" json:"actor"`
 }
 
 // ListTaggedReleasesParams defines parameters for ListTaggedReleases.
@@ -318,6 +429,9 @@ type RegisterProjectJSONRequestBody = RegisterProjectRequest
 // RenameProjectJSONRequestBody defines body for RenameProject for application/json ContentType.
 type RenameProjectJSONRequestBody = RenameProjectRequest
 
+// PutProjectBuildProfileJSONRequestBody defines body for PutProjectBuildProfile for application/json ContentType.
+type PutProjectBuildProfileJSONRequestBody = BuildProfilePut
+
 // PostProjectRequirementsJSONRequestBody defines body for PostProjectRequirements for application/json ContentType.
 type PostProjectRequirementsJSONRequestBody = RequirementChange
 
@@ -326,6 +440,9 @@ type PutProjectTagsJSONRequestBody = TagsPut
 
 // RegisterReleaseJSONRequestBody defines body for RegisterRelease for application/json ContentType.
 type RegisterReleaseJSONRequestBody = RegisterReleaseRequest
+
+// PutReleaseBuildProfileJSONRequestBody defines body for PutReleaseBuildProfile for application/json ContentType.
+type PutReleaseBuildProfileJSONRequestBody = BuildProfilePut
 
 // PostReleaseRequirementsJSONRequestBody defines body for PostReleaseRequirements for application/json ContentType.
 type PostReleaseRequirementsJSONRequestBody = RequirementChange
@@ -377,6 +494,15 @@ type ServerInterface interface {
 	// Rename a project. Admin key only.
 	// (PATCH /projects/{id})
 	RenameProject(w http.ResponseWriter, r *http.Request, id string)
+	// Remove this project's build profile. The removal is kept in the history with its actor. Admin, or a key scoped to the owning product. 404 when the project states none.
+	// (DELETE /projects/{id}/build-profile)
+	DeleteProjectBuildProfile(w http.ResponseWriter, r *http.Request, id string, params DeleteProjectBuildProfileParams)
+	// A project's own build profile - the current value and every earlier one, newest first (EDR-REBUILD-01 D10, D16). `current` is absent when the project states none.
+	// (GET /projects/{id}/build-profile)
+	GetProjectBuildProfile(w http.ResponseWriter, r *http.Request, id string)
+	// Store a new build profile for this project, as its next revision. Admin, or a key scoped to the owning product. The profile must be a JSON object of at most 16 KiB and 5 levels, with no key named like a secret (password, token, secret, api_key, credential).
+	// (PUT /projects/{id}/build-profile)
+	PutProjectBuildProfile(w http.ResponseWriter, r *http.Request, id string)
 	// List the releases under a project.
 	// (GET /projects/{id}/releases)
 	ListReleasesOfProject(w http.ResponseWriter, r *http.Request, id string, params ListReleasesOfProjectParams)
@@ -404,6 +530,18 @@ type ServerInterface interface {
 	// Count the unique customers a release reaches through the estate graph.
 	// (GET /releases/{id}/blast-radius)
 	GetBlastRadius(w http.ResponseWriter, r *http.Request, id string)
+	// Remove this release's build profile. The removal is kept in the history with its actor. Admin, or a key scoped to the owning product. 404 when the release states none.
+	// (DELETE /releases/{id}/build-profile)
+	DeleteReleaseBuildProfile(w http.ResponseWriter, r *http.Request, id string, params DeleteReleaseBuildProfileParams)
+	// A release's own build profile - the current value and every earlier one, newest first (EDR-REBUILD-01 D10, D16). `current` is absent when the release states none.
+	// (GET /releases/{id}/build-profile)
+	GetReleaseBuildProfile(w http.ResponseWriter, r *http.Request, id string)
+	// Store a new build profile for this release, as its next revision. Admin, or a key scoped to the owning product. The profile must be a JSON object of at most 16 KiB and 5 levels, with no key named like a secret (password, token, secret, api_key, credential).
+	// (PUT /releases/{id}/build-profile)
+	PutReleaseBuildProfile(w http.ResponseWriter, r *http.Request, id string)
+	// The build profile that applies to this release and where it comes from: the release's own, else its project's (EDR-REBUILD-01 D10). The release's own replaces the project's as a whole; nothing is merged. `found` is false when neither states one.
+	// (GET /releases/{id}/build-profile/resolved)
+	GetReleaseResolvedBuildProfile(w http.ResponseWriter, r *http.Request, id string)
 	// A release's CVSS security requirements (CR / IR / AR) — current record and history, newest first (EDR-SCORING-01 S3).
 	// (GET /releases/{id}/requirements)
 	GetReleaseRequirements(w http.ResponseWriter, r *http.Request, id string)
@@ -512,6 +650,24 @@ func (_ Unimplemented) RenameProject(w http.ResponseWriter, r *http.Request, id 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// Remove this project's build profile. The removal is kept in the history with its actor. Admin, or a key scoped to the owning product. 404 when the project states none.
+// (DELETE /projects/{id}/build-profile)
+func (_ Unimplemented) DeleteProjectBuildProfile(w http.ResponseWriter, r *http.Request, id string, params DeleteProjectBuildProfileParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// A project's own build profile - the current value and every earlier one, newest first (EDR-REBUILD-01 D10, D16). `current` is absent when the project states none.
+// (GET /projects/{id}/build-profile)
+func (_ Unimplemented) GetProjectBuildProfile(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Store a new build profile for this project, as its next revision. Admin, or a key scoped to the owning product. The profile must be a JSON object of at most 16 KiB and 5 levels, with no key named like a secret (password, token, secret, api_key, credential).
+// (PUT /projects/{id}/build-profile)
+func (_ Unimplemented) PutProjectBuildProfile(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // List the releases under a project.
 // (GET /projects/{id}/releases)
 func (_ Unimplemented) ListReleasesOfProject(w http.ResponseWriter, r *http.Request, id string, params ListReleasesOfProjectParams) {
@@ -563,6 +719,30 @@ func (_ Unimplemented) GetRelease(w http.ResponseWriter, r *http.Request, id str
 // Count the unique customers a release reaches through the estate graph.
 // (GET /releases/{id}/blast-radius)
 func (_ Unimplemented) GetBlastRadius(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Remove this release's build profile. The removal is kept in the history with its actor. Admin, or a key scoped to the owning product. 404 when the release states none.
+// (DELETE /releases/{id}/build-profile)
+func (_ Unimplemented) DeleteReleaseBuildProfile(w http.ResponseWriter, r *http.Request, id string, params DeleteReleaseBuildProfileParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// A release's own build profile - the current value and every earlier one, newest first (EDR-REBUILD-01 D10, D16). `current` is absent when the release states none.
+// (GET /releases/{id}/build-profile)
+func (_ Unimplemented) GetReleaseBuildProfile(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Store a new build profile for this release, as its next revision. Admin, or a key scoped to the owning product. The profile must be a JSON object of at most 16 KiB and 5 levels, with no key named like a secret (password, token, secret, api_key, credential).
+// (PUT /releases/{id}/build-profile)
+func (_ Unimplemented) PutReleaseBuildProfile(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// The build profile that applies to this release and where it comes from: the release's own, else its project's (EDR-REBUILD-01 D10). The release's own replaces the project's as a whole; nothing is merged. `found` is false when neither states one.
+// (GET /releases/{id}/build-profile/resolved)
+func (_ Unimplemented) GetReleaseResolvedBuildProfile(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -988,6 +1168,100 @@ func (siw *ServerInterfaceWrapper) RenameProject(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteProjectBuildProfile operation middleware
+func (siw *ServerInterfaceWrapper) DeleteProjectBuildProfile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteProjectBuildProfileParams
+
+	// ------------- Required query parameter "actor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "actor", r.URL.Query(), &params.Actor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteProjectBuildProfile(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProjectBuildProfile operation middleware
+func (siw *ServerInterfaceWrapper) GetProjectBuildProfile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProjectBuildProfile(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutProjectBuildProfile operation middleware
+func (siw *ServerInterfaceWrapper) PutProjectBuildProfile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutProjectBuildProfile(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListReleasesOfProject operation middleware
 func (siw *ServerInterfaceWrapper) ListReleasesOfProject(w http.ResponseWriter, r *http.Request) {
 
@@ -1237,6 +1511,126 @@ func (siw *ServerInterfaceWrapper) GetBlastRadius(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetBlastRadius(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteReleaseBuildProfile operation middleware
+func (siw *ServerInterfaceWrapper) DeleteReleaseBuildProfile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteReleaseBuildProfileParams
+
+	// ------------- Required query parameter "actor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "actor", r.URL.Query(), &params.Actor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteReleaseBuildProfile(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetReleaseBuildProfile operation middleware
+func (siw *ServerInterfaceWrapper) GetReleaseBuildProfile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReleaseBuildProfile(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutReleaseBuildProfile operation middleware
+func (siw *ServerInterfaceWrapper) PutReleaseBuildProfile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutReleaseBuildProfile(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetReleaseResolvedBuildProfile operation middleware
+func (siw *ServerInterfaceWrapper) GetReleaseResolvedBuildProfile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReleaseResolvedBuildProfile(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1565,6 +1959,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Patch(options.BaseURL+"/projects/{id}", wrapper.RenameProject)
 	})
 	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/projects/{id}/build-profile", wrapper.DeleteProjectBuildProfile)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/projects/{id}/build-profile", wrapper.GetProjectBuildProfile)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/projects/{id}/build-profile", wrapper.PutProjectBuildProfile)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/projects/{id}/releases", wrapper.ListReleasesOfProject)
 	})
 	r.Group(func(r chi.Router) {
@@ -1590,6 +1993,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/releases/{id}/blast-radius", wrapper.GetBlastRadius)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/releases/{id}/build-profile", wrapper.DeleteReleaseBuildProfile)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/releases/{id}/build-profile", wrapper.GetReleaseBuildProfile)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/releases/{id}/build-profile", wrapper.PutReleaseBuildProfile)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/releases/{id}/build-profile/resolved", wrapper.GetReleaseResolvedBuildProfile)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/releases/{id}/requirements", wrapper.GetReleaseRequirements)
@@ -1618,74 +2033,89 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"KOXh5dPk6qer/w8AAP//",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

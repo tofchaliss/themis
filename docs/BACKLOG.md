@@ -355,6 +355,142 @@ three angles, and two of them proposed fixes that would not have worked.
   (Enterprise default, Midnight, Ops night), new GUI at `/next/` screen by screen, then the
   switch. Steps G1-G7, one PR each on the owner's go.
 
+- [ ] **Policy-driven image rebuild per release** (id `COMM-REBUILD-POLICY-1`, owner ask
+  2026-11-26, feature). A fixed-field rebuild policy in Governance replaces the fixed "open
+  Critical or High" rule of the rebuild loop; it also evaluates on `fix_available`; releases opt
+  in by tag (`rebuild:auto` / `rebuild:ask`); the request leaves as one signed
+  `rebuild_requested` event to a build connector outside this repository (owner pick
+  2026-11-26), so no enterprise build setup enters Themis core. Callback, comparison and attempt
+  limit unchanged. The build configuration is a build profile, an opaque JSON block per Project
+  with Release override, stored in Registry and copied into the event (D10, owner pick
+  2026-11-26). Policy scope is installation, Product and Release, nearest wins as a whole (D11,
+  owner pick 2026-11-27); review points decided as D12 to D16 (one build per request, one open
+  cycle per release, cool-down from dispatch, approval record, profile revision on the event).
+  D17 to D21 from a second review: the installation policy is the ceiling for automation and a
+  tag only restricts (owner pick 2026-11-27), mandatory connector allow-lists, the exact meaning
+  of "fix known", a refusal is not an attempt, a new fix waits for the next cycle.
+  D22 to D26 from a third review: approval by admin or product key with a named person (owner
+  pick 2026-11-27), four ids so an equal later request is new, the record of a settled uncertain
+  build, the state words (delivered is not built), expiry of a recommendation as an event.
+  D27 to D32 from a fourth review, no new owner choice: a recommendation is its decision id and
+  the cycle follows the approval, attempts are reserved / used / given back, the request carries
+  the facts used, version order is Knowledge's verdict, a parameter schema per job, an expiry
+  sweep. D33 to D36 from a fifth review, no new owner choice: the CI credential is narrow in the
+  build system and the connector fails closed, required fields of a targeted entry, what a
+  missing assessment revision means, one intent sends one payload byte for byte. D37 and D38
+  from a sixth review, no new owner choice: the connector's stored states with a recovery worker
+  after a restart, and the attempt is used at `submitted` (the build system accepted the build),
+  not at execution. D39 from a seventh review, no new owner choice: one worker per intent in the
+  connector (a conditional write claims it), and "no build found" is believed only where the
+  build system's search is complete. D40 to D43 from an own read of the whole record: a request
+  made again gets a new intent id (try number), one standing recommendation per Release, every
+  receiver meets the connector contract (the "no connector needed" sentence is withdrawn), and
+  which rules reach the built-in Jenkins sender. D44 from a review of D40 to D43: the states of
+  a recommendation (an expired one is no longer standing), and one standing recommendation per
+  Release kept by a database unique rule. D45 from a review of D44: approval only while the
+  effective mode is exactly `ask`, and one notice per created recommendation. D46 from a review
+  of D45: the approval locks the policies it checks, reads the tags fresh and fails closed, and
+  expiry is recorded before withdrawal. Not decided: stopping an open cycle on mode `off`.
+  Owner choice 10 (2026-11-27): the tag limit of D46 item 9 is accepted.
+  Design in EDR-REBUILD-01 (PROPOSED); owner choices 2, 3 and 4 answered 2026-11-27, choice 5
+  asked again at R5. Steps R1-R6 plus R1a and R2a, one PR each on the owner's go (release
+  freeze). **R1 built 2026-11-27** (installation policy record, pure evaluation rule, Governance
+  migration 28, `GET/PUT /rebuild-policy` and `/rebuild-policy/history`; nothing triggers a build
+  yet); VM check PASSED 2026-11-28 (EDR "Step R1 as built"). **R1a API built 2026-11-28**
+  (Product and Release policies, removal with history, list read, in-force read with the mode
+  ceiling; Governance migration 29); VM check PASSED 2026-11-28 (EDR "Step R1a as built").
+  **R2 part 1 built 2026-11-28** (owner go for R2 the same day): tag scope and effective mode,
+  the judgement of one Release as a read (`GET /releases/{id}/rebuild-evaluation`), and one new
+  Knowledge read (`GET /releases/{id}/fix-verdicts`); no migration, nothing is sent; VM check
+  PASSED 2026-11-28 on the second run (the first found a tag-read defect, fixed the same day).
+  The module-stream point (`KN-BEHIND-MODULE-1`) was decided and built for the judgement
+  2026-11-28. **R2 part 2 built 2026-11-28** (owner confirmed the scope the same day): rebuild
+  triggers written with the `release_evaluated` (new SBOM) and `fix_available` notes, a worker
+  that judges them, the decision record with frozen facts, the events
+  `governance.rebuild_recommended.v1` and `governance.rebuild_requested.v1`, and the read
+  `GET /releases/{id}/rebuild-decisions`; Governance migration 30; nothing consumes the events
+  and no build starts; VM check PASSED 2026-11-28 with two hand-written test triggers (EDR "VM
+  check of part 2"). Next: R2a (build
+  profile) or R3 (Communication keeps the cycle from the events), each on the owner's go.
+
+- [ ] **A known fix for language packages** (id `KN-FIX-STANDING-LANG-1`, from EDR-REBUILD-01
+  step R2 part 1, 2026-11-28, feature). Knowledge records the vendor bounds an open occurrence is
+  below (`verdict_behind`) only for RPM and APK components, where its fixed-verdict compares.
+  For npm, Go, Maven, PyPI and the rest, `GET /releases/{id}/fix-verdicts` answers `unknown`, so
+  such a component never counts toward a rebuild while `fix_required` is on (the safe direction
+  of D30), and no fix-available alert is raised for it either. To widen it: judge "below the
+  published fix" with the per-ecosystem comparison that already gates a match
+  (`value.CompareVersions`, `value.VersionParsable`, the per-world fixes of the card), record
+  the result on the match row, and bump `VerdictGeneration` so the sweep writes it once.
+
+- [ ] **A module-stream bound is not a fix for an install outside that stream** (id
+  `KN-BEHIND-MODULE-1`, from the VM check of EDR-REBUILD-01 step R2 part 1, 2026-11-28, defect
+  in the making). `verdict_behind` holds every same-EL-major vendor bound an open rpm occurrence
+  is below, including builds of another module stream (`python3-ply 3.9-9.el8` reads as below
+  four `3.11-10.module+el8...` builds). `fix: known` follows from it, so the rebuild judgement
+  counts the occurrence (44 of 92 counted entries on the checked Release had only module-stream
+  bounds), and the fix-available alert announces it. A plain rebuild cannot pick such a build
+  up. To settle before R2 part 2 sends any event: keep reachable and unreachable bounds apart on
+  the verdict (the open reason already tells them apart in prose), and let only a reachable
+  bound make a known fix. Needs a `VerdictGeneration` bump.
+  **Judgement side done 2026-11-28** (owner decision: do not count, show as own group): the
+  fix-verdict read answers `other_stream`, derived on read with no stored change, and the
+  rebuild judgement lists such components apart. **Still open:** the fix-available alert
+  announces a bound of another stream like any other; give it the same rule, or say so on the
+  card.
+  **VM check PASS 2026-11-28:** 92 counted entries became 48 counted and 44 listed apart.
+
+- [ ] **See a rebuild trigger written by a real event** (id `GOV-REBUILD-TRIGGER-LIVE-1`, from
+  the VM check of EDR-REBUILD-01 step R2 part 2, 2026-11-28, check). The VM check used two
+  triggers written by hand. The two places that write a trigger with its event (a new SBOM's
+  evaluation, a fix-available announcement) are proven by the integration tests only. After
+  the next SBOM upload or real fix on a deployment, read `GET /releases/{id}/rebuild-decisions`
+  and confirm a trigger with source `governance` is there and closed. Mode `auto`, the
+  `rebuild_requested` event and the `gave_up` path are also not exercised outside the tests.
+
+- [ ] **Sample the `other_stream` fix answers by hand** (id `KN-OTHER-STREAM-SAMPLE-1`, from the
+  VM check of `KN-BEHIND-MODULE-1`, 2026-11-28, check). On the checked Release Knowledge answers
+  `other_stream` for 379 of 563 occurrences with a bound (67%), against 48% among the entries the
+  judgement counted. The higher share fits the data (module-stream advisories list their whole
+  rebuild set), but nobody has read the rows. Read 20 across different packages from
+  `GET /releases/{id}/fix-verdicts` and confirm for each that no bound is a plain build or a
+  module build of the install's own series. One wrong row means a real fix is hidden from the
+  rebuild judgement, so do this before R2 part 2 sends an event.
+  **2026-11-28:** the 379 rows are 39 packages; the first 20 by purl were read and all are
+  right (base-repository install, every bound a module build of a newer Perl stream). Open:
+  the other 19 packages.
+
+- [ ] **Registry's single-entity views list `tags` and never fill them** (id `RG-VIEW-TAGS-1`,
+  from the same VM check, 2026-11-28, defect). `ProductView`, `ProjectView` and `ReleaseView`
+  carry `tags` in the API schema; the list reads fill it, `GET /products/{id}`,
+  `GET /projects/{id}` and `GET /releases/{id}` do not. A client that trusts the schema reads
+  every entity as untagged (it cost the first VM run of the rebuild judgement). Fill the field
+  in the three handlers, or take it out of the schema for those reads.
+
+- [ ] **The build profile on the rebuild event is the same value, not the same bytes** (id
+  `GOV-BUILD-BYTES-1`, from EDR-REBUILD-01 step R2a, 2026-11-28, design). Registry keeps the
+  profile as text and takes the SHA-256 over it. Governance keeps the decision and the outbox
+  payload in JSON columns, which reorder keys, so a receiver cannot recompute the digest from
+  the event's `build`. Settle in R3 with D36: either the intent reads the stored bytes from
+  Registry by revision, or the event carries the profile as text.
+
+- [ ] **The dashboard gate does not check `actor`** (id `GUI-ACTOR-GATE-1`, from EDR-REBUILD-01
+  step R2a, 2026-11-28, hardening). The gate compares `actor_id` and `proposer_id` in a write
+  body with the signed-in user. The build profile, the rebuild policy and the security
+  requirements use `actor`, and their `DELETE` carries it in the query. Through the dashboard a
+  write-capable user could record another name. Add `actor` (body and query) to the gate's
+  check; this changes the security model, so it needs the owner's go.
+
+- [ ] **Build profile form in the React GUI** (id `GUI-NEXT-BUILD-PROFILE-1`, from EDR-REBUILD-01
+  step R2a, 2026-11-28, feature). The form exists in the current GUI only. Add it to the Estate
+  page at `/next/` when that page gets its edit actions.
+
+- [ ] **GUI page for the rebuild policies** (id `GUI-REBUILD-POLICY-1`, from EDR-REBUILD-01 step
+  R1a, 2026-11-28, feature). One page that lists every policy in force (`GET /rebuild-policies`),
+  shows the policy in force for a Release with its level and mode ceiling, and lets an admin
+  set, change and remove a policy with a named actor and the change history. Backend is done;
+  the page waits for the owner's go.
+
 - [ ] **PSIRT early alert on the Overview** (id `GUI-PSIRT-1`, owner 2026-11-23, feature).
   Newly published critical/high CVEs in the world (original source score, no Themis score),
   tied to the products whose components they may hit, as the first bucket before the Themis

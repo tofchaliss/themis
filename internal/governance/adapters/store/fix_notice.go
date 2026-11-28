@@ -93,5 +93,9 @@ func (s *Store) MarkFixNoticesAnnounced(ctx context.Context, releaseID string, n
 		announcement, sourceContext, releaseID, note.EventType, schemaRefFor(note.EventType), releaseID, string(payload), note.OccurredAt.UTC()); err != nil {
 		return err
 	}
+	// A fix-available announcement is a rebuild trigger (EDR-REBUILD-01 D3), recorded with it.
+	if err := enqueueRebuildTrigger(ctx, tx, announcement, domain.RebuildTriggerFixAvailable, releaseID); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }

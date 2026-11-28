@@ -286,6 +286,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/projects/{id}/build-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A project's own build profile - the current value and every earlier one, newest first (EDR-REBUILD-01 D10, D16). `current` is absent when the project states none. */
+        get: operations["getProjectBuildProfile"];
+        /** Store a new build profile for this project, as its next revision. Admin, or a key scoped to the owning product. The profile must be a JSON object of at most 16 KiB and 5 levels, with no key named like a secret (password, token, secret, api_key, credential). */
+        put: operations["putProjectBuildProfile"];
+        post?: never;
+        /** Remove this project's build profile. The removal is kept in the history with its actor. Admin, or a key scoped to the owning product. 404 when the project states none. */
+        delete: operations["deleteProjectBuildProfile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{id}/build-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A release's own build profile - the current value and every earlier one, newest first (EDR-REBUILD-01 D10, D16). `current` is absent when the release states none. */
+        get: operations["getReleaseBuildProfile"];
+        /** Store a new build profile for this release, as its next revision. Admin, or a key scoped to the owning product. The profile must be a JSON object of at most 16 KiB and 5 levels, with no key named like a secret (password, token, secret, api_key, credential). */
+        put: operations["putReleaseBuildProfile"];
+        post?: never;
+        /** Remove this release's build profile. The removal is kept in the history with its actor. Admin, or a key scoped to the owning product. 404 when the release states none. */
+        delete: operations["deleteReleaseBuildProfile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{id}/build-profile/resolved": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The build profile that applies to this release and where it comes from: the release's own, else its project's (EDR-REBUILD-01 D10). The release's own replaces the project's as a whole; nothing is merged. `found` is false when neither states one. */
+        get: operations["getReleaseResolvedBuildProfile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/products/{id}/tags": {
         parameters: {
             query?: never;
@@ -450,6 +505,49 @@ export interface components {
             release?: components["schemas"]["RequirementRecord"];
             project?: components["schemas"]["RequirementRecord"];
             product?: components["schemas"]["RequirementRecord"];
+        };
+        /** @description The build profile itself: a JSON object Themis stores and passes on without reading inside it. Served byte for byte as stored (compact form, keys in the order written). */
+        BuildProfile: {
+            [key: string]: unknown;
+        };
+        BuildProfilePut: {
+            profile: components["schemas"]["BuildProfile"];
+            /** @description Who made the change. Required. */
+            actor: string;
+        };
+        /** @description One recorded change of a build profile. Records are never edited. */
+        BuildProfileRecord: {
+            /** @enum {string} */
+            level: "project" | "release";
+            entity_id: string;
+            /** @description Counts the changes of this entity's profile from 1. */
+            revision: number;
+            /** @description True on the record that took the profile away; it carries no profile. */
+            removed: boolean;
+            profile?: components["schemas"]["BuildProfile"];
+            /** @description Hex SHA-256 of the stored profile bytes. Absent on a removal. */
+            sha256?: string;
+            actor: string;
+            /** @description The name of the API key that made the change, when auth is on. */
+            via?: string;
+            /** Format: date-time */
+            recorded_at: string;
+        };
+        BuildProfileHistory: {
+            current?: components["schemas"]["BuildProfileRecord"];
+            history: components["schemas"]["BuildProfileRecord"][];
+        };
+        ResolvedBuildProfile: {
+            release_id: string;
+            project_id: string;
+            /** @description False when neither the release nor its project states a profile. */
+            found: boolean;
+            /**
+             * @description Where the profile in force is stored. Absent when none is found.
+             * @enum {string}
+             */
+            scope?: "project" | "release";
+            record?: components["schemas"]["BuildProfileRecord"];
         };
         TagSet: {
             /** @description The entity's own tags. */
@@ -1153,6 +1251,196 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResolvedRequirements"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getProjectBuildProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildProfileHistory"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    putProjectBuildProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BuildProfilePut"];
+            };
+        };
+        responses: {
+            /** @description Stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildProfileRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteProjectBuildProfile: {
+        parameters: {
+            query: {
+                /** @description The person removing the profile, recorded with the removal. */
+                actor: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. The body is the history entry of the removal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildProfileRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseBuildProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildProfileHistory"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    putReleaseBuildProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BuildProfilePut"];
+            };
+        };
+        responses: {
+            /** @description Stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildProfileRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteReleaseBuildProfile: {
+        parameters: {
+            query: {
+                /** @description The person removing the profile, recorded with the removal. */
+                actor: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. The body is the history entry of the removal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildProfileRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseResolvedBuildProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolvedBuildProfile"];
                 };
             };
             404: components["responses"]["Problem"];

@@ -1,5 +1,7 @@
 package domain
 
+import "github.com/themis-project/themis/internal/kernel/value"
+
 // VerdictGeneration versions the OCCURRENCE-JUDGEMENT LOGIC — judgeOccurrence, the vendor
 // fixed-verdict rules, FixesFor/StrictFixesFor and the name rules they lean on. Bump it in the
 // SAME change as any edit to those, and the D6 catch-up sweep re-judges the estate once.
@@ -102,4 +104,51 @@ func OpenVerdict() OccurrenceVerdict { return OccurrenceVerdict{State: VerdictOp
 // ClearedVendorFix builds an affirmative clearance with its evidence grade and premise.
 func ClearedVendorFix(grade VerdictGrade, reason string) OccurrenceVerdict {
 	return OccurrenceVerdict{State: VerdictClearedVendorFix, Grade: grade, Reason: reason}
+}
+
+// FixStanding answers one question about an occurrence: is there a published fix this install
+// has not picked up (EDR-REBUILD-01 D19, D30)? It is read off the recorded verdict, never a new
+// comparison, so a consumer in another context does not have to order version strings.
+type FixStanding string
+
+const (
+	// FixKnown — the occurrence is open AND below at least one vendor bound published for its
+	// own package and world. The same fact the fix-available alert announces.
+	FixKnown FixStanding = "known"
+	// FixOtherStream — the occurrence is open and below vendor bounds, but every one of them is a
+	// build of ANOTHER module stream (EDR-REBUILD-01 KN-BEHIND-MODULE-1). A plain update or
+	// rebuild never reaches such a build; switching the stream is a person's change. So it is a
+	// fix that exists, and not one a rebuild can pick up. The caller decides this from the
+	// bounds (the app's reach rule); FixStandingOf never returns it.
+	FixOtherStream FixStanding = "other_stream"
+	// FixNone — nothing to pick up: the install already carries the fix (a clearance), or the
+	// comparison ran and no bound for this package and world is on record.
+	FixNone FixStanding = "none"
+	// FixUnknown — the comparison could not run: an ecosystem the fixed-verdict does not cover,
+	// or an rpm build that names no EL stream. Unknown is NOT a known fix (D30 item 2).
+	FixUnknown FixStanding = "unknown"
+)
+
+// FixStandingOf derives the standing from a recorded occurrence: its verdict state, the bounds
+// it was found behind, and the ecosystem and version it was judged with. The fail direction is
+// deliberate and the opposite of attribution's: an occurrence Themis cannot compare is
+// `unknown`, so that it never starts a build that could not be shown to help.
+func FixStandingOf(state VerdictState, ecosystem, version string, behind []string) FixStanding {
+	if !state.IsOpen() {
+		return FixNone
+	}
+	if len(behind) > 0 {
+		return FixKnown
+	}
+	switch value.ClassifyEcosystem(ecosystem) {
+	case value.VersionClassRPM:
+		if value.RPMReleaseMajor(version) == "" {
+			return FixUnknown
+		}
+		return FixNone
+	case value.VersionClassAPK:
+		return FixNone
+	default:
+		return FixUnknown
+	}
 }

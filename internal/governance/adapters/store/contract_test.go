@@ -83,6 +83,9 @@ func TestIntegrationContractV1_GovernanceEvents(t *testing.T) {
 				Fixes: []string{"0:4.18.0-553.80.1.el8_10"}, Advisories: []string{"RHSA-2026:0001"}},
 			{FindingID: "", CVE: "CVE-2026-2", Package: "openssl", Ecosystem: "rpm", Fixes: []string{"1:1.1.1k-14.el8_6"}},
 		}, now)},
+		// EDR-REBUILD-01 step R2 part 2: the two rebuild events carry one decision shape.
+		{app.EventRebuildRecommended, contractRebuildDecision(domain.RebuildOutcomeRecommend, now)},
+		{app.EventRebuildRequested, contractRebuildDecision(domain.RebuildOutcomeRequest, now)},
 		{app.EventReviewDueSoon, domain.ReviewDueSoon{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", Stance: string(domain.StanceAcceptedRisk), PositionVersion: 2, ReviewBy: now.Add(24 * time.Hour), Owner: "risk-owner@example.test", OccurredAt: now}},
 	}
 	for _, tc := range cases {
@@ -127,4 +130,61 @@ func TestIntegrationContractV1_ReleaseEvaluatedUploadOutcome(t *testing.T) {
 	ev.UploadOutcome = &domain.UploadOutcome{}
 	raw, _ = json.Marshal(ev)
 	assertValidContract(t, schemaRefFor(app.EventReleaseEvaluated), raw)
+}
+
+// contractRebuildDecision is a decision with every field set, for the two rebuild contracts.
+func contractRebuildDecision(outcome string, at time.Time) domain.RebuildDecision {
+	mode := string(domain.RebuildModeAsk)
+	if outcome == domain.RebuildOutcomeRequest {
+		mode = string(domain.RebuildModeAuto)
+	}
+	entry := domain.RebuildDecisionEntry{
+		FindingID: "fnd-1", CVE: "CVE-2026-1", PURL: "pkg:rpm/example/libexample@1.0-1.el8",
+		CurrentVersion: "1.0-1.el8", FixedVersions: []string{"0:1.0-2.el8_10"}, FixSource: app.RebuildFixSourceVerdict,
+		Severity: domain.SLABucketHigh, Score: 75, ScoreSource: app.RebuildScoreSourceBase,
+		ClaimClass: "carrier", Position: "none", AssessmentState: app.RebuildAssessmentNotAssessed,
+		CountedBecause: []string{"severity_floor"},
+	}
+	d := domain.RebuildDecision{
+		DecisionID: "dec-1", ReleaseID: "rel-1", ProductID: "prod-1", ProjectID: "prj-1",
+		TriggerID: "evt-1", TriggerSource: "governance", TriggerType: domain.RebuildTriggerFixAvailable,
+		Outcome: outcome, EffectiveMode: mode, EffectiveModeSetBy: "tag", InstallationMode: mode,
+		Tag: "rebuild:" + mode, TagLevel: "release",
+		Policy: domain.RebuildDecisionPolicy{ScopeKind: "installation", Version: 0, FixRequired: true,
+			SeverityFloor: domain.SLABucketHigh, CountKnownExploited: true, SkipDecided: true, CarrierOnly: true,
+			CoolDownSeconds: 86400, Mode: mode},
+		Considered: 3, Skipped: map[string]int{domain.RebuildSkippedBelowFloor: 1},
+		Targeted: []domain.RebuildDecisionEntry{entry}, OtherStream: []domain.RebuildDecisionEntry{entry},
+		DecidedAt: at,
+	}
+	d.Build = json.RawMessage(`{"job":"team/build-image","parameters":{"BRANCH":"release/1"}}`)
+	d.BuildProfile = &domain.RebuildDecisionBuildProfile{Scope: "project", Revision: 2, SHA256: "ab12"}
+	if outcome == domain.RebuildOutcomeRecommend {
+		d.RecommendReason = domain.RebuildRecommendModeAsk
+	}
+	return d
+}
+
+// D10 item 6: a recommendation held by a missing build profile carries no profile; a request
+// without one does not satisfy the contract.
+func TestIntegrationContractV1_RebuildWithoutBuildProfile(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	d := contractRebuildDecision(domain.RebuildOutcomeRecommend, now)
+	d.Build, d.BuildProfile, d.RecommendReason = nil, nil, domain.RebuildRecommendNoBuildProfile
+	raw, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertValidContract(t, schemaRefFor(app.EventRebuildRecommended), raw)
+
+	req := contractRebuildDecision(domain.RebuildOutcomeRequest, now)
+	req.Build, req.BuildProfile = nil, nil
+	raw, _ = json.Marshal(req)
+	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := compileContract(t, schemaRefFor(app.EventRebuildRequested)).Validate(inst); err == nil {
+		t.Error("a rebuild request with no build profile must not satisfy the contract")
+	}
 }

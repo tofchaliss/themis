@@ -29,6 +29,8 @@ type ReadService struct {
 	recent RecentLister
 	// advisory may be nil — ByAdvisory then refuses (EDR-INCIDENT-01 D2).
 	advisory AdvisoryLister
+	// fixVerdicts may be nil — ReleaseFixVerdicts then refuses (EDR-REBUILD-01 D30).
+	fixVerdicts FixVerdictLister
 }
 
 // NewReadService wires the read ports.

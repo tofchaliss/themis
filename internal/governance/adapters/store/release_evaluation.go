@@ -145,6 +145,12 @@ func (s *Store) PublishEvaluatedAndMark(ctx context.Context, row app.PendingEval
 		eventID, app.EventReleaseEvaluated, row.ReleaseID, occurredAt, string(payload)); err != nil {
 		return err
 	}
+	// A new SBOM's evaluation is a rebuild trigger (EDR-REBUILD-01 D3), recorded with its event.
+	if trigger, ok := domain.RebuildTriggerOfEvaluation(ev.Cause); ok {
+		if err := enqueueRebuildTrigger(ctx, tx, eventID, trigger, row.ReleaseID); err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
 }
 

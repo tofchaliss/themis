@@ -68,6 +68,9 @@ type Governance struct {
 	// fix-published notices and announces one governance.fix_available.v1 per release. Always
 	// wired; the composition root runs it on THEMIS_FIX_AVAILABLE_INTERVAL (0 disables).
 	FixAvailable *app.FixAvailableSweep
+	// RebuildTriggers judges the recorded rebuild triggers (EDR-REBUILD-01 step R2 part 2). Nil
+	// when the Registry or the Knowledge read seam is missing.
+	RebuildTriggers *app.RebuildTriggerWorker
 	// Scope applies scoped decisions (EDR-SYNC-01): the composition root runs its sweep on
 	// THEMIS_SCOPE_SWEEP_INTERVAL. Nil without a Registry seam — the owners of a release cannot
 	// be resolved, so a scoped decision stays pending, visibly, rather than guessed at.
@@ -152,8 +155,34 @@ func Wire(
 	if reg != nil {
 		estate = reg
 	}
+	// EDR-REBUILD-01 steps R1 and R1a: the rebuild policy records. Step R2 part 1 adds the
+	// judgement of one Release as a read: the tags come from Registry (fail-closed: with no
+	// Registry seam the read refuses) and the fix verdicts from Knowledge (with no Knowledge
+	// seam every fix reads unknown, so nothing counts under fix_required). Nothing here asks
+	// for a build. A nil *Client must not become a non-nil interface, hence the guards.
+	rebuildPolicy := app.NewRebuildPolicyService(st, sysClock{}).WithIdentity(productOf)
+	if reg != nil {
+		rebuildPolicy = rebuildPolicy.WithTags(reg)
+	}
+	var fixVerdicts app.ReleaseFixVerdictReader
+	if kn != nil {
+		fixVerdicts = kn
+	}
+	rebuildEval := app.NewRebuildEvaluationService(rebuildPolicy, st, fixVerdicts, sysClock{})
 	handler := govhttp.NewHandler(write, read).WithLogger(logger).WithSLA(sla).
-		WithMetrics(app.NewMetricsService(st, estate, sla, sysClock{}))
+		WithMetrics(app.NewMetricsService(st, estate, sla, sysClock{})).
+		WithRebuildPolicy(rebuildPolicy).
+		WithRebuildEvaluation(rebuildEval).
+		WithRebuildDecisions(app.NewRebuildDecisionReader(st))
+	// Step R2 part 2: the worker that judges the recorded triggers (a new SBOM that was judged,
+	// a fix that became available) and records a decision with its event. It needs both read
+	// seams: without Registry there is no mode, and without Knowledge no fix verdict, and a
+	// trigger judged on "everything unknown" would record "nothing counts" for a Release that
+	// was never judged. Without them no worker is wired and the triggers simply hold.
+	var rebuildTriggers *app.RebuildTriggerWorker
+	if reg != nil && kn != nil {
+		rebuildTriggers = app.NewRebuildTriggerWorker(st, rebuildEval, reg, idGen{}, sysClock{}, evaluationLog{logger})
+	}
 	if reg != nil {
 		handler = handler.WithProductResolver(reg)
 	}
@@ -226,18 +255,19 @@ func Wire(
 		scope.WithSeverityCopy(severity)
 	}
 	return Governance{
-		Handler:      handler.Router(),
-		Store:        st,
-		Consumer:     inbound.NewConsumer(app.NewCoordinator(write).WithEvaluations(st).WithFixNotices(st)).WithLogger(logger),
-		Relay:        relay,
-		Reconcile:    app.NewReconcileService(relay),
-		Evaluations:  evaluations,
-		Rejudge:      rejudge,
-		ReviewBy:     app.NewReviewBySweep(write, st, sysClock{}),
-		SLA:          sla,
-		FixAvailable: app.NewFixAvailableSweep(st, sysClock{}),
-		Scope:        scope,
-		Scores:       scores,
+		Handler:         handler.Router(),
+		Store:           st,
+		Consumer:        inbound.NewConsumer(app.NewCoordinator(write).WithEvaluations(st).WithFixNotices(st)).WithLogger(logger),
+		Relay:           relay,
+		Reconcile:       app.NewReconcileService(relay),
+		Evaluations:     evaluations,
+		Rejudge:         rejudge,
+		ReviewBy:        app.NewReviewBySweep(write, st, sysClock{}),
+		SLA:             sla,
+		FixAvailable:    app.NewFixAvailableSweep(st, sysClock{}),
+		RebuildTriggers: rebuildTriggers,
+		Scope:           scope,
+		Scores:          scores,
 	}
 }
 
