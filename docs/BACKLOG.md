@@ -409,7 +409,8 @@ three angles, and two of them proposed fixes that would not have worked.
   that judges them, the decision record with frozen facts, the events
   `governance.rebuild_recommended.v1` and `governance.rebuild_requested.v1`, and the read
   `GET /releases/{id}/rebuild-decisions`; Governance migration 30; nothing consumes the events
-  and no build starts; VM check pending (EDR "Step R2 part 2 as built"). Next: R2a (build
+  and no build starts; VM check PASSED 2026-11-28 with two hand-written test triggers (EDR "VM
+  check of part 2"). Next: R2a (build
   profile) or R3 (Communication keeps the cycle from the events), each on the owner's go.
 
 - [ ] **A known fix for language packages** (id `KN-FIX-STANDING-LANG-1`, from EDR-REBUILD-01
@@ -438,6 +439,14 @@ three angles, and two of them proposed fixes that would not have worked.
   announces a bound of another stream like any other; give it the same rule, or say so on the
   card.
   **VM check PASS 2026-11-28:** 92 counted entries became 48 counted and 44 listed apart.
+
+- [ ] **See a rebuild trigger written by a real event** (id `GOV-REBUILD-TRIGGER-LIVE-1`, from
+  the VM check of EDR-REBUILD-01 step R2 part 2, 2026-11-28, check). The VM check used two
+  triggers written by hand. The two places that write a trigger with its event (a new SBOM's
+  evaluation, a fix-available announcement) are proven by the integration tests only. After
+  the next SBOM upload or real fix on a deployment, read `GET /releases/{id}/rebuild-decisions`
+  and confirm a trigger with source `governance` is there and closed. Mode `auto`, the
+  `rebuild_requested` event and the `gave_up` path are also not exercised outside the tests.
 
 - [ ] **Sample the `other_stream` fix answers by hand** (id `KN-OTHER-STREAM-SAMPLE-1`, from the
   VM check of `KN-BEHIND-MODULE-1`, 2026-11-28, check). On the checked Release Knowledge answers
