@@ -515,6 +515,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rebuild-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The installation rebuild policy (EDR-REBUILD-01 D2) - the fixed-field record that says when an image rebuild is worth asking for. With nothing stored it reads the shipped defaults at version 0. Read scope. Step R1 stores the record only - nothing is evaluated against a Release and no build is asked for yet. */
+        get: operations["getRebuildPolicy"];
+        /** Store a new version of the installation rebuild policy. Admin scope only, and the change must name its actor (D9). Every field is required - a switch left out is refused, never read as off. Each change adds one to the version and is kept in the history. */
+        put: operations["putRebuildPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rebuild-policy/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every stored version of the installation rebuild policy, newest first, with who changed it and when (EDR-REBUILD-01 D9). Empty when the policy was never set. Read scope. */
+        get: operations["getRebuildPolicyHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/faultlines/{faultlineId}/findings": {
         parameters: {
             query?: never;
@@ -1110,6 +1145,70 @@ export interface components {
         SLAPolicySet: {
             estate: components["schemas"]["SLAPolicyRecord"];
             overrides: components["schemas"]["SLAPolicyRecord"][];
+        };
+        RebuildPolicyPut: {
+            /** @description Count a Finding only when a fixed version is known for its component. */
+            fix_required: boolean;
+            /**
+             * @description The lowest severity that counts.
+             * @enum {string}
+             */
+            severity_floor: "low" | "medium" | "high" | "critical";
+            /** @description Count a known-exploited Finding whatever its severity. */
+            count_known_exploited: boolean;
+            /** @description Do not count a Finding decided not_affected or accepted_risk. */
+            skip_decided: boolean;
+            /** @description Do not count scope-class components; unknown counts as carrier. */
+            carrier_only: boolean;
+            /**
+             * Format: int64
+             * @description The shortest time between two rebuild requests for one Release. 0 = none.
+             */
+            cool_down_seconds: number;
+            /**
+             * @description off = no rebuild is asked for; ask = a person is told and a person starts the build; auto = the request is sent without asking.
+             * @enum {string}
+             */
+            mode: "off" | "ask" | "auto";
+            /** @description The person changing the policy, recorded with the version. */
+            updated_by: string;
+        };
+        RebuildPolicyRecord: {
+            /** @description Whose policy this is. Step R1 serves `installation` only. */
+            scope_kind: string;
+            /** @description Empty for the installation policy. */
+            scope_id: string;
+            /** @description Counts the changes from 1. 0 = nothing stored, the shipped defaults are in force. */
+            version: number;
+            /** @description Count a Finding only when a fixed version is known for its component. */
+            fix_required: boolean;
+            /**
+             * @description The lowest severity that counts.
+             * @enum {string}
+             */
+            severity_floor: "low" | "medium" | "high" | "critical";
+            /** @description Count a known-exploited Finding whatever its severity. */
+            count_known_exploited: boolean;
+            /** @description Do not count a Finding decided not_affected or accepted_risk. */
+            skip_decided: boolean;
+            /** @description Do not count scope-class components; unknown counts as carrier. */
+            carrier_only: boolean;
+            /**
+             * Format: int64
+             * @description The shortest time between two rebuild requests for one Release. 0 = none.
+             */
+            cool_down_seconds: number;
+            /**
+             * @description off = no rebuild is asked for; ask = a person is told and a person starts the build; auto = the request is sent without asking.
+             * @enum {string}
+             */
+            mode: "off" | "ask" | "auto";
+            /**
+             * Format: date-time
+             * @description Absent for the shipped defaults (nothing stored yet).
+             */
+            updated_at?: string;
+            updated_by?: string;
         };
         SLAAcceptancePeriod: {
             /** Format: date-time */
@@ -2267,6 +2366,78 @@ export interface operations {
             400: components["responses"]["Problem"];
             403: components["responses"]["Problem"];
             500: components["responses"]["Problem"];
+        };
+    };
+    getRebuildPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    putRebuildPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildPolicyPut"];
+            };
+        };
+        responses: {
+            /** @description Stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getRebuildPolicyHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"][];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
         };
     };
     getFaultlineFindings: {
