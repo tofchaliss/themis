@@ -56,6 +56,11 @@ func (s *Store) RebuildPolicy(ctx context.Context, scopeKind, scopeID string) (a
 // returns the scope's next version. The version counts every change of the scope from 1 and
 // keeps counting across a removal, so it is read from the history, not from the row in force.
 func lockRebuildScope(ctx context.Context, tx pgx.Tx, scopeKind, scopeID string) (int, error) {
+	// Every policy write waits for the approvals that are checking the policies now, and an
+	// approval that starts later waits for this write (EDR-REBUILD-01 D46 items 3 and 4).
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(`+rebuildPolicyGate+`)`); err != nil {
+		return 0, err
+	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('rebuild_policy:' || $1 || ':' || $2, 0))`,
 		scopeKind, scopeID); err != nil {
 		return 0, err

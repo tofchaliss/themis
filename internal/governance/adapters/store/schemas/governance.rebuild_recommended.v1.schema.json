@@ -53,7 +53,8 @@
       "enum": [
         "new_sbom",
         "fix_available",
-        "cycle_closed"
+        "cycle_closed",
+        "mode_changed"
       ]
     },
     "outcome": {
@@ -366,6 +367,11 @@
         "no_build_profile"
       ],
       "description": "Why this is a recommendation and not a request. no_build_profile: no build profile applies to the Release, so no build could be asked for whatever the mode (D10 item 6); `build` and `build_profile` are then absent."
+    },
+    "supersedes": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Decision id of the recommendation this one replaces (EDR-REBUILD-01 D45 item 4). Absent when it replaces none."
     }
   },
   "dependentRequired": {

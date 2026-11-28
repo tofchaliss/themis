@@ -1641,8 +1641,10 @@ stops a cycle with the stop action. This closes the open question of R2.
 
 1. When a cycle closes and decisions had joined it, Communication writes
    `communication.rebuild_cycle_closed.v1` in the same transaction as the close.
-2. D21 is narrowed here: with no joined decision nothing is published. A cycle that closes
-   with a set that cannot be fixed would otherwise ask Governance again without end.
+2. D21 is narrowed here: with no joined decision no trigger is recorded. A cycle that closes
+   with a set that cannot be fixed would otherwise ask Governance again without end. (Step R4
+   changed where the rule sits: Communication now says so for every cycle opened from a
+   decision, and Governance decides whether the closure is a trigger.)
 3. Governance reads the Communication stream with a second cursor and stores the event as a
    trigger of a third type, `cycle_closed` (Governance migration 31, reversible), source
    `communication`, trigger id = the id of the event. The same event twice is one trigger.
@@ -1661,6 +1663,111 @@ stops a cycle with the stop action. This closes the open question of R2.
 HTTP 97%; Governance `app` and `domain` 100%, inbound 96%. Store tests on a real database:
 Communication 85%, Governance 83%, both migrations down and up. `make lint`, `make vet-tags`,
 `make clean-arch`, `make arch-test` and the GUI `npm run check` are green.
+
+### Step R4 as built (2026-11-28)
+
+Same owner go as R3. Where a choice was open the recommended pick was taken and is named as
+**Pick**.
+
+**What a recommendation is now.** A rebuild decision with outcome `recommend` has a state:
+`standing`, `approved`, `superseded`, `expired` or `withdrawn` (D44). Governance migration 32
+adds the state to `rebuild_decisions`, with the approval, and a unique index that allows one
+`standing` row per Release. Recommendations recorded before this step: the newest of each
+Release became `standing` (its 7 days count from its own time), the older ones `superseded`.
+
+**What the trigger worker does with it (D41, D44).**
+
+1. A standing recommendation past its 7 days is expired first, with its event. The rest of the
+   judgement then sees no standing recommendation, so the same ask makes a new one and a person
+   is told.
+2. The result is the same ask as the standing one (same targeted components, same policy
+   record and version, same build profile revision, same reason): the trigger ends in
+   `unchanged` and points to the standing decision. No decision, no event, no notice.
+3. The result is a different ask: the standing one becomes `superseded` and the new decision
+   carries `supersedes`. Both happen in the transaction that stores the new one.
+4. Nothing counts, or the mode is `off`: the standing one becomes `withdrawn`.
+5. The mode is `auto`: the standing one becomes `withdrawn` and the request goes out directly.
+6. A write that rested on a standing recommendation that moved first writes nothing. The
+   trigger stays open and is judged again on the next pass (D44 item 5).
+
+**After an approval (D44 item 7).** While an approved recommendation's cycle is not known to
+be closed, a trigger in mode `ask` makes no new recommendation. It ends in `none` with reason
+`cycle_open`, and the approved recommendation is flagged. Communication now says that a cycle
+closed for every cycle opened from a decision. Governance then ends the hold, and records the
+closure as a trigger when a decision had joined the cycle or a trigger had been kept back.
+
+**Pick (the hold has an end of its own).** The hold ends with the closure, or 24 hours after
+the approval, whichever comes first. A request can be held or refused on the way (cool-down,
+unsigned route, a node that still opens cycles from the posture), and then no cycle ever
+closes. A recommendation made after the 24 hours and approved joins a cycle that is still open
+(D20), so the bound can cost one more notice and never a second build.
+
+**The approval: `POST /rebuild-recommendations/{decision_id}/approve` (D15, D22, D45, D46).**
+
+1. The body names the person: `actor_id`. Without it the call is refused. The dashboard gate
+   compares `actor_id` with the signed-in user, so through the GUI the name is the session's.
+2. The key must be `admin` or `product:<id>` of the Product the recommendation froze. A read
+   key, a callback key and a key of another Product get 403.
+3. Order of the checks: not standing; then the 7 days (the expiry is recorded with its event
+   by this call if nobody did yet); then "no build profile" (stays standing, nothing to ask);
+   then the mode.
+4. The tags are read fresh from Registry in the call. If they cannot be read the answer is 503
+   and the recommendation stays standing.
+5. The write is one transaction. It takes a lock that every policy write also takes, reads the
+   versions of the installation, Product and Release policy again and compares them with what
+   the mode was computed from. If they differ nothing is written and the call starts over, at
+   most three times.
+6. Mode `ask`: the recommendation becomes `approved`, the approval is stored on it (actor, key
+   name and scopes, time, the three policy versions, the tag and when it was read), and
+   `governance.rebuild_requested.v1` is written to the outbox with the frozen facts, outcome
+   `request`, the same decision id and the approval.
+7. Any other mode: the recommendation becomes `withdrawn` and a trigger of type `mode_changed`
+   is recorded. The call starts nothing.
+8. Answers: 200 `approved`; 409 with `result` `not_standing` (and the id of the standing one),
+   `expired`, `withdrawn` (and the mode in force) or `no_build_profile`.
+
+**Pick (the lock).** D46 item 3 names `SELECT ... FOR SHARE` on the policy rows as the means.
+Built is one advisory lock: the approval holds it shared, every policy write takes it
+exclusive. It does what D46 asks (no policy change can commit between the check and the state
+change) and also covers a policy that does not exist yet, which has no row to lock (item 4).
+
+**The read: `GET /releases/{id}/rebuild-recommendation`.** The newest recommendation of the
+Release with its state, `expires_at`, `can_approve`, and the approval. A standing one past its
+time reads `expired` even before the sweep recorded it.
+
+**Expiry (D26, D32).** A sweep on the cadence of `THEMIS_REVIEW_BY_INTERVAL` moves standing
+recommendations older than 7 days to `expired` and writes
+`governance.rebuild_recommendation_expired.v1`. The move is one conditional statement, so the
+sweep, an approval and a trigger cannot record the same expiry twice.
+
+**Notices (D45).** Communication tells people on the `rebuild_recommended` route: once per
+recommendation, naming its decision id; a recommendation that replaces another says which one;
+an expired one says so. An `unchanged` trigger sends nothing.
+
+**GUI.** The Release page of the React GUI shows a card "Rebuild recommendation" when the
+Release has one: state, how many components and which CVEs, when it expires, who started it.
+"Start rebuild" asks for a yes and sends the approval as the signed-in user. Every refusal is
+shown with its reason.
+
+**Events and schemas.** `governance.rebuild_requested.v1` gained `approval`; both rebuild
+events gained `supersedes` and the trigger type `mode_changed`; new
+`governance.rebuild_recommendation_expired.v1`. `communication.rebuild_cycle_closed.v1` may
+now carry an empty list of joined decisions.
+
+**Known limits of this step.**
+
+1. The approval of a recommendation whose request Communication then holds (cool-down,
+   unsigned route) is recorded as approved, and no build starts. The hold is visible on
+   `GET /releases/{id}/rebuild-cycle` of Communication, not on the recommendation
+   (`GOV-REBUILD-APPROVED-HELD-1`).
+2. The GUI card does not show the rebuild cycle and its requests yet
+   (`GUI-REBUILD-CYCLE-1`).
+3. Nothing of this was seen on the VM yet; that is R6.
+
+**Checked.** Governance `domain` and `app` 100%, HTTP 98%, inbound 96%; Communication `app`
+100%. Store tests on a real database: Governance 83%, Communication 85%, migration 32 down and
+up. `make lint`, `make vet-tags`, `make clean-arch`, `make arch-test`; GUI `npm run check` and
+the bundle rebuilt.
 
 ## Honest limits
 

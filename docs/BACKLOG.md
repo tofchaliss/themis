@@ -488,6 +488,17 @@ three angles, and two of them proposed fixes that would not have worked.
   intent is delivered. If the intent dead-letters, the row and its cycle wait until an
   operator runs `deliveryctl retry`. Mark the request `uncertain` when its intent dead-letters.
 
+- [ ] **An approved recommendation whose request is held shows no hold** (id
+  `GOV-REBUILD-APPROVED-HELD-1`, from EDR-REBUILD-01 step R4, 2026-11-28, follow-up). After an
+  approval Communication may hold the request (cool-down, unsigned route). Governance shows
+  the recommendation as approved; the hold is only on Communication's
+  `GET /releases/{id}/rebuild-cycle`. Show the hold beside the approval.
+
+- [ ] **Show the rebuild cycle and its requests in the GUI** (id `GUI-REBUILD-CYCLE-1`, from
+  EDR-REBUILD-01 step R4, 2026-11-28, follow-up). The Release page shows the recommendation
+  and "Start rebuild". The cycle, its requests, the hold, and the actions settle, request
+  again and stop exist only as API.
+
 - [ ] **The dashboard gate does not check `actor`** (id `GUI-ACTOR-GATE-1`, from EDR-REBUILD-01
   step R2a, 2026-11-28, hardening). The gate compares `actor_id` and `proposer_id` in a write
   body with the signed-in user. The build profile, the rebuild policy and the security

@@ -843,3 +843,35 @@ func TestConsumer_RebuildRecommendedCapsTheCVEList(t *testing.T) {
 		t.Errorf("listed %d of count %s", n, in.Snapshot[app.SnapshotRebuildTargetedCount])
 	}
 }
+
+// D26: a recommendation that ran out is told on the rebuild_recommended route, and opens nothing.
+func TestConsumer_RebuildRecommendationExpired(t *testing.T) {
+	const typ = "governance.rebuild_recommendation_expired"
+	payload := []byte(`{"decision_id":"dec-1","release_id":"rel-1","product_id":"prod-1","project_id":"proj-1","targeted_count":3,
+		"decided_at":"2026-11-01T10:00:00Z","expired_at":"2026-11-08T10:00:00Z"}`)
+	c, intents, cycles, _ := decisionConsumer(app.RebuildOpenFromDecision, map[string]string{app.WebhookRebuildRecommended: "sec"})
+	if err := c.Handle(context.Background(), govEnv("env-x1", typ, payload)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(intents.created) != 1 || len(cycles.rows) != 0 {
+		t.Fatalf("intents %d cycles %d", len(intents.created), len(cycles.rows))
+	}
+	in := intents.created[0]
+	if in.Destination != "sec" || in.Snapshot[app.SnapshotWebhookEvent] != app.WebhookRebuildRecommended ||
+		in.Snapshot[app.SnapshotRebuildExpired] != "1" || in.Snapshot[app.SnapshotRebuildDecisionID] != "dec-1" ||
+		in.Snapshot[app.SnapshotRebuildTargetedCount] != "3" || in.ReleaseID != "rel-1" {
+		t.Errorf("intent = %+v", in)
+	}
+	if err := c.Handle(context.Background(), govEnv("env-x2", typ, []byte(`{"decision_id":"d"}`))); err != nil || len(intents.created) != 1 {
+		t.Errorf("no release: err %v intents %d", err, len(intents.created))
+	}
+	if err := consumer(&memRepo{}).Handle(context.Background(), govEnv("env-x3", typ, []byte(`{`))); err != nil {
+		t.Errorf("no intake: %v", err)
+	}
+	if err := c.Handle(context.Background(), govEnv("env-x4", typ, []byte(`{`))); err == nil {
+		t.Error("a malformed event must be an error")
+	}
+	if !inbound.Subscription.InInterest(typ) {
+		t.Error("the expiry must be in the interest set")
+	}
+}

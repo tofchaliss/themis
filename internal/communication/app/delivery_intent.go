@@ -556,7 +556,11 @@ const (
 	// rebuild_recommended webhook.
 	SnapshotRebuildTargetedCount   = "rebuild_targeted_count"
 	SnapshotRebuildRecommendReason = "rebuild_recommend_reason"
-	rebuildRequestOriginPrefix     = "rebuild:"
+	// SnapshotRebuildSupersedes names the recommendation a new one replaces (D45 item 4), and
+	// SnapshotRebuildExpired ("1") marks the notice of a recommendation that ran out (D26).
+	SnapshotRebuildSupersedes  = "rebuild_supersedes"
+	SnapshotRebuildExpired     = "rebuild_expired"
+	rebuildRequestOriginPrefix = "rebuild:"
 )
 
 // ErrUnsignedRebuildRoute — the rebuild_requested route leads to an audience with no signing

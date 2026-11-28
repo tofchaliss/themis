@@ -212,14 +212,25 @@ func (r *decisionRig) openJoined(t *testing.T) string {
 	return id
 }
 
-// D21: a closed cycle is told only when a decision joined it. A cycle nobody joined has nothing
-// waiting, and telling it would ask again for the set it could not close.
-func TestCycleClosed_ToldOnlyWithJoinedDecisions(t *testing.T) {
+// D21, D44 item 7: a cycle opened from a decision always says that it closed, because Governance
+// holds new recommendations back until then. A cycle the posture opened says so only when a
+// decision joined it: nothing else waits for it.
+func TestCycleClosed_WhoIsTold(t *testing.T) {
 	ctx := context.Background()
 	alone := rig(true, true)
 	alone.open(t)
-	if _, err := alone.loop.Stop(ctx, "rel-1", "pat", ""); err != nil || len(alone.closed.cycles) != 0 {
-		t.Fatalf("a cycle nobody joined must not be told: %d (err %v)", len(alone.closed.cycles), err)
+	if _, err := alone.loop.Stop(ctx, "rel-1", "pat", ""); err != nil || len(alone.closed.cycles) != 1 {
+		t.Fatalf("a decision cycle must be told once: %d (err %v)", len(alone.closed.cycles), err)
+	}
+	if ev := app.CycleClosedEvent(alone.closed.cycles[0]); ev.DecisionID != "dec-1" || len(ev.Joined) != 0 {
+		t.Errorf("event of a cycle nobody joined = %+v", ev)
+	}
+	posture := rig(true, true)
+	if _, err := posture.cycles.CreateCycle(ctx, app.RebuildCycle{ReleaseID: "rel-9", State: app.CycleOpen, Origin: app.CycleOriginEvaluation}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := posture.loop.Stop(ctx, "rel-9", "pat", ""); err != nil || len(posture.closed.cycles) != 0 {
+		t.Fatalf("a posture cycle nobody joined must not be told: %d (err %v)", len(posture.closed.cycles), err)
 	}
 	joined := rig(true, true)
 	joined.openJoined(t)

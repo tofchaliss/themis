@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/governance/governance.rebuild_recommendation_expired.v1.schema.json",
+  "title": "governance.rebuild_recommendation_expired.v1",
+  "description": "A rebuild recommendation waited 7 days for an answer and ran out (EDR-REBUILD-01 D26). It approves nothing and builds nothing; the next trigger of the Release evaluates afresh.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision_id",
+    "release_id",
+    "product_id",
+    "project_id",
+    "targeted_count",
+    "decided_at",
+    "expired_at"
+  ],
+  "properties": {
+    "decision_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "release_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "product_id": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "targeted_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "decided_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expired_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

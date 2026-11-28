@@ -25,8 +25,8 @@ func TestSubscription(t *testing.T) {
 			t.Errorf("interest set missing %s", want)
 		}
 	}
-	if len(s.Interest) != 10 {
-		t.Errorf("interest set = %v, want 10 types", s.Interest)
+	if len(s.Interest) != 11 {
+		t.Errorf("interest set = %v, want 11 types", s.Interest)
 	}
 	// A Governance lifecycle event Communication does not consume is out of interest.
 	if s.InInterest("governance.finding_resolved") {

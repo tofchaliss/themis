@@ -459,7 +459,15 @@ func TestConsumer_FixPublished(t *testing.T) {
 	}
 }
 
-type cycleTriggers struct{ got [][4]string }
+type cycleTriggers struct {
+	got    [][4]string
+	closed [][]string
+}
+
+func (c *cycleTriggers) MarkRebuildCyclesClosed(_ context.Context, ids []string) (bool, error) {
+	c.closed = append(c.closed, ids)
+	return false, nil
+}
 
 func (c *cycleTriggers) RecordRebuildTrigger(_ context.Context, id, source, typ, release string) error {
 	c.got = append(c.got, [4]string{id, source, typ, release})
@@ -471,13 +479,14 @@ func (c *cycleTriggers) RecordRebuildTrigger(_ context.Context, id, source, typ,
 func TestConsumer_RebuildCycleClosed(t *testing.T) {
 	rec := &cycleTriggers{}
 	c := inbound.NewConsumer(app.NewCoordinator(app.NewFindingService(newMemRepo(), &ids{}, clk{})).WithRebuildTriggers(rec))
-	env := mkEnv("communication.rebuild_cycle_closed", []byte(`{"cycle_id":"cy-1","release_id":"rel-1","state":"evaluated"}`))
+	env := mkEnv("communication.rebuild_cycle_closed", []byte(`{"cycle_id":7,"release_id":"rel-1","state":"succeeded","decision_id":"dec-1","joined_decision_ids":["dec-2"]}`))
 	env.ID = "ev-1"
 	if err := c.Handle(context.Background(), env); err != nil {
 		t.Fatalf("handle: %v", err)
 	}
-	if len(rec.got) != 1 || rec.got[0] != [4]string{env.ID, "communication", "cycle_closed", "rel-1"} {
-		t.Fatalf("recorded = %v", rec.got)
+	if len(rec.got) != 1 || rec.got[0] != [4]string{env.ID, "communication", "cycle_closed", "rel-1"} ||
+		len(rec.closed) != 1 || len(rec.closed[0]) != 2 || rec.closed[0][0] != "dec-1" || rec.closed[0][1] != "dec-2" {
+		t.Fatalf("recorded = %v closed = %v", rec.got, rec.closed)
 	}
 	if err := c.Handle(context.Background(), mkEnv("communication.rebuild_cycle_closed", []byte(`{nope`))); err == nil {
 		t.Error("malformed payload must be an error (retried), not a drop")

@@ -86,6 +86,8 @@ func TestIntegrationContractV1_GovernanceEvents(t *testing.T) {
 		// EDR-REBUILD-01 step R2 part 2: the two rebuild events carry one decision shape.
 		{app.EventRebuildRecommended, contractRebuildDecision(domain.RebuildOutcomeRecommend, now)},
 		{app.EventRebuildRequested, contractRebuildDecision(domain.RebuildOutcomeRequest, now)},
+		// Step R4 (D26): a recommendation that ran out.
+		{app.EventRebuildRecommendationExpired, domain.NewRebuildRecommendationExpired(contractRebuildDecision(domain.RebuildOutcomeRecommend, now), now.Add(domain.RebuildRecommendationTTL))},
 		{app.EventReviewDueSoon, domain.ReviewDueSoon{FindingID: "fnd-1", ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", Stance: string(domain.StanceAcceptedRisk), PositionVersion: 2, ReviewBy: now.Add(24 * time.Hour), Owner: "risk-owner@example.test", OccurredAt: now}},
 	}
 	for _, tc := range cases {
@@ -159,9 +161,15 @@ func contractRebuildDecision(outcome string, at time.Time) domain.RebuildDecisio
 	}
 	d.Build = json.RawMessage(`{"job":"team/build-image","parameters":{"BRANCH":"release/1"}}`)
 	d.BuildProfile = &domain.RebuildDecisionBuildProfile{Scope: "project", Revision: 2, SHA256: "ab12"}
+	// Step R4: a recommendation may name the one it replaces, and a request may carry the
+	// approval it follows.
+	d.Supersedes = "dec-0"
 	if outcome == domain.RebuildOutcomeRecommend {
 		d.RecommendReason = domain.RebuildRecommendModeAsk
+		return d
 	}
+	d.Approval = &domain.RebuildApproval{Actor: "pat", KeyName: "deciders", KeyScopes: []string{"product:prod-1"}, ApprovedAt: at,
+		PolicyVersions: domain.RebuildPolicyVersions{Installation: 2, Product: 1}, Tag: "auto", TagLevel: "release", TagsReadAt: at}
 	return d
 }
 

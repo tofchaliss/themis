@@ -57,6 +57,7 @@ func (s *Store) querier(ctx context.Context) rowQuerier {
 // execer is the write surface shared by *pgxpool.Pool and pgx.Tx.
 type execer interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 // exec returns the ambient inbox transaction as the write surface when one rides the context,

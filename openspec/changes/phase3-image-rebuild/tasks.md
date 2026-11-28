@@ -130,6 +130,22 @@ Every step waits for the owner's go and lands as its own PR.
 - [x] 6.8 `make vet-tags`, lint, clean-arch, arch-test, unit and store tests green.
 - [ ] 6.9 VM check: part of R6.
 
+## Group 7 — R4 mode ask: the standing recommendation and "start rebuild" (same owner go)
+
+- [x] 7.1 Governance migration 32: state of a recommendation, approval, one standing per
+  Release; outcome `unchanged`, trigger type `mode_changed`; down and up tested.
+- [x] 7.2 Trigger worker: unchanged, supersede, withdraw, expire first, hold after approval
+  (D41, D44).
+- [x] 7.3 Approval `POST /rebuild-recommendations/{decision_id}/approve` with the policy lock,
+  fresh tags, fail closed (D15, D22, D45, D46); read `GET /releases/{id}/rebuild-recommendation`.
+- [x] 7.4 Expiry sweep and `governance.rebuild_recommendation_expired.v1` (D26, D32).
+- [x] 7.5 Communication: closure said for every decision cycle; notices name the decision,
+  the replaced one and the expiry (D45).
+- [x] 7.6 React GUI: "Rebuild recommendation" card with "Start rebuild" on the Release page;
+  component tests, `npm run check`, bundle rebuilt.
+- [x] 7.7 `make vet-tags`, lint, clean-arch, arch-test, unit and store tests green.
+- [ ] 7.8 VM check: part of R6.
+
 ## Later groups
 
-- [ ] R4 to R6 as in the EDR's order of work.
+- [ ] R5 and R6 as in the EDR's order of work.

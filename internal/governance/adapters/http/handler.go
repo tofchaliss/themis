@@ -48,6 +48,9 @@ type Handler struct {
 	// rebuildDecisions reads the recorded rebuild triggers and decisions (step R2 part 2). A
 	// nil reader answers 503.
 	rebuildDecisions *app.RebuildDecisionReader
+	// rebuildApproval reads recommendations and approves them (step R4). A nil service
+	// answers 503.
+	rebuildApproval *app.RebuildApprovalService
 	// metrics serves the remediation metrics (D6). Nil ⇒ /metrics/remediation answers 503.
 	metrics *app.MetricsService
 	// scope previews who a scoped decision reaches (EDR-SYNC-01 D7). Nil ⇒ no Registry seam, and

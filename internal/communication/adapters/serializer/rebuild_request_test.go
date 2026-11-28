@@ -131,6 +131,19 @@ func TestRenderWebhook_RebuildRecommended(t *testing.T) {
 			t.Errorf("%q: %s", reason, doc.Summary)
 		}
 	}
+	// D45 items 4 and 5: every notice names its decision, and one that replaces another says so.
+	doc := renderHook(t, r, hook(app.WebhookRebuildRecommended, map[string]string{
+		app.SnapshotRebuildDecisionID: "dec-2", app.SnapshotRebuildSupersedes: "dec-1", app.SnapshotRebuildTargetedCount: "1"}))
+	if !strings.Contains(doc.Summary, "Decision dec-2.") || !strings.Contains(doc.Summary, "replaces recommendation dec-1") {
+		t.Errorf("superseding notice: %s", doc.Summary)
+	}
+	// D26: the expiry is told on the same route and starts nothing.
+	doc = renderHook(t, r, hook(app.WebhookRebuildRecommended, map[string]string{
+		app.SnapshotRebuildDecisionID: "dec-2", app.SnapshotRebuildExpired: "1", app.SnapshotRebuildTargetedCount: "3"}))
+	if !strings.Contains(doc.Summary, "decision dec-2, 3 component(s)") || !strings.Contains(doc.Summary, "expired after 7 days") ||
+		!strings.Contains(doc.Summary, "Nothing was started") || strings.Contains(doc.Summary, "recommends") {
+		t.Errorf("expiry notice: %s", doc.Summary)
+	}
 }
 
 var namedRelease = identitySource{ref: domain.RollupProductRef{Product: "example-product", Project: "project-a", Version: "1.2.0"}}

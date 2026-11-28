@@ -71,6 +71,9 @@ type Governance struct {
 	// RebuildTriggers judges the recorded rebuild triggers (EDR-REBUILD-01 step R2 part 2). Nil
 	// when the Registry or the Knowledge read seam is missing.
 	RebuildTriggers *app.RebuildTriggerWorker
+	// RebuildExpiry records recommendations that waited 7 days unanswered (EDR-REBUILD-01 D32,
+	// step R4). The composition root runs it on the cadence of the review-by timer.
+	RebuildExpiry *app.RebuildExpirySweep
 	// Scope applies scoped decisions (EDR-SYNC-01): the composition root runs its sweep on
 	// THEMIS_SCOPE_SWEEP_INTERVAL. Nil without a Registry seam — the owners of a release cannot
 	// be resolved, so a scoped decision stays pending, visibly, rather than guessed at.
@@ -173,7 +176,8 @@ func Wire(
 		WithMetrics(app.NewMetricsService(st, estate, sla, sysClock{})).
 		WithRebuildPolicy(rebuildPolicy).
 		WithRebuildEvaluation(rebuildEval).
-		WithRebuildDecisions(app.NewRebuildDecisionReader(st))
+		WithRebuildDecisions(app.NewRebuildDecisionReader(st)).
+		WithRebuildApproval(app.NewRebuildApprovalService(st, rebuildPolicy, idGen{}, sysClock{}))
 	// Step R2 part 2: the worker that judges the recorded triggers (a new SBOM that was judged,
 	// a fix that became available) and records a decision with its event. It needs both read
 	// seams: without Registry there is no mode, and without Knowledge no fix verdict, and a
@@ -266,6 +270,7 @@ func Wire(
 		SLA:             sla,
 		FixAvailable:    app.NewFixAvailableSweep(st, sysClock{}),
 		RebuildTriggers: rebuildTriggers,
+		RebuildExpiry:   app.NewRebuildExpirySweep(st, sysClock{}),
 		Scope:           scope,
 		Scores:          scores,
 	}

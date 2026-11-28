@@ -323,6 +323,18 @@ func main() {
 	default:
 		logger.Warn("scope sweep DISABLED (THEMIS_SCOPE_SWEEP_INTERVAL=0) — scoped decisions reach Findings born later only, and decision copies stay pending")
 	}
+	// The expiry of rebuild recommendations (EDR-REBUILD-01 D32, step R4), on the cadence of the
+	// review-by timer. It evaluates nothing and builds nothing; with the timer off, an expired
+	// recommendation is still expired by the clock and is recorded by the next trigger or approval.
+	if cfg.reviewByInterval > 0 {
+		go gov.RebuildExpiry.RunEvery(ctx, cfg.reviewByInterval, func(expired int, err error) {
+			if err != nil {
+				logger.Error("rebuild recommendation expiry sweep failed", observability.Err(err))
+			} else if expired > 0 {
+				logger.Info("rebuild recommendations expired", observability.Int("expired", expired))
+			}
+		})
+	}
 	// The rebuild-trigger worker (EDR-REBUILD-01 step R2 part 2): it judges each recorded trigger
 	// and records a decision with its event. It asks no build system for anything.
 	if gov.RebuildTriggers != nil {

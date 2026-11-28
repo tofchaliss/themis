@@ -28,6 +28,7 @@ import {
   priorityTitle,
 } from "@/components/finding-bits";
 import { FindingDrawer } from "@/components/finding-drawer";
+import { RebuildRecommendationCard } from "@/components/rebuild-recommendation";
 import { CustomerVexCard, DocSheet, PublicationsCard, RemediationPlanCard, type Doc } from "@/components/release-extras";
 import { Empty, ErrorPanel } from "@/components/states";
 import { useCveReleases, useEvidence, useWhoAmI, usePosture, useProject, useRelease, useScanReport, useUploadOutcome, type PostureEntry, type UploadOutcome } from "@/lib/queries";
@@ -414,6 +415,7 @@ export function Release({ id, version: hashVersion }: { id: string; version: str
           </Card>
           {outcome.data && <UploadOutcomeCard o={outcome.data} />}
           <ScansCard releaseId={id} version={version} />
+          <RebuildRecommendationCard releaseId={id} actor={who.data?.user ?? ""} canWrite={who.data?.can_write !== false} />
           <RemediationPlanCard releaseId={id} />
           <CustomerVexCard releaseId={id} canWrite={who.data?.can_write !== false} onDoc={setDoc} />
           <PublicationsCard releaseId={id} onDoc={setDoc} />

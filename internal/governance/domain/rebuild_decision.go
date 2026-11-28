@@ -172,6 +172,11 @@ type RebuildDecision struct {
 	// not part of the ask; they are carried so that a person can act on them.
 	OtherStream []RebuildDecisionEntry `json:"other_stream"`
 	DecidedAt   time.Time              `json:"decided_at"`
+	// Supersedes is the decision id of the recommendation this one replaces (D45 item 4); ""
+	// when it replaces none.
+	Supersedes string `json:"supersedes,omitempty"`
+	// Approval is set only on the request that follows an approved recommendation (D27).
+	Approval *RebuildApproval `json:"approval,omitempty"`
 }
 
 // RebuildClaimClassName is D34's claim class: carrier, scope, and unknown for everything else

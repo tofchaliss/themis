@@ -278,7 +278,10 @@ func (l *RebuildLoop) OpensFromDecision() bool {
 // is not lost. A cycle nobody joined has nothing waiting: evaluating again would only ask once
 // more for the set this cycle could not close, without end.
 func (l *RebuildLoop) cycleClosed(ctx context.Context, c RebuildCycle) error {
-	if l.closed == nil || c.State == CycleOpen || len(c.Joined) == 0 {
+	// A cycle opened from a decision always says that it closed: Governance holds new
+	// recommendations back until then (D44 item 7). A cycle opened from a posture says so only
+	// when decisions joined it.
+	if l.closed == nil || c.State == CycleOpen || (len(c.Joined) == 0 && c.Origin != CycleOriginDecision) {
 		return nil
 	}
 	return l.closed.CycleClosed(ctx, c)

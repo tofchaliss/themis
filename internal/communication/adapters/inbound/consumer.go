@@ -59,6 +59,9 @@ const (
 	// `rebuild_recommended` only tells people, when its webhook route is set.
 	eventRebuildRequested   = "governance.rebuild_requested"
 	eventRebuildRecommended = "governance.rebuild_recommended"
+	// eventRebuildRecommendationExpired — a recommendation waited 7 days unanswered (D26, step
+	// R4). People are told on the `rebuild_recommended` route; nothing starts.
+	eventRebuildRecommendationExpired = "governance.rebuild_recommendation_expired"
 )
 
 // Subscription declares Communication's bus binding (EB-07 / D7): it consumes the Governance
@@ -74,7 +77,7 @@ var Subscription = eventbus.Subscription{
 		eventReleaseEvaluated, eventProposalAccepted,
 		eventReviewDueSoon, eventDispositionStale, eventSLABreached,
 		eventFixAvailable,
-		eventRebuildRequested, eventRebuildRecommended,
+		eventRebuildRequested, eventRebuildRecommended, eventRebuildRecommendationExpired,
 	},
 }
 
@@ -149,6 +152,8 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		return c.recordRebuildRequested(ctx, env)
 	case eventRebuildRecommended:
 		return c.recordRebuildRecommended(ctx, env)
+	case eventRebuildRecommendationExpired:
+		return c.recordRebuildRecommendationExpired(ctx, env)
 	default:
 		return nil // not a Communication-consumed event — ignore
 	}
@@ -403,6 +408,7 @@ type rebuildDecisionDTO struct {
 	ProjectID       string `json:"project_id"`
 	TriggerType     string `json:"trigger_type"`
 	RecommendReason string `json:"recommend_reason"`
+	Supersedes      string `json:"supersedes"`
 	Policy          struct {
 		CoolDownSeconds int64 `json:"cool_down_seconds"`
 	} `json:"policy"`
@@ -462,6 +468,38 @@ func (c *Consumer) recordRebuildRecommended(ctx context.Context, env event.Envel
 		map[string]string{
 			app.SnapshotRebuildDecisionID: dto.DecisionID, app.SnapshotRebuildRecommendReason: dto.RecommendReason,
 			app.SnapshotRebuildTargetedCount: strconv.Itoa(len(dto.Targeted)), app.SnapshotTargetedCVEs: strings.Join(cves, ","),
+			app.SnapshotRebuildSupersedes: dto.Supersedes,
+		})
+	return err
+}
+
+// rebuildExpiredDTO mirrors the fields of governance.rebuild_recommendation_expired.v1 this
+// consumer reads.
+type rebuildExpiredDTO struct {
+	DecisionID    string `json:"decision_id"`
+	ReleaseID     string `json:"release_id"`
+	ProductID     string `json:"product_id"`
+	ProjectID     string `json:"project_id"`
+	TargetedCount int    `json:"targeted_count"`
+}
+
+// recordRebuildRecommendationExpired tells people, on the same route as the recommendation,
+// that it ran out unanswered (D26). It starts nothing.
+func (c *Consumer) recordRebuildRecommendationExpired(ctx context.Context, env event.Envelope) error {
+	if c.intents == nil {
+		return nil
+	}
+	var dto rebuildExpiredDTO
+	if err := json.Unmarshal(env.Payload, &dto); err != nil {
+		return err
+	}
+	if strings.TrimSpace(dto.ReleaseID) == "" {
+		return nil
+	}
+	_, _, err := c.intents.EnqueueWebhook(ctx, lineageOf(env), env.ID, app.WebhookRebuildRecommended, dto.ReleaseID, dto.ProductID, dto.ProjectID, "",
+		map[string]string{
+			app.SnapshotRebuildDecisionID: dto.DecisionID, app.SnapshotRebuildExpired: "1",
+			app.SnapshotRebuildTargetedCount: strconv.Itoa(dto.TargetedCount),
 		})
 	return err
 }
