@@ -1080,7 +1080,7 @@ not say which new rules reach it. Decided:
 | R0 | this record and the backlog item | docs |
 | R1 | policy record, evaluation in the domain, read and write API | Governance domain, API, migration |
 | R1a | Product and Release policy overrides; the effective-policy read and the list read (D11). API built 2026-11-28; the GUI page follows as `GUI-REBUILD-POLICY-1` | Governance domain, API, migration; GUI |
-| R2 | evaluation on `new_sbom` and on `fix_available`; the two new events; tag scope | Governance, Registry read seam |
+| R2 | evaluation on `new_sbom` and on `fix_available`; the two new events; tag scope. Built in two parts: part 1 (2026-11-28) is tag scope, effective mode and the judgement as a read; part 2 is the triggers, the stored decision and the events | Governance, Registry read seam; part 1 also adds one read to Knowledge |
 | R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule; the status call, attempt reservation, refusal counter and try number (D20, D28, D40); settling `uncertain` (D24) | Communication, API |
 | R4 | mode `ask`: the "start rebuild" action in API and GUI; one standing recommendation and its states (D41, D44, D45, D46); the expiry sweep (D32) | Governance or Communication API, GUI |
@@ -1185,6 +1185,68 @@ Release beside the installation policy.
   7. After the removals the first Release was back on the installation policy.
   Every answer carried `tags_applied: false`. Not tried on the VM: a `product:<id>` key (none is
   at hand there); the handler tests cover who may change.
+
+### Step R2 part 1 as built (2026-11-28)
+
+The owner gave the go for R2 on 2026-11-28. R2 is built in two parts. **Part 1 is the judgement
+as a read**: Themis can say, for one Release, whether a rebuild would be asked for and for which
+components. It stores nothing, publishes nothing and starts nothing. **Part 2** is the two
+triggers (D3), the stored decision (D27, D29) and the two events (D9).
+
+- **Knowledge: one new read** (an API addition in a second context, told to the owner before
+  building). `GET /releases/{id}/fix-verdicts` returns every live occurrence of the Release
+  with its recorded verdict and a `fix` value: `known` (open, and below at least one vendor
+  bound for its own package and world), `none` (already cleared, or compared and no bound on
+  record) or `unknown` (Themis could not compare). It serves what the occurrence verdict
+  already recorded (`verdict_behind`, EDR-INCIDENT-01 D1). Nothing is judged or written. This
+  is D30 as built: Governance orders no version strings.
+- **Tags** (D4, D17 value 3). `ResolveRebuildTag` reads the own tags of the Release, its Project
+  and its Product, from Registry's existing reads (no Registry change). `rebuild:off` on any
+  level wins. Otherwise the nearest level with `rebuild:ask` or `rebuild:auto` decides. A level
+  carrying both reads `ask`, because a tag only restricts. No rebuild tag is `off`.
+- **Effective mode** (D17 whole). The lowest of the installation mode, the mode of the policy in
+  force and the tag, with which of the three set it. When the tag and the policies give the same
+  mode, the policy side is named. A Release with no tag reads "set by `tag`": the missing tag
+  is what keeps it out. `GET /releases/{id}/rebuild-policy/in-force` now carries `tag`,
+  `effective_mode`, `effective_mode_set_by` and `tags_applied: true`.
+- **The judgement.** `GET /releases/{id}/rebuild-evaluation` (read scope). It looks at every
+  open component occurrence of every Finding that is not resolved or archived, applies the
+  policy in force, and returns: the policy, the tag, the effective mode, the `outcome`
+  (`none`, `recommend` for mode ask, `request` for mode auto), each counted component with the
+  fields of D34, and `skipped`: how many occurrences did not count, by the first rule that left
+  each out (`decided`, `scope_component`, `no_fix`, `fix_unknown`, `below_floor`). A Release
+  whose mode is `off` still shows what would count; its outcome is `none`.
+- **Failure directions.** Registry unreadable (Product or tags): 503, no judgement. A tag list
+  that could not be read never reads as "no tag". Knowledge unreadable: the read still answers,
+  `fix_verdicts_read` is false, every fix is unknown, so nothing counts under `fix_required`.
+- **D34 identity confirmed.** `finding_components` has the primary key (finding id, purl), so
+  the pair is unique and no occurrence index is needed.
+
+**Where part 1 differs from the decisions, and why. Each is open for part 2.**
+
+1. **A known fix exists only for RPM and APK components.** Knowledge records the bounds an
+   occurrence is below only where its fixed-verdict compares: RPM (same EL major) and APK. A
+   language package (npm, Go, Maven, PyPI) reads `unknown` and so never counts while
+   `fix_required` is on. That is the safe direction of D30. Widening it is Knowledge work
+   (backlog `KN-FIX-STANDING-LANG-1`).
+2. **`fixed_versions` is a list, not one `fixed_version`.** An occurrence can be below several
+   bounds (two errata, or a module stream beside the plain build). Governance may not order
+   them (D30). Part 2 must decide how the event names one, or keep the list.
+3. **`fix_source` is `knowledge_verdict`, not a feed name.** The match row does not store which
+   feed stated the bound, and the advisory is computed, not stored. Part 2 decides whether
+   Knowledge stores it.
+4. **Severity is the score priority and the SLA read, not the component assessment.** The
+   calculated assessment is in shadow (EDR-SCORING-01 9.1: computed and shown, not used). So
+   `score_source` is `base_score`, or `owner_set` when a person set the severity, and
+   `assessment.state` is `not_assessed` (or `not_eligible` for a scope component). `assessed`
+   comes with the shadow exit (S7).
+5. **A stale decision still counts as decided.** A `not_affected` or `accepted_risk` Position
+   that was re-surfaced is still skipped by `skip_decided` until a person decides again. This
+   follows D3: a stale decision re-opens a question for a person, and a build does not answer it.
+6. **A row the re-verdict sweep has not reached yet** is served as last judged. It can miss a
+   bound that arrived since; the next sweep brings it up to date.
+
+VM check: pending (task 3.5).
 
 ## Honest limits
 

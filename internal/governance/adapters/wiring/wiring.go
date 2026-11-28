@@ -152,11 +152,23 @@ func Wire(
 	if reg != nil {
 		estate = reg
 	}
+	// EDR-REBUILD-01 steps R1 and R1a: the rebuild policy records. Step R2 part 1 adds the
+	// judgement of one Release as a read: the tags come from Registry (fail-closed: with no
+	// Registry seam the read refuses) and the fix verdicts from Knowledge (with no Knowledge
+	// seam every fix reads unknown, so nothing counts under fix_required). Nothing here asks
+	// for a build. A nil *Client must not become a non-nil interface, hence the guards.
+	rebuildPolicy := app.NewRebuildPolicyService(st, sysClock{}).WithIdentity(productOf)
+	if reg != nil {
+		rebuildPolicy = rebuildPolicy.WithTags(reg)
+	}
+	var fixVerdicts app.ReleaseFixVerdictReader
+	if kn != nil {
+		fixVerdicts = kn
+	}
 	handler := govhttp.NewHandler(write, read).WithLogger(logger).WithSLA(sla).
 		WithMetrics(app.NewMetricsService(st, estate, sla, sysClock{})).
-		// EDR-REBUILD-01 steps R1 and R1a: the rebuild policy records. Stored and served
-		// only; nothing reads it to ask for a build yet.
-		WithRebuildPolicy(app.NewRebuildPolicyService(st, sysClock{}).WithIdentity(productOf))
+		WithRebuildPolicy(rebuildPolicy).
+		WithRebuildEvaluation(app.NewRebuildEvaluationService(rebuildPolicy, st, fixVerdicts, sysClock{}))
 	if reg != nil {
 		handler = handler.WithProductResolver(reg)
 	}

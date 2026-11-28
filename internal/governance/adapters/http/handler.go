@@ -42,6 +42,9 @@ type Handler struct {
 	// rebuild serves the installation rebuild policy (EDR-REBUILD-01 step R1). Nil ⇒
 	// /rebuild-policy answers 503.
 	rebuild *app.RebuildPolicyService
+	// rebuildEval answers the rebuild judgement for one Release (step R2 part 1, a dry run).
+	// Nil ⇒ the read answers 503.
+	rebuildEval *app.RebuildEvaluationService
 	// metrics serves the remediation metrics (D6). Nil ⇒ /metrics/remediation answers 503.
 	metrics *app.MetricsService
 	// scope previews who a scoped decision reaches (EDR-SYNC-01 D7). Nil ⇒ no Registry seam, and
@@ -102,6 +105,12 @@ func (h *Handler) WithSLA(sla *app.SLAService) *Handler {
 // WithRebuildPolicy attaches the rebuild policy service behind /rebuild-policy.
 func (h *Handler) WithRebuildPolicy(rp *app.RebuildPolicyService) *Handler {
 	h.rebuild = rp
+	return h
+}
+
+// WithRebuildEvaluation attaches the rebuild judgement behind /releases/{id}/rebuild-evaluation.
+func (h *Handler) WithRebuildEvaluation(e *app.RebuildEvaluationService) *Handler {
+	h.rebuildEval = e
 	return h
 }
 

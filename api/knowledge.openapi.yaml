@@ -421,6 +421,41 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/SanityFlag'
+  /releases/{releaseId}/fix-verdicts:
+    get:
+      operationId: getReleaseFixVerdicts
+      summary: >
+        For every live occurrence of one release, whether a published fix exists that the
+        install has not picked up (EDR-REBUILD-01 D19, D30).
+      description: >-
+        Serves the RECORDED occurrence verdict, so a consumer in another context never orders
+        version strings itself. `fix` is `known` when the occurrence is open and below at least
+        one vendor bound for its own package and world, `none` when there is nothing to pick up
+        (already cleared, or compared with no bound on record), and `unknown` when Themis could
+        not compare (an ecosystem the fixed-verdict does not cover, or an rpm build that names
+        no EL stream). Unknown is not a known fix. Read-only; a release with no match is an
+        empty list. 503 when the read is not wired.
+      parameters:
+        - name: releaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FixVerdict'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /scanner-reports/{evidenceId}/unresolved:
     get:
       operationId: getUnresolvedComponents
@@ -991,6 +1026,32 @@ components:
             Canonical ecosystem the fix was published for (rpm, apk, npm, ...). Absent when the
             source did not say; a consumer must treat an absent ecosystem as matching any
             component (only positive evidence of mismatch excludes).
+    FixVerdict:
+      type: object
+      required: [faultline_id, cve, purl, version, ecosystem, state, fix, behind]
+      properties:
+        faultline_id:
+          type: string
+        cve:
+          type: string
+        purl:
+          type: string
+        version:
+          type: string
+          description: The component version the occurrence was judged with.
+        ecosystem:
+          type: string
+        state:
+          type: string
+          description: The recorded occurrence verdict (`open` or `cleared_vendor_fix`).
+        fix:
+          type: string
+          enum: [known, none, unknown]
+        behind:
+          type: array
+          description: The vendor fix bounds the open occurrence is below; empty unless `fix` is `known`.
+          items:
+            type: string
     SanityFlag:
       type: object
       required: [release_id, purl, cves, reason, flagged_at]

@@ -207,3 +207,56 @@ func TestWatchResolution(t *testing.T) {
 		t.Error("bad URL swallowed")
 	}
 }
+
+// EDR-REBUILD-01 D30: the fix verdicts ride the read seam as Knowledge recorded them. A fix
+// value this client does not know, and a `known` that names no bound, read as unknown — never
+// as a known fix. Other statuses, bad bodies and transport failures are errors.
+func TestReleaseFixVerdicts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/releases/rel-1/fix-verdicts":
+			_, _ = w.Write([]byte(`[
+				{"faultline_id":"fl-1","cve":"CVE-2026-0001","purl":"pkg:rpm/redhat/kernel@4.18.0-1.el8","state":"open","fix":"known","behind":["0:4.18.0-2.el8"]},
+				{"faultline_id":"fl-2","cve":"CVE-2026-0002","purl":"pkg:rpm/redhat/bash@4.4-1.el8","state":"open","fix":"none","behind":[]},
+				{"faultline_id":"fl-3","cve":"CVE-2026-0003","purl":"pkg:npm/left-pad@1.0.0","state":"open","fix":"unknown","behind":[]},
+				{"faultline_id":"fl-4","cve":"CVE-2026-0004","purl":"pkg:rpm/redhat/zlib@1.2-1.el8","state":"open","fix":"known","behind":[]},
+				{"faultline_id":"fl-5","cve":"CVE-2026-0005","purl":"pkg:rpm/redhat/curl@7.61-1.el8","state":"open","fix":"certainly","behind":["x"]}]`))
+		case "/api/v1/releases/rel-empty/fix-verdicts":
+			_, _ = w.Write([]byte(`[]`))
+		case "/api/v1/releases/rel-bad/fix-verdicts":
+			_, _ = w.Write([]byte(`{not-json`))
+		default:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, srv.Client())
+	ctx := context.Background()
+
+	got, err := c.ReleaseFixVerdicts(ctx, "rel-1")
+	if err != nil || len(got) != 5 {
+		t.Fatalf("verdicts = %+v err %v", got, err)
+	}
+	if got[0].Fix != "known" || got[0].FaultlineID != "fl-1" || got[0].PURL != "pkg:rpm/redhat/kernel@4.18.0-1.el8" ||
+		len(got[0].FixedVersions) != 1 || got[0].FixedVersions[0] != "0:4.18.0-2.el8" {
+		t.Errorf("known = %+v", got[0])
+	}
+	if got[1].Fix != "none" || got[2].Fix != "unknown" || got[3].Fix != "unknown" || got[4].Fix != "unknown" || got[4].FixedVersions != nil {
+		t.Errorf("others = %+v", got[1:])
+	}
+	if got, err := c.ReleaseFixVerdicts(ctx, "rel-empty"); err != nil || len(got) != 0 {
+		t.Errorf("empty = %+v err %v", got, err)
+	}
+	if _, err := c.ReleaseFixVerdicts(ctx, "rel-503"); err == nil {
+		t.Error("503 swallowed")
+	}
+	if _, err := c.ReleaseFixVerdicts(ctx, "rel-bad"); err == nil {
+		t.Error("bad body swallowed")
+	}
+	if _, err := NewClient("http://127.0.0.1:1", nil).ReleaseFixVerdicts(ctx, "rel-1"); err == nil {
+		t.Error("transport error swallowed")
+	}
+	if _, err := NewClient("http://bad\x7f", nil).ReleaseFixVerdicts(ctx, "rel-1"); err == nil {
+		t.Error("request build error swallowed")
+	}
+}

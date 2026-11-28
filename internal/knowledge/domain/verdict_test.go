@@ -71,3 +71,31 @@ func TestOccurrenceVerdict_NewlyBehind(t *testing.T) {
 		t.Errorf("a clearance is behind nothing, got %v", got)
 	}
 }
+
+// EDR-REBUILD-01 D30: a known fix needs an open occurrence that is behind a bound; a clearance
+// and a compared-with-no-bound row have nothing to pick up; anything Themis could not compare is
+// unknown, which is not a known fix.
+func TestFixStandingOf(t *testing.T) {
+	cases := []struct {
+		name      string
+		state     domain.VerdictState
+		ecosystem string
+		version   string
+		behind    []string
+		want      domain.FixStanding
+	}{
+		{"open and behind a bound", domain.VerdictOpen, "rpm", "4.18.0-1.el8", []string{"0:4.18.0-2.el8"}, domain.FixKnown},
+		{"a row predating the state reads open", "", "rpm", "4.18.0-1.el8", []string{"0:4.18.0-2.el8"}, domain.FixKnown},
+		{"cleared carries the fix", domain.VerdictClearedVendorFix, "rpm", "4.18.0-2.el8", nil, domain.FixNone},
+		{"rpm compared, no bound", domain.VerdictOpen, "rocky", "4.18.0-1.el8", nil, domain.FixNone},
+		{"rpm naming no EL stream", domain.VerdictOpen, "rpm", "4.18.0", nil, domain.FixUnknown},
+		{"apk compared, no bound", domain.VerdictOpen, "alpine", "1.2.3-r0", nil, domain.FixNone},
+		{"an ecosystem the verdict does not cover", domain.VerdictOpen, "npm", "1.0.0", nil, domain.FixUnknown},
+		{"no ecosystem at all", domain.VerdictOpen, "", "1.0.0", nil, domain.FixUnknown},
+	}
+	for _, c := range cases {
+		if got := domain.FixStandingOf(c.state, c.ecosystem, c.version, c.behind); got != c.want {
+			t.Errorf("%s: got %q want %q", c.name, got, c.want)
+		}
+	}
+}

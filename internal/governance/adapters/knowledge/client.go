@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/themis-project/themis/internal/governance/app"
+	"github.com/themis-project/themis/internal/governance/domain"
 	"github.com/themis-project/themis/internal/kernel/value"
 )
 
@@ -193,6 +194,55 @@ func (c *Client) FaultlinesByAdvisory(ctx context.Context, advisory string) ([]a
 	out := make([]app.FaultlineKnowledge, 0, len(bodies))
 	for _, b := range bodies {
 		out = append(out, toKnowledge(b))
+	}
+	return out, nil
+}
+
+// --- Release fix verdicts (EDR-REBUILD-01 D30) --------------------------------------------
+
+var _ app.ReleaseFixVerdictReader = (*Client)(nil)
+
+// ReleaseFixVerdicts fetches Knowledge's recorded fix standing for every live occurrence of one
+// release. Governance never orders version strings for the rebuild policy; this is the answer
+// it reads instead. A fix value this client does not know reads as unknown, which is never a
+// known fix.
+func (c *Client) ReleaseFixVerdicts(ctx context.Context, releaseID string) ([]app.ReleaseFixVerdict, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		c.baseURL+"/api/v1/releases/"+url.PathEscape(releaseID)+"/fix-verdicts", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("knowledge: fix verdicts of release %s: status %d", releaseID, resp.StatusCode)
+	}
+	var rows []struct {
+		FaultlineID string   `json:"faultline_id"`
+		PURL        string   `json:"purl"`
+		Fix         string   `json:"fix"`
+		Behind      []string `json:"behind"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
+		return nil, err
+	}
+	out := make([]app.ReleaseFixVerdict, 0, len(rows))
+	for _, r := range rows {
+		v := app.ReleaseFixVerdict{FaultlineID: r.FaultlineID, PURL: r.PURL, Fix: domain.RebuildFixUnknown}
+		switch domain.RebuildFixVerdict(r.Fix) {
+		case domain.RebuildFixKnown:
+			// A known fix names the bound it is about. One that names none cannot be shown or
+			// audited, so it stays unknown.
+			if len(r.Behind) > 0 {
+				v.Fix, v.FixedVersions = domain.RebuildFixKnown, r.Behind
+			}
+		case domain.RebuildFixNone:
+			v.Fix = domain.RebuildFixNone
+		}
+		out = append(out, v)
 	}
 	return out, nil
 }

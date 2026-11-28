@@ -292,3 +292,41 @@ func TestClient_ReleaseOwners(t *testing.T) {
 		}
 	}
 }
+
+// EDR-REBUILD-01 D4: each level's OWN tags come back apart, with the owner ids, and every hop
+// fails closed — a tag list that could not be read must never look like "no tag".
+func TestClient_ReleaseTagLevels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := map[string]string{
+			"/api/v1/releases/rel-1":       `{"id":"rel-1","project_id":"proj-1","tags":["rebuild:auto"]}`,
+			"/api/v1/releases/rel-noproj":  `{"id":"rel-noproj","project_id":""}`,
+			"/api/v1/releases/rel-2":       `{"id":"rel-2","project_id":"proj-noprod"}`,
+			"/api/v1/releases/rel-3":       `{"id":"rel-3","project_id":"proj-2"}`,
+			"/api/v1/projects/proj-1":      `{"id":"proj-1","product_id":"prod-1","tags":["team:a"]}`,
+			"/api/v1/projects/proj-noprod": `{"id":"proj-noprod","product_id":""}`,
+			"/api/v1/projects/proj-2":      `{"id":"proj-2","product_id":"prod-missing"}`,
+			"/api/v1/products/prod-1":      `{"id":"prod-1","name":"P1","tags":["rebuild:off","tier:1"]}`,
+		}[r.URL.Path]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	c := registry.NewClient(srv.URL, srv.Client())
+
+	got, err := c.ReleaseTagLevels(context.Background(), "rel-1")
+	if err != nil {
+		t.Fatalf("ReleaseTagLevels: %v", err)
+	}
+	if got.ProductID != "prod-1" || got.ProjectID != "proj-1" || len(got.Release) != 1 || got.Release[0] != "rebuild:auto" ||
+		len(got.Project) != 1 || got.Project[0] != "team:a" || len(got.Product) != 2 || got.Product[0] != "rebuild:off" {
+		t.Errorf("levels = %+v", got)
+	}
+	for _, id := range []string{"", "missing", "rel-noproj", "rel-2", "rel-3"} {
+		if _, err := c.ReleaseTagLevels(context.Background(), id); err == nil {
+			t.Errorf("release %q: want an error, got tags", id)
+		}
+	}
+}

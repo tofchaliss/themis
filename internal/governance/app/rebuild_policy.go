@@ -12,7 +12,8 @@ import (
 // The rebuild policy records (EDR-REBUILD-01 D2, D9, D11, D17; steps R1 and R1a). This file
 // stores and reads the installation policy and the optional Product and Release policies, each
 // with its own version and change history, and answers which one is in force for a Release.
-// It evaluates no Finding and publishes nothing: wiring the rule to a trigger is step R2.
+// It evaluates no Finding and publishes nothing. From step R2 the same read also applies the
+// Release's tags (D4, D17) when a tag reader is wired.
 
 // Rebuild policy scope kinds, as stored. They are the three levels of D11.
 const (
@@ -75,6 +76,7 @@ type RebuildPolicyStore interface {
 type RebuildPolicyService struct {
 	store    RebuildPolicyStore
 	identity ProductOfRelease // nil: the policy in force for a Release cannot be answered
+	tags     ReleaseTagReader // nil: the Release's tags are not read, so no effective mode
 	clock    Clock
 }
 
@@ -222,9 +224,39 @@ type RebuildPolicyForRelease struct {
 	// InstallationMode is the installation policy's mode, the ceiling of D17.
 	InstallationMode domain.RebuildMode
 	// ModeCeiling is the most the policies allow for this Release, and ModeSetBy which of them
-	// set it. The Release's tags can only lower it (D17 value 3); they are read from step R2 on.
+	// set it. The Release's tags can only lower it (D17 value 3).
 	ModeCeiling domain.RebuildMode
 	ModeSetBy   string
+	// TagsApplied says whether the tags were read (a tag reader is wired). Only then are the
+	// four fields below set.
+	TagsApplied bool
+	// ProjectID is the Project of the Release, as Registry names it.
+	ProjectID string
+	// Tag is what the tags of the Release, its Project and its Product say (D4).
+	Tag domain.RebuildTagMode
+	// EffectiveMode is D17 whole: the lowest of the installation mode, the mode of the policy in
+	// force and the tag. EffectiveSetBy names the value that set it.
+	EffectiveMode  domain.RebuildMode
+	EffectiveSetBy string
+}
+
+// ReleaseTagLevels is the own tags of a Release, of its Project and of its Product, with the
+// two owner ids read on the way (EDR-REBUILD-01 D4).
+type ReleaseTagLevels struct {
+	ProductID, ProjectID      string
+	Release, Project, Product []string
+}
+
+// ReleaseTagReader reads them from Registry. It fails closed like ProductOfRelease: an error,
+// never a blank Product and never an empty tag list standing in for one that could not be read.
+type ReleaseTagReader interface {
+	ReleaseTagLevels(ctx context.Context, releaseID string) (ReleaseTagLevels, error)
+}
+
+// WithTags wires the tag reader. With it, InForce also answers the effective mode (D17).
+func (s *RebuildPolicyService) WithTags(t ReleaseTagReader) *RebuildPolicyService {
+	s.tags = t
+	return s
 }
 
 // InForce resolves the policy in force for one Release: its own, else its Product's, else the
@@ -234,10 +266,22 @@ func (s *RebuildPolicyService) InForce(ctx context.Context, releaseID string) (R
 	if releaseID == "" {
 		return RebuildPolicyForRelease{}, ErrRebuildPolicyScopeInvalid
 	}
-	if s.identity == nil {
+	var (
+		productID string
+		levels    ReleaseTagLevels
+		err       error
+	)
+	switch {
+	case s.tags != nil:
+		// One read gives the owners AND the tags, so the mode is judged against the same
+		// Product the policy was looked up for.
+		levels, err = s.tags.ReleaseTagLevels(ctx, releaseID)
+		productID = levels.ProductID
+	case s.identity != nil:
+		productID, _, err = s.identity.ProductAndProjectOfRelease(ctx, releaseID)
+	default:
 		return RebuildPolicyForRelease{}, ErrRebuildPolicyIdentityUnavailable
 	}
-	productID, _, err := s.identity.ProductAndProjectOfRelease(ctx, releaseID)
 	if err != nil || strings.TrimSpace(productID) == "" {
 		return RebuildPolicyForRelease{}, ErrRebuildPolicyIdentityUnavailable
 	}
@@ -263,5 +307,10 @@ func (s *RebuildPolicyService) InForce(ctx context.Context, releaseID string) (R
 	}
 	res := domain.ResolveRebuildPolicy(inst.Policy, product, release)
 	out.ModeCeiling, out.ModeSetBy = res.ModeCeiling, res.ModeSetBy
+	if s.tags != nil {
+		out.TagsApplied, out.ProjectID = true, levels.ProjectID
+		out.Tag = domain.ResolveRebuildTag(levels.Release, levels.Project, levels.Product)
+		out.EffectiveMode, out.EffectiveSetBy = domain.EffectiveRebuildMode(res.ModeCeiling, res.ModeSetBy, out.Tag)
+	}
 	return out, nil
 }

@@ -167,7 +167,20 @@ type RebuildVerdict struct {
 	Mode RebuildMode
 	// Targeted are the counted candidates, in the order given.
 	Targeted []RebuildTarget
+	// Skipped counts the candidates that did not count, by the FIRST rule that left each out
+	// (the RebuildSkipped* names). It exists so that "nothing counts" can say why.
+	Skipped map[string]int
 }
+
+// Why a candidate did not count. One reason per candidate: the first rule that left it out, in
+// the order the policy applies them.
+const (
+	RebuildSkippedDecided    = "decided"
+	RebuildSkippedScope      = "scope_component"
+	RebuildSkippedNoFix      = "no_fix"
+	RebuildSkippedFixUnknown = "fix_unknown"
+	RebuildSkippedBelowFloor = "below_floor"
+)
 
 // Worth reports whether a rebuild is worth asking for: the mode is not off and at least one
 // candidate counted.
@@ -182,19 +195,26 @@ func suppressedForRebuild(s Stance) bool {
 // I/O. The cool-down and the open-cycle rule are the caller's (D13, D14); they gate the opening
 // of a cycle, not what counts.
 func EvaluateRebuild(p RebuildPolicy, candidates []RebuildCandidate) RebuildVerdict {
-	out := RebuildVerdict{Mode: p.Mode}
+	out := RebuildVerdict{Mode: p.Mode, Skipped: map[string]int{}}
 	if !p.Mode.Valid() {
 		out.Mode = RebuildModeOff
 	}
 	floor := severityRank(p.SeverityFloor)
 	for _, c := range candidates {
 		if p.SkipDecided && suppressedForRebuild(c.Position) {
+			out.Skipped[RebuildSkippedDecided]++
 			continue
 		}
 		if p.CarrierOnly && strings.TrimSpace(c.ClaimClass) == ClaimScope {
+			out.Skipped[RebuildSkippedScope]++
 			continue
 		}
 		if p.FixRequired && c.Fix != RebuildFixKnown {
+			if c.Fix == RebuildFixNone {
+				out.Skipped[RebuildSkippedNoFix]++
+			} else {
+				out.Skipped[RebuildSkippedFixUnknown]++
+			}
 			continue
 		}
 		var because []string
@@ -205,6 +225,7 @@ func EvaluateRebuild(p RebuildPolicy, candidates []RebuildCandidate) RebuildVerd
 			because = append(because, RebuildCountedKnownExploited)
 		}
 		if len(because) == 0 {
+			out.Skipped[RebuildSkippedBelowFloor]++
 			continue
 		}
 		out.Targeted = append(out.Targeted, RebuildTarget{RebuildCandidate: c, CountedBecause: because})

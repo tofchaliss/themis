@@ -84,6 +84,9 @@ func feedServer(t *testing.T, repo app.Repository, proj app.ProjectionReader, fe
 	if al, ok := repo.(app.AdvisoryLister); ok {
 		read = read.WithAdvisory(al)
 	}
+	if fl, ok := repo.(app.FixVerdictLister); ok {
+		read = read.WithFixVerdicts(fl)
+	}
 	srv := httptest.NewServer(knhttp.NewHandler(read, health).Router())
 	t.Cleanup(srv.Close)
 	return srv
@@ -793,6 +796,63 @@ func TestGetFaultlinesByAdvisory(t *testing.T) {
 	}
 	plain := server(t, fakeRepo{card: card, found: true}, fakeProjection{})
 	if status, _ := get(t, plain.URL+"/faultlines/by-advisory?id=RHSA-2026:0001"); status != http.StatusServiceUnavailable {
+		t.Errorf("unwired status = %d", status)
+	}
+}
+
+// fixVerdictRepo is a repository that also answers the release fix-verdict read.
+type fixVerdictRepo struct {
+	fakeRepo
+	rows []app.MatchVerdict
+	ferr error
+}
+
+func (r *fixVerdictRepo) ReleaseMatchVerdicts(context.Context, string) ([]app.MatchVerdict, error) {
+	return r.rows, r.ferr
+}
+
+// EDR-REBUILD-01 D30: the fix-verdict read returns each live occurrence with its standing and an
+// always-present `behind` list, an empty list for a release with no match, 503 unwired and 500
+// on a store failure.
+func TestGetReleaseFixVerdicts(t *testing.T) {
+	repo := &fixVerdictRepo{fakeRepo: fakeRepo{card: sampleCard(t), found: true}, rows: []app.MatchVerdict{
+		{FaultlineID: "fl-1", CVE: "CVE-2024-1", PURL: "pkg:rpm/redhat/kernel@4.18.0-1.el8", Version: "4.18.0-1.el8", Ecosystem: "rpm", State: domain.VerdictOpen, Behind: []string{"0:4.18.0-2.el8"}},
+		{FaultlineID: "fl-1", CVE: "CVE-2024-1", PURL: "pkg:npm/left-pad@1.0.0", Version: "1.0.0", Ecosystem: "npm", State: domain.VerdictOpen},
+	}}
+	srv := server(t, repo, fakeProjection{})
+	status, body := get(t, srv.URL+"/releases/rel-1/fix-verdicts")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d: %s", status, body)
+	}
+	var rows []struct {
+		Cve    string   `json:"cve"`
+		Purl   string   `json:"purl"`
+		State  string   `json:"state"`
+		Fix    string   `json:"fix"`
+		Behind []string `json:"behind"`
+	}
+	if err := json.Unmarshal(body, &rows); err != nil || len(rows) != 2 {
+		t.Fatalf("rows = %+v err %v", rows, err)
+	}
+	if rows[0].Fix != "known" || len(rows[0].Behind) != 1 || rows[0].State != "open" || rows[0].Cve != "CVE-2024-1" {
+		t.Errorf("first row = %+v", rows[0])
+	}
+	if rows[1].Fix != "unknown" || rows[1].Behind == nil || !strings.Contains(string(body), `"behind":[]`) {
+		t.Errorf("second row = %+v body %s", rows[1], body)
+	}
+	repo.rows = nil
+	if status, body := get(t, srv.URL+"/releases/rel-2/fix-verdicts"); status != http.StatusOK || string(body) != "[]\n" {
+		t.Errorf("no match = %d %q", status, body)
+	}
+	if status, _ := get(t, srv.URL+"/releases/%20/fix-verdicts"); status != http.StatusBadRequest {
+		t.Errorf("blank id status = %d", status)
+	}
+	repo.ferr = errors.New("db down")
+	if status, _ := get(t, srv.URL+"/releases/rel-1/fix-verdicts"); status != http.StatusInternalServerError {
+		t.Errorf("store failure status = %d", status)
+	}
+	plain := server(t, fakeRepo{card: sampleCard(t), found: true}, fakeProjection{})
+	if status, _ := get(t, plain.URL+"/releases/rel-1/fix-verdicts"); status != http.StatusServiceUnavailable {
 		t.Errorf("unwired status = %d", status)
 	}
 }

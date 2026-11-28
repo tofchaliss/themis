@@ -1739,6 +1739,29 @@ func TestRecordMatch_FixPublishedOnNewBound(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT verdict_behind FROM faultline_matches WHERE component_purl=$1", patched.PURL).Scan(&b); err != nil || len(b) != 0 {
 		t.Errorf("cleared row behind = %v/%v, want the empty set", b, err)
 	}
+
+	// EDR-REBUILD-01 D30: the release read serves the recorded verdict of each live row.
+	open1, err := st.ReleaseMatchVerdicts(ctx, "rel-1")
+	if err != nil || len(open1) != 1 {
+		t.Fatalf("rel-1 verdicts = %+v err %v", open1, err)
+	}
+	if v := open1[0]; v.CVE != cve || v.PURL != kernel.PURL || v.Version != kernel.Version || v.Ecosystem != "rpm" ||
+		!v.State.IsOpen() || len(v.Behind) != 2 || v.FaultlineID != string(f.ID()) {
+		t.Errorf("rel-1 verdict = %+v", v)
+	}
+	if cleared, err := st.ReleaseMatchVerdicts(ctx, "rel-2"); err != nil || len(cleared) != 1 ||
+		cleared[0].State != domain.VerdictClearedVendorFix || len(cleared[0].Behind) != 0 {
+		t.Errorf("rel-2 verdicts = %+v err %v", cleared, err)
+	}
+	if none, err := st.ReleaseMatchVerdicts(ctx, "rel-none"); err != nil || len(none) != 0 {
+		t.Errorf("unknown release = %+v err %v", none, err)
+	}
+	if _, err := pool.Exec(ctx, "UPDATE faultline_matches SET retired_at=now() WHERE release_id='rel-1'"); err != nil {
+		t.Fatal(err)
+	}
+	if retired, err := st.ReleaseMatchVerdicts(ctx, "rel-1"); err != nil || len(retired) != 0 {
+		t.Errorf("a retired row must not be served: %+v err %v", retired, err)
+	}
 }
 
 // EDR-INCIDENT-01 D2: an advisory names the cards whose `fixed` statements carry it, in CVE
