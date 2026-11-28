@@ -82,8 +82,11 @@ Every step waits for the owner's go and lands as its own PR.
 - [x] 4.4 Events `governance.rebuild_requested.v1` and `governance.rebuild_recommended.v1`
   with frozen schemas and contract tests; Communication's consumer ignores event types it does
   not know (its `default` case), confirmed in the code.
-- [ ] 4.5 VM check: migration 30 applies, a forced trigger is judged, a tagged Release gives a
+- [x] 4.5 VM check: migration 30 applies, a forced trigger is judged, a tagged Release gives a
   decision and one event, an untagged one gives `none` with the reason, nothing is sent out.
+  PASS 2026-11-28 (EDR "VM check of part 2").
+- [ ] 4.6 See one trigger written by a real event on the VM (a new SBOM or a real
+  `fix_available`), and its outcome on the decisions read (backlog `GOV-REBUILD-TRIGGER-LIVE-1`).
 
 ## Later groups
 

@@ -1411,7 +1411,33 @@ types it does not know, and its own rebuild loop (EDR-DELIVERY-01 M2-8) is uncha
 4. **Mode `off` does not stop anything that is open**, because nothing is open yet. The
    question stays with the owner for R3.
 
-VM check of part 2: pending (task 4.5).
+**VM check of part 2 (2026-11-28, task 4.5): PASS.** Main after #278, auth on, the same
+Release as before, installation policy version 4 (mode ask). The two triggers were test rows
+written by hand into `rebuild_triggers` (source `vm-check`, type `fix_available`), because no
+new SBOM and no new fix arrived during the check.
+
+| Step | Expected | Seen |
+| --- | --- | --- |
+| Governance restart | migration 30 applied | `schema_migrations` reads 30 |
+| Worker | enabled | "rebuild-trigger worker enabled" in the log |
+| Trigger 1, Release has no tag | `none`, reason `mode_off`, no decision | `none`, `mode_off`, mode `off`, 48 would count, no decision |
+| Tag `rebuild:ask` set, trigger 2 | `recommend` with a decision | `recommend`, mode `ask` set by `installation`, tag `rebuild:ask` at level `release`, policy version 4 |
+| Frozen facts | as the judgement read | considered 596, targeted 48, other_stream 44, skipped 235 / 234 / 44 / 33 / 2 |
+| Outbox | one rebuild event | one `governance.rebuild_recommended` with schema `governance.rebuild_recommended.v1` |
+| `rebuild_decisions` | one row | one row, outcome `recommend` |
+| Tag removed | tags empty | tags empty |
+| Governance error log | nothing | nothing |
+
+- Each trigger was closed within one 45 second wait.
+- The numbers of the decision are the numbers of the read of part 1 on the same data, so the
+  worker and the read give one answer.
+- Nothing was sent out: no ticket, no mail, no card, no build.
+- **Not exercised on the VM:** a trigger written by a real event (the two write sites are
+  covered by the integration tests only), mode `auto` and the `rebuild_requested` event, and
+  the `gave_up` path. The first real `fix_available` or new SBOM on the VM is the natural
+  check of the write sites (backlog `GOV-REBUILD-TRIGGER-LIVE-1`).
+- The two test triggers and the one test decision stay in the VM database as the record of
+  this check; they are marked by the source `vm-check`.
 
 ## Honest limits
 
