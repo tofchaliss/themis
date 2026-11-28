@@ -6,6 +6,7 @@ package wiring
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -123,7 +124,17 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 		ReviewAudience:     cfg.ReviewAudience,
 		RebuildDestination: cfg.Jenkins.Job,
 		WebhookRoutes:      cfg.WebhookRoutes,
+		SignedAudiences:    cfg.Webhook.SignedAudiences(),
 	}).WithRebuildCallbacks(comm.Store)
+	// A rebuild_requested route without a signing secret sends nothing (EDR-REBUILD-01 D6). Said
+	// once at start, by name, so that it is not found one held-back decision at a time.
+	if unsigned := cfg.Webhook.UnsignedRebuildRoutes(cfg.WebhookRoutes); len(unsigned) > 0 {
+		logger.Error("a rebuild_requested webhook route has NO signing secret — no rebuild request will be sent on it, and no cycle opens for its releases",
+			observability.String("routes", strings.Join(unsigned, " ")))
+	}
+	if _, routed := cfg.WebhookRoutes[app.WebhookRebuildRequested]; routed && cfg.Jenkins.Enabled {
+		logger.Info("both a rebuild_requested route and the Jenkins sender are configured — the route wins for the releases it covers")
+	}
 	// Webhook routes by tag ("kind#tag=audience", EDR-REMEDIATION-01 D7) read the release's
 	// effective tags over the same Registry client the names come from.
 	if tags, ok := comm.Identity.(app.ReleaseTagReader); ok {
@@ -131,7 +142,7 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 	}
 	if comm.API != nil {
 		comm.API.WithRebuildCallbacks(intents) // the callback route records against the same intents
-		comm.API.WithWebhookHealth(comm.Store)  // D4: the Feeds page reads destination health
+		comm.API.WithWebhookHealth(comm.Store) // D4: the Feeds page reads destination health
 	}
 	if comm.Posture != nil {
 		intents = intents.WithPayloadRenderer(serializer.NewOutwardRenderer(comm.Posture).WithIdentity(comm.Identity).WithDashboardURL(cfg.DashboardURL))
@@ -139,8 +150,18 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 	comm.Consumer.WithIntents(intents)
 	// The rebuild loop (N-M2i) needs the posture to decide; without the read seam there is no
 	// loop, and a node without one still tickets and mails.
+	var loop *app.RebuildLoop
 	if comm.Posture != nil {
-		comm.Consumer.WithRebuildLoop(app.NewRebuildLoop(comm.Store, comm.Posture, intents, sysClock{}, cfg.RebuildMaxAttempts))
+		// Since EDR-REBUILD-01 step R3 the loop also keeps rebuild requests and, when
+		// THEMIS_COMMUNICATION_REBUILD_OPEN_FROM=decision, opens a cycle from Governance's
+		// decision and not from the posture.
+		loop = app.NewRebuildLoop(comm.Store, comm.Posture, intents, sysClock{}, cfg.RebuildMaxAttempts).
+			WithDecisions(comm.Store, cfg.RebuildOpenFrom).
+			WithCycleClosed(comm.Store) // D21: a closed cycle that decisions joined goes back to Governance
+		comm.Consumer.WithRebuildLoop(loop)
+		if comm.API != nil {
+			comm.API.WithRebuildLoop(loop)
+		}
 	}
 	// The Store is also the REAL Jira sender's ticket index: Themis's own record of which issue a
 	// Release already has is what keeps one ticket per Release when the project forbids labels on
@@ -150,6 +171,9 @@ func WireDelivery(comm Communication, cfg delivery.Config, logger *observability
 	comm.Consumer.WithSLADigest(digest)
 	worker := delivery.NewWorker(cfg, comm.Store, intents, delivery.NewDeliverersWithHealth(cfg, comm.Store, comm.Store, logger), logger).
 		WithSLADigest(digest)
+	if loop != nil {
+		worker = worker.WithRebuildSweep(loop)
+	}
 	// The scheduled remediation summary (D6 through D4) reads the same Governance client.
 	if reader, ok := comm.Posture.(app.RemediationMetricsReader); ok {
 		worker = worker.WithMetricsSchedule(app.NewMetricsSchedule(reader, intents, idGen{}))

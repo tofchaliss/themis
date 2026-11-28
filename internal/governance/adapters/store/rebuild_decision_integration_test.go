@@ -180,3 +180,26 @@ func TestSettleRebuildTrigger(t *testing.T) {
 		t.Errorf("limit 1 = %d %v", len(one), err)
 	}
 }
+
+// EDR-REBUILD-01 D21: a closed rebuild cycle is stored as an open trigger of the third kind
+// (migration 31 lets the type in), once per event id, and the worker reads it like the others.
+func TestRecordRebuildTriggerFromAClosedCycle(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	for i := 0; i < 2; i++ {
+		if err := st.RecordRebuildTrigger(ctx, "ev-1", "communication", domain.RebuildTriggerCycleClosed, "rel-1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pending, err := st.PendingRebuildTriggers(ctx, 10)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending = %+v %v, want one trigger for one event", pending, err)
+	}
+	if p := pending[0]; p.TriggerID != "ev-1" || p.Source != "communication" || p.Type != domain.RebuildTriggerCycleClosed || p.ReleaseID != "rel-1" {
+		t.Errorf("trigger = %+v", p)
+	}
+	if err := st.RecordRebuildTrigger(ctx, "ev-2", "communication", "made_up", "rel-1"); err == nil {
+		t.Error("a trigger type outside the closed set must be refused by the table")
+	}
+}

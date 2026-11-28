@@ -20,6 +20,144 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// Defines values for CIRebuildCallbackStatus.
+const (
+	CIRebuildCallbackStatusRefused   CIRebuildCallbackStatus = "refused"
+	CIRebuildCallbackStatusSubmitted CIRebuildCallbackStatus = "submitted"
+	CIRebuildCallbackStatusUncertain CIRebuildCallbackStatus = "uncertain"
+)
+
+// Valid indicates whether the value is a known member of the CIRebuildCallbackStatus enum.
+func (e CIRebuildCallbackStatus) Valid() bool {
+	switch e {
+	case CIRebuildCallbackStatusRefused:
+		return true
+	case CIRebuildCallbackStatusSubmitted:
+		return true
+	case CIRebuildCallbackStatusUncertain:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RebuildCycleOrigin.
+const (
+	Decision   RebuildCycleOrigin = "decision"
+	Evaluation RebuildCycleOrigin = "evaluation"
+)
+
+// Valid indicates whether the value is a known member of the RebuildCycleOrigin enum.
+func (e RebuildCycleOrigin) Valid() bool {
+	switch e {
+	case Decision:
+		return true
+	case Evaluation:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RebuildCycleState.
+const (
+	RebuildCycleStateExhausted RebuildCycleState = "exhausted"
+	RebuildCycleStateOpen      RebuildCycleState = "open"
+	RebuildCycleStateRefused   RebuildCycleState = "refused"
+	RebuildCycleStateStopped   RebuildCycleState = "stopped"
+	RebuildCycleStateSucceeded RebuildCycleState = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the RebuildCycleState enum.
+func (e RebuildCycleState) Valid() bool {
+	switch e {
+	case RebuildCycleStateExhausted:
+		return true
+	case RebuildCycleStateOpen:
+		return true
+	case RebuildCycleStateRefused:
+		return true
+	case RebuildCycleStateStopped:
+		return true
+	case RebuildCycleStateSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RebuildHoldReason.
+const (
+	CoolDown      RebuildHoldReason = "cool_down"
+	UnsignedRoute RebuildHoldReason = "unsigned_route"
+)
+
+// Valid indicates whether the value is a known member of the RebuildHoldReason enum.
+func (e RebuildHoldReason) Valid() bool {
+	switch e {
+	case CoolDown:
+		return true
+	case UnsignedRoute:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RebuildRequestState.
+const (
+	RebuildRequestStateBuildReported RebuildRequestState = "build_reported"
+	RebuildRequestStateDelivered     RebuildRequestState = "delivered"
+	RebuildRequestStateEvaluated     RebuildRequestState = "evaluated"
+	RebuildRequestStateNotSubmitted  RebuildRequestState = "not_submitted"
+	RebuildRequestStateRefused       RebuildRequestState = "refused"
+	RebuildRequestStateRequested     RebuildRequestState = "requested"
+	RebuildRequestStateSubmitted     RebuildRequestState = "submitted"
+	RebuildRequestStateUncertain     RebuildRequestState = "uncertain"
+)
+
+// Valid indicates whether the value is a known member of the RebuildRequestState enum.
+func (e RebuildRequestState) Valid() bool {
+	switch e {
+	case RebuildRequestStateBuildReported:
+		return true
+	case RebuildRequestStateDelivered:
+		return true
+	case RebuildRequestStateEvaluated:
+		return true
+	case RebuildRequestStateNotSubmitted:
+		return true
+	case RebuildRequestStateRefused:
+		return true
+	case RebuildRequestStateRequested:
+		return true
+	case RebuildRequestStateSubmitted:
+		return true
+	case RebuildRequestStateUncertain:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RebuildSettleRequestAnswer.
+const (
+	RebuildSettleRequestAnswerNotSubmitted RebuildSettleRequestAnswer = "not_submitted"
+	RebuildSettleRequestAnswerSubmitted    RebuildSettleRequestAnswer = "submitted"
+)
+
+// Valid indicates whether the value is a known member of the RebuildSettleRequestAnswer enum.
+func (e RebuildSettleRequestAnswer) Valid() bool {
+	switch e {
+	case RebuildSettleRequestAnswerNotSubmitted:
+		return true
+	case RebuildSettleRequestAnswerSubmitted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for WebhookHealthState.
 const (
 	Active            WebhookHealthState = "active"
@@ -44,29 +182,47 @@ func (e WebhookHealthState) Valid() bool {
 	}
 }
 
-// CIRebuildCallback defines model for CIRebuildCallback.
+// CIRebuildCallback Two reports share this body. Without `status` it is the BUILD report and `sbom_id` and `image_digest` are required. With `status` it is the connector's status call for one request (EDR-REBUILD-01 D28) and only `intent_id` and `status` are required.
 type CIRebuildCallback struct {
 	// BuildId The job's own build identifier, as given.
 	BuildId *string `json:"build_id,omitempty"`
 
+	// BuildRef The identity the build system gave the build at `submitted` (a queue item or a run id).
+	BuildRef *string `json:"build_ref,omitempty"`
+
+	// ExecutionStarted Optional. The build system says the build is running. Shown, counted nowhere.
+	ExecutionStarted *bool `json:"execution_started,omitempty"`
+
 	// GitRef The revision built, as given.
 	GitRef *string `json:"git_ref,omitempty"`
 
-	// ImageDigest The built image's digest. Required (RC-3).
-	ImageDigest string `json:"image_digest"`
+	// ImageDigest The built image's digest. Required for a build report (RC-3).
+	ImageDigest *string `json:"image_digest,omitempty"`
 
-	// IntentId The ci_rebuild intent this build served (THEMIS_INTENT_ID as the job received it).
+	// IntentId The rebuild intent this report is about (the event id, or THEMIS_INTENT_ID as the job received it).
 	IntentId string `json:"intent_id"`
 
-	// SbomId The Evidence id of the NEW SBOM the job uploaded. Required (RC-3).
-	SbomId string `json:"sbom_id"`
+	// Reason Why, for `refused` and `uncertain`.
+	Reason *string `json:"reason,omitempty"`
+
+	// SbomId The Evidence id of the NEW SBOM the job uploaded. Required for a build report (RC-3).
+	SbomId *string `json:"sbom_id,omitempty"`
+
+	// Status What became of the request: the build system accepted the build (`submitted`), the connector did not submit it (`refused`, not an attempt), or the connector cannot tell (`uncertain`, a person settles it).
+	Status *CIRebuildCallbackStatus `json:"status,omitempty"`
 }
+
+// CIRebuildCallbackStatus What became of the request: the build system accepted the build (`submitted`), the connector did not submit it (`refused`, not an attempt), or the connector cannot tell (`uncertain`, a person settles it).
+type CIRebuildCallbackStatus string
 
 // CIRebuildCallbackAck defines model for CIRebuildCallbackAck.
 type CIRebuildCallbackAck struct {
 	IntentId   string    `json:"intent_id"`
 	ReceivedAt time.Time `json:"received_at"`
-	SbomId     string    `json:"sbom_id"`
+	SbomId     *string   `json:"sbom_id,omitempty"`
+
+	// State The state of the rebuild request after this report, when the intent has one.
+	State *string `json:"state,omitempty"`
 }
 
 // CreatePublicationRequest The subject is a UNION (EDR-COMMUNICATION-01 D13.5): exactly one of finding_id (a per-Position artifact, D3) or release_id (the release-scoped VEX rollup, D13 - only artifact_type `vex` is valid there). Supplying both or neither is a 400.
@@ -137,6 +293,101 @@ type QueueEntryView struct {
 	Stance      *string `json:"stance,omitempty"`
 	Version     *int    `json:"version,omitempty"`
 }
+
+// RebuildActorRequest defines model for RebuildActorRequest.
+type RebuildActorRequest struct {
+	// Actor The person who asks. Recorded.
+	Actor string  `json:"actor"`
+	Note  *string `json:"note,omitempty"`
+}
+
+// RebuildCycle defines model for RebuildCycle.
+type RebuildCycle struct {
+	Attempts          int       `json:"attempts"`
+	BaselineSbomId    *string   `json:"baseline_sbom_id,omitempty"`
+	ClosedBy          *string   `json:"closed_by,omitempty"`
+	ClosedNote        *string   `json:"closed_note,omitempty"`
+	DecisionId        *string   `json:"decision_id,omitempty"`
+	Id                int64     `json:"id"`
+	JoinedDecisionIds *[]string `json:"joined_decision_ids,omitempty"`
+	LastSbomId        *string   `json:"last_sbom_id,omitempty"`
+	MaxAttempts       *int      `json:"max_attempts,omitempty"`
+	OpenedAt          time.Time `json:"opened_at"`
+
+	// Origin What opened the cycle - the posture of a new SBOM, or a rebuild decision of Governance.
+	Origin    RebuildCycleOrigin `json:"origin"`
+	Refusals  int                `json:"refusals"`
+	ReleaseId string             `json:"release_id"`
+	State     RebuildCycleState  `json:"state"`
+	Targeted  []string           `json:"targeted"`
+	UpdatedAt time.Time          `json:"updated_at"`
+}
+
+// RebuildCycleOrigin What opened the cycle - the posture of a new SBOM, or a rebuild decision of Governance.
+type RebuildCycleOrigin string
+
+// RebuildCycleState defines model for RebuildCycle.State.
+type RebuildCycleState string
+
+// RebuildCycleView defines model for RebuildCycleView.
+type RebuildCycleView struct {
+	Cycle *RebuildCycle `json:"cycle,omitempty"`
+
+	// Hold A rebuild decision that opened no cycle, and why (EDR-REBUILD-01 D14 item 5).
+	Hold      *RebuildHold     `json:"hold,omitempty"`
+	ReleaseId string           `json:"release_id"`
+	Requests  []RebuildRequest `json:"requests"`
+}
+
+// RebuildHold A rebuild decision that opened no cycle, and why (EDR-REBUILD-01 D14 item 5).
+type RebuildHold struct {
+	DecisionId string            `json:"decision_id"`
+	HeldUntil  *time.Time        `json:"held_until,omitempty"`
+	Reason     RebuildHoldReason `json:"reason"`
+	RecordedAt time.Time         `json:"recorded_at"`
+}
+
+// RebuildHoldReason defines model for RebuildHold.Reason.
+type RebuildHoldReason string
+
+// RebuildRequest One request of a rebuild cycle - one intent, one attempt number, one try number. Evidence about a request; it changes no Finding.
+type RebuildRequest struct {
+	Attempt  int     `json:"attempt"`
+	BuildRef *string `json:"build_ref,omitempty"`
+
+	// Channel webhook (the signed rebuild_requested event) or jenkins (the built-in sender).
+	Channel            string              `json:"channel"`
+	CycleId            int64               `json:"cycle_id"`
+	DecisionId         string              `json:"decision_id"`
+	DeliveredAt        *time.Time          `json:"delivered_at,omitempty"`
+	ExecutionStartedAt *time.Time          `json:"execution_started_at,omitempty"`
+	IntentId           string              `json:"intent_id"`
+	Reason             *string             `json:"reason,omitempty"`
+	ReleaseId          string              `json:"release_id"`
+	ReportedBy         *string             `json:"reported_by,omitempty"`
+	RequestedAt        time.Time           `json:"requested_at"`
+	SettleNote         *string             `json:"settle_note,omitempty"`
+	SettledAnswer      *string             `json:"settled_answer,omitempty"`
+	SettledAt          *time.Time          `json:"settled_at,omitempty"`
+	SettledBy          *string             `json:"settled_by,omitempty"`
+	State              RebuildRequestState `json:"state"`
+	StatusAt           *time.Time          `json:"status_at,omitempty"`
+	Try                int                 `json:"try"`
+}
+
+// RebuildRequestState defines model for RebuildRequest.State.
+type RebuildRequestState string
+
+// RebuildSettleRequest defines model for RebuildSettleRequest.
+type RebuildSettleRequest struct {
+	// Actor The person who settles. Recorded.
+	Actor  string                     `json:"actor"`
+	Answer RebuildSettleRequestAnswer `json:"answer"`
+	Note   *string                    `json:"note,omitempty"`
+}
+
+// RebuildSettleRequestAnswer defines model for RebuildSettleRequest.Answer.
+type RebuildSettleRequestAnswer string
 
 // RollupStatus defines model for RollupStatus.
 type RollupStatus struct {
@@ -233,9 +484,18 @@ type PreviewPublicationJSONRequestBody = PreviewRequest
 // CreatePublicationJSONRequestBody defines body for CreatePublication for application/json ContentType.
 type CreatePublicationJSONRequestBody = CreatePublicationRequest
 
+// SettleRebuildRequestJSONRequestBody defines body for SettleRebuildRequest for application/json ContentType.
+type SettleRebuildRequestJSONRequestBody = RebuildSettleRequest
+
+// RequestRebuildAgainJSONRequestBody defines body for RequestRebuildAgain for application/json ContentType.
+type RequestRebuildAgainJSONRequestBody = RebuildActorRequest
+
+// StopRebuildCycleJSONRequestBody defines body for StopRebuildCycle for application/json ContentType.
+type StopRebuildCycleJSONRequestBody = RebuildActorRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-	// CI rebuild callback (EDR-DELIVERY-01 M2-7). The build job Themis asked for reports the intent it served, the NEW SBOM it uploaded and the image it built. Accepted only from a key holding the `delivery:callback` scope and no other; recorded as governed-external evidence on the intent. It changes no Finding, no Position and no posture.
+	// CI rebuild callback (EDR-DELIVERY-01 M2-7). The build job Themis asked for reports the intent it served, the NEW SBOM it uploaded and the image it built. Accepted only from a key holding the `delivery:callback` scope and no other; recorded as governed-external evidence on the intent. It changes no Finding, no Position and no posture. The same route takes the connector's small STATUS call (EDR-REBUILD-01 D28): a body that carries `status` (`submitted`, `refused` or `uncertain`) reports what became of one request and needs neither `sbom_id` nor `image_digest`.
 	// (POST /callbacks/ci-rebuild)
 	RecordCIRebuildCallback(w http.ResponseWriter, r *http.Request)
 	// Render a Position into an artifact without recording a Publication.
@@ -253,6 +513,18 @@ type ServerInterface interface {
 	// The analyst worklist — Positions ready to publish or gone stale.
 	// (GET /publishable-positions)
 	GetPublishableQueue(w http.ResponseWriter, r *http.Request)
+	// Settle an uncertain rebuild request (EDR-REBUILD-01 D24): a person answers `submitted` (the attempt stays used) or `not_submitted` (the attempt is given back and the request may be made again). The answer, the person and the time are recorded. Admin key, or the key of the Release's Product.
+	// (POST /rebuild-requests/{intent_id}/settle)
+	SettleRebuildRequest(w http.ResponseWriter, r *http.Request, intentId string)
+	// The newest rebuild cycle of a Release with its requests, and the decision that is held back, if any (EDR-REBUILD-01 step R3). Read-only. A Release with no cycle and no hold answers with both absent.
+	// (GET /releases/{id}/rebuild-cycle)
+	GetReleaseRebuildCycle(w http.ResponseWriter, r *http.Request, id string)
+	// Make the waiting request of the Release's open cycle again, on a person's word (EDR-REBUILD-01 D20 item 3, D40): the same attempt with the next try number, after a refusal or a `not_submitted`. Admin key, or the key of the Release's Product; the body names the person.
+	// (POST /releases/{id}/rebuild-cycle/request-again)
+	RequestRebuildAgain(w http.ResponseWriter, r *http.Request, id string)
+	// Stop the Release's open rebuild cycle, on a person's word. No further request is made in it; what was already sent is not taken back. Admin key, or the key of the Release's Product; the body names the person.
+	// (POST /releases/{id}/rebuild-cycle/stop)
+	StopRebuildCycle(w http.ResponseWriter, r *http.Request, id string)
 	// The worklist staleness row (D13.2): the current rollup for (release, format, audience) and its computed drift against the live posture - exact, not approximated, thanks to the recorded input set. Republishing stays a human act.
 	// (GET /releases/{id}/rollup-status)
 	GetRollupStatus(w http.ResponseWriter, r *http.Request, id string, params GetRollupStatusParams)
@@ -274,7 +546,7 @@ type ServerInterface interface {
 
 type Unimplemented struct{}
 
-// CI rebuild callback (EDR-DELIVERY-01 M2-7). The build job Themis asked for reports the intent it served, the NEW SBOM it uploaded and the image it built. Accepted only from a key holding the `delivery:callback` scope and no other; recorded as governed-external evidence on the intent. It changes no Finding, no Position and no posture.
+// CI rebuild callback (EDR-DELIVERY-01 M2-7). The build job Themis asked for reports the intent it served, the NEW SBOM it uploaded and the image it built. Accepted only from a key holding the `delivery:callback` scope and no other; recorded as governed-external evidence on the intent. It changes no Finding, no Position and no posture. The same route takes the connector's small STATUS call (EDR-REBUILD-01 D28): a body that carries `status` (`submitted`, `refused` or `uncertain`) reports what became of one request and needs neither `sbom_id` nor `image_digest`.
 // (POST /callbacks/ci-rebuild)
 func (_ Unimplemented) RecordCIRebuildCallback(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -307,6 +579,30 @@ func (_ Unimplemented) GetPublication(w http.ResponseWriter, r *http.Request, id
 // The analyst worklist — Positions ready to publish or gone stale.
 // (GET /publishable-positions)
 func (_ Unimplemented) GetPublishableQueue(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Settle an uncertain rebuild request (EDR-REBUILD-01 D24): a person answers `submitted` (the attempt stays used) or `not_submitted` (the attempt is given back and the request may be made again). The answer, the person and the time are recorded. Admin key, or the key of the Release's Product.
+// (POST /rebuild-requests/{intent_id}/settle)
+func (_ Unimplemented) SettleRebuildRequest(w http.ResponseWriter, r *http.Request, intentId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// The newest rebuild cycle of a Release with its requests, and the decision that is held back, if any (EDR-REBUILD-01 step R3). Read-only. A Release with no cycle and no hold answers with both absent.
+// (GET /releases/{id}/rebuild-cycle)
+func (_ Unimplemented) GetReleaseRebuildCycle(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Make the waiting request of the Release's open cycle again, on a person's word (EDR-REBUILD-01 D20 item 3, D40): the same attempt with the next try number, after a refusal or a `not_submitted`. Admin key, or the key of the Release's Product; the body names the person.
+// (POST /releases/{id}/rebuild-cycle/request-again)
+func (_ Unimplemented) RequestRebuildAgain(w http.ResponseWriter, r *http.Request, id string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Stop the Release's open rebuild cycle, on a person's word. No further request is made in it; what was already sent is not taken back. Admin key, or the key of the Release's Product; the body names the person.
+// (POST /releases/{id}/rebuild-cycle/stop)
+func (_ Unimplemented) StopRebuildCycle(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -455,6 +751,110 @@ func (siw *ServerInterfaceWrapper) GetPublishableQueue(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPublishableQueue(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SettleRebuildRequest operation middleware
+func (siw *ServerInterfaceWrapper) SettleRebuildRequest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "intent_id" -------------
+	var intentId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "intent_id", chi.URLParam(r, "intent_id"), &intentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "intent_id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SettleRebuildRequest(w, r, intentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetReleaseRebuildCycle operation middleware
+func (siw *ServerInterfaceWrapper) GetReleaseRebuildCycle(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetReleaseRebuildCycle(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RequestRebuildAgain operation middleware
+func (siw *ServerInterfaceWrapper) RequestRebuildAgain(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RequestRebuildAgain(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StopRebuildCycle operation middleware
+func (siw *ServerInterfaceWrapper) StopRebuildCycle(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StopRebuildCycle(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -783,6 +1183,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/publishable-positions", wrapper.GetPublishableQueue)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/rebuild-requests/{intent_id}/settle", wrapper.SettleRebuildRequest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/releases/{id}/rebuild-cycle", wrapper.GetReleaseRebuildCycle)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/releases/{id}/rebuild-cycle/request-again", wrapper.RequestRebuildAgain)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/releases/{id}/rebuild-cycle/stop", wrapper.StopRebuildCycle)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/releases/{id}/rollup-status", wrapper.GetRollupStatus)
 	})
 	r.Group(func(r chi.Router) {
@@ -806,59 +1218,86 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"vwEAAP//",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

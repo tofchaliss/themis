@@ -39,6 +39,51 @@ type Worker struct {
 	digest *app.SLADigest
 	// metrics, when wired, posts the remediation-metrics summary on its own cadence (D6).
 	metrics *app.MetricsSchedule
+	// silent, when wired, turns rebuild requests nobody reported on into uncertain (D28 item 3).
+	silent SilentRequestSweeper
+}
+
+// SilentRequestSweeper finds delivered rebuild requests with no status call and no build
+// callback for a day and marks them uncertain (EDR-REBUILD-01 D28 item 3). The rebuild loop
+// implements it.
+type SilentRequestSweeper interface {
+	SweepSilent(ctx context.Context) (int, error)
+}
+
+// rebuildSweepInterval is how often the silent-request sweep runs. The limit it applies is a
+// day, so a quarter of an hour is fine-grained enough.
+const rebuildSweepInterval = 15 * time.Minute
+
+// WithRebuildSweep runs the silent-request sweep beside the delivery loop.
+func (w *Worker) WithRebuildSweep(s SilentRequestSweeper) *Worker {
+	w.silent = s
+	return w
+}
+
+// sweepSilent runs one pass of the silent-request sweep and logs what it did.
+func (w *Worker) sweepSilent(ctx context.Context) {
+	n, err := w.silent.SweepSilent(ctx)
+	if err != nil {
+		w.logger.Error("rebuild silent-request sweep failed", observability.Err(err))
+		return
+	}
+	if n > 0 {
+		w.logger.Info("rebuild requests with no status marked uncertain", observability.Int("requests", n))
+	}
+}
+
+// runSilentSweep runs the sweep every interval until ctx is done.
+func (w *Worker) runSilentSweep(ctx context.Context, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			w.sweepSilent(ctx)
+		}
+	}
 }
 
 // WithMetricsSchedule posts the remediation-metrics summary every cfg.MetricsReportInterval
@@ -96,6 +141,9 @@ func (w *Worker) Run(ctx context.Context) {
 				w.logger.Info("remediation metrics summary sent")
 			}
 		})
+	}
+	if w.silent != nil {
+		go w.runSilentSweep(ctx, rebuildSweepInterval)
 	}
 	if w.digest != nil {
 		go w.digest.RunEvery(ctx, w.cfg.SLADigestInterval, func(sent int, err error) {

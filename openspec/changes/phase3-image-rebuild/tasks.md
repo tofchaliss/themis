@@ -112,6 +112,24 @@ Every step waits for the owner's go and lands as its own PR.
   #281: the card shows for a picked Project, and the owner saved and removed a profile through
   it (EDR "VM check of R2a").
 
+## Group 6 — R3 Communication acts on the events (owner go 2026-11-28 for R3 to R6)
+
+- [x] 6.1 Switch `THEMIS_COMMUNICATION_REBUILD_OPEN_FROM` (`evaluation` default, `decision`).
+- [x] 6.2 Communication migration 12: cycle origin and frozen decision, `rebuild_requests`,
+  `rebuild_holds`, `release_last_sbom`; down and up tested.
+- [x] 6.3 Consume `governance.rebuild_requested.v1` and `rebuild_recommended.v1`; join an open
+  cycle (D20), cool-down hold, new intent id per try (D40).
+- [x] 6.4 Request rendered once as `themis.rebuild.requested.v1`, same bytes on every retry
+  (D36); unsigned route refused at startup and at send time (D42); Jenkins sender as one
+  connector (D43).
+- [x] 6.5 Status call on `POST /callbacks/ci-rebuild` (`submitted`, `refused`, `uncertain`),
+  three refusals close the cycle, mails, the 24 hour silence sweep.
+- [x] 6.6 Person actions: read the cycle, settle, request again, stop.
+- [x] 6.7 `communication.rebuild_cycle_closed.v1` and Governance trigger type `cycle_closed`
+  (Governance migration 31, second bus cursor) (D21).
+- [x] 6.8 `make vet-tags`, lint, clean-arch, arch-test, unit and store tests green.
+- [ ] 6.9 VM check: part of R6.
+
 ## Later groups
 
-- [ ] R3 to R6 as in the EDR's order of work, each on the owner's go.
+- [ ] R4 to R6 as in the EDR's order of work.

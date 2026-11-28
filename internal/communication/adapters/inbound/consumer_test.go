@@ -477,6 +477,21 @@ func (c *cyclesMem) UpdateCycle(_ context.Context, cy app.RebuildCycle) error {
 	return nil
 }
 
+func (c *cyclesMem) LatestCycle(_ context.Context, releaseID string) (app.RebuildCycle, bool, error) {
+	if r, ok := c.rows[releaseID]; ok {
+		return *r, true, nil
+	}
+	return app.RebuildCycle{}, false, nil
+}
+func (c *cyclesMem) CycleByID(_ context.Context, id int64) (app.RebuildCycle, bool, error) {
+	for _, r := range c.rows {
+		if r.ID == id {
+			return *r, true, nil
+		}
+	}
+	return app.RebuildCycle{}, false, nil
+}
+
 type postureMem struct{ rows []app.ReleaseSeverityRow }
 
 func (p *postureMem) ReleaseSeverity(context.Context, string) ([]app.ReleaseSeverityRow, error) {
@@ -561,7 +576,9 @@ func (d *digestRows) RecordSLABreach(_ context.Context, r app.SLABreachRecord) e
 	d.rows = append(d.rows, r)
 	return nil
 }
-func (d *digestRows) PendingSLABreaches(context.Context) ([]app.SLABreachRecord, error) { return nil, nil }
+func (d *digestRows) PendingSLABreaches(context.Context) ([]app.SLABreachRecord, error) {
+	return nil, nil
+}
 func (d *digestRows) MarkSLABreachesDigested(context.Context, []app.SLABreachRecord, string) error {
 	return nil
 }
@@ -709,5 +726,120 @@ func TestConsumer_FixAvailable(t *testing.T) {
 	}
 	if err := consumer(&memRepo{}).Handle(ctx, govEnv("env-fe", "governance.fix_available", []byte(`{}`))); err != nil {
 		t.Errorf("delivery off: %v", err)
+	}
+}
+
+// --- EDR-REBUILD-01 step R3: the two rebuild decisions on the reader path ---------------------
+
+const rebuildDecisionPayload = `{"decision_id":"dec-1","release_id":"rel-1","product_id":"prod-1","project_id":"proj-1",
+	"trigger_type":"fix_available","recommend_reason":"mode_ask","outcome":"request",
+	"policy":{"cool_down_seconds":3600,"version":2,"scope_kind":"product"},
+	"targeted":[{"finding_id":"f-1","cve":"CVE-2026-2","purl":"pkg:rpm/a"},{"finding_id":"f-2","cve":"CVE-2026-1","purl":"pkg:rpm/b"},
+		{"finding_id":"f-3","cve":"CVE-2026-2","purl":"pkg:rpm/c"},{"finding_id":"f-4","cve":" ","purl":"pkg:rpm/d"}]}`
+
+func decisionConsumer(openFrom string, routes map[string]string) (*inbound.Consumer, *intentStore, *loopCycles, *loopRequests) {
+	intents := newIntentStore()
+	svc := app.NewDeliveryIntentService(intents, &intentIDs{}, clk{}, app.DeliveryIntentConfig{
+		WebhookRoutes: routes, SignedAudiences: map[string]bool{"builders": true}})
+	cycles, requests := &loopCycles{}, &loopRequests{}
+	loop := app.NewRebuildLoop(cycles, &postureMem{}, svc, clk{}, 2).WithDecisions(requests, openFrom)
+	return consumer(&memRepo{}).WithIntents(svc).WithRebuildLoop(loop), intents, cycles, requests
+}
+
+// governance.rebuild_requested opens a cycle from the decision and records the signed request,
+// with the whole decision kept for the payload; a redelivery under the same cycle adds nothing.
+func TestConsumer_RebuildRequestedOpensACycleAndRecordsTheRequest(t *testing.T) {
+	c, intents, cycles, requests := decisionConsumer(app.RebuildOpenFromDecision, map[string]string{app.WebhookRebuildRequested: "builders"})
+	env := govEnv("env-r1", "governance.rebuild_requested", []byte(rebuildDecisionPayload))
+	if err := c.Handle(context.Background(), env); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(cycles.rows) != 1 || len(requests.rows) != 1 || len(intents.created) != 1 {
+		t.Fatalf("cycles %d requests %d intents %d", len(cycles.rows), len(requests.rows), len(intents.created))
+	}
+	cycle, in := cycles.rows[0], intents.created[0]
+	if cycle.Origin != app.CycleOriginDecision || cycle.DecisionID != "dec-1" || strings.Join(cycle.Targeted, ",") != "CVE-2026-1,CVE-2026-2" ||
+		cycle.ProductID != "prod-1" || cycle.OriginEventID != "env-r1" {
+		t.Errorf("cycle = %+v", cycle)
+	}
+	if !in.IsRebuildRequest() || in.Destination != "builders" || in.Snapshot[app.SnapshotRebuildDecision] != rebuildDecisionPayload ||
+		in.Lineage.EventType != "governance.rebuild_requested" {
+		t.Errorf("intent = %+v", in)
+	}
+	// A second decision for the same Release joins and asks for nothing.
+	second := strings.Replace(rebuildDecisionPayload, "dec-1", "dec-2", 1)
+	if err := c.Handle(context.Background(), govEnv("env-r2", "governance.rebuild_requested", []byte(second))); err != nil {
+		t.Fatalf("handle second: %v", err)
+	}
+	if len(cycles.rows) != 1 || len(intents.created) != 1 || strings.Join(cycles.rows[0].Joined, ",") != "dec-2" {
+		t.Errorf("a second decision must join: cycles %d intents %d joined %v", len(cycles.rows), len(intents.created), cycles.rows[0].Joined)
+	}
+}
+
+// A node that still opens cycles from the posture, or has no loop, records nothing for a
+// decision; a malformed decision is a real error.
+func TestConsumer_RebuildRequestedIsInertUnlessSwitchedOn(t *testing.T) {
+	c, intents, cycles, _ := decisionConsumer(app.RebuildOpenFromEvaluation, nil)
+	if err := c.Handle(context.Background(), govEnv("env-r1", "governance.rebuild_requested", []byte(rebuildDecisionPayload))); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(cycles.rows) != 0 || len(intents.created) != 0 {
+		t.Errorf("evaluation mode must ignore a decision: cycles %d intents %d", len(cycles.rows), len(intents.created))
+	}
+	if err := consumer(&memRepo{}).Handle(context.Background(), govEnv("env-r1", "governance.rebuild_requested", []byte(`{`))); err != nil {
+		t.Errorf("no loop: %v", err)
+	}
+	if err := c.Handle(context.Background(), govEnv("env-r3", "governance.rebuild_requested", []byte(`{`))); err == nil {
+		t.Error("a malformed decision must be an error")
+	}
+}
+
+// governance.rebuild_recommended posts a webhook when its route is set, and nothing else: no
+// cycle, no request.
+func TestConsumer_RebuildRecommendedPostsWhenRouted(t *testing.T) {
+	c, intents, cycles, _ := decisionConsumer(app.RebuildOpenFromDecision, map[string]string{app.WebhookRebuildRecommended: "sec"})
+	if err := c.Handle(context.Background(), govEnv("env-c1", "governance.rebuild_recommended", []byte(rebuildDecisionPayload))); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(intents.created) != 1 || len(cycles.rows) != 0 {
+		t.Fatalf("intents %d cycles %d", len(intents.created), len(cycles.rows))
+	}
+	in := intents.created[0]
+	if in.Type != app.IntentWebhook || in.Destination != "sec" || in.Snapshot[app.SnapshotWebhookEvent] != app.WebhookRebuildRecommended ||
+		in.Snapshot[app.SnapshotRebuildRecommendReason] != "mode_ask" || in.Snapshot[app.SnapshotRebuildTargetedCount] != "4" ||
+		in.Snapshot[app.SnapshotTargetedCVEs] != "CVE-2026-1,CVE-2026-2" || in.ReleaseID != "rel-1" || in.IsRebuildRequest() {
+		t.Errorf("intent = %+v", in)
+	}
+
+	// Unrouted: nothing. No release: nothing. No intake: nothing. Malformed: an error.
+	unrouted, quiet, _, _ := decisionConsumer(app.RebuildOpenFromDecision, nil)
+	if err := unrouted.Handle(context.Background(), govEnv("env-c2", "governance.rebuild_recommended", []byte(rebuildDecisionPayload))); err != nil || len(quiet.created) != 0 {
+		t.Errorf("unrouted: err %v intents %d", err, len(quiet.created))
+	}
+	if err := c.Handle(context.Background(), govEnv("env-c3", "governance.rebuild_recommended", []byte(`{"decision_id":"d"}`))); err != nil || len(intents.created) != 1 {
+		t.Errorf("no release: err %v intents %d", err, len(intents.created))
+	}
+	if err := consumer(&memRepo{}).Handle(context.Background(), govEnv("env-c4", "governance.rebuild_recommended", []byte(`{`))); err != nil {
+		t.Errorf("no intake: %v", err)
+	}
+	if err := c.Handle(context.Background(), govEnv("env-c5", "governance.rebuild_recommended", []byte(`{`))); err == nil {
+		t.Error("a malformed recommendation must be an error")
+	}
+}
+
+// The CVE list a recommendation carries is capped; the count is whole.
+func TestConsumer_RebuildRecommendedCapsTheCVEList(t *testing.T) {
+	c, intents, _, _ := decisionConsumer(app.RebuildOpenFromDecision, map[string]string{app.WebhookRebuildRecommended: "sec"})
+	var targeted []string
+	for i := 0; i < 25; i++ {
+		targeted = append(targeted, fmt.Sprintf(`{"cve":"CVE-2026-%04d"}`, i))
+	}
+	payload := `{"decision_id":"d","release_id":"rel-1","targeted":[` + strings.Join(targeted, ",") + `]}`
+	if err := c.Handle(context.Background(), govEnv("env-c9", "governance.rebuild_recommended", []byte(payload))); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	in := intents.created[0]
+	if n := len(strings.Split(in.Snapshot[app.SnapshotTargetedCVEs], ",")); n != 20 || in.Snapshot[app.SnapshotRebuildTargetedCount] != "25" {
+		t.Errorf("listed %d of count %s", n, in.Snapshot[app.SnapshotRebuildTargetedCount])
 	}
 }

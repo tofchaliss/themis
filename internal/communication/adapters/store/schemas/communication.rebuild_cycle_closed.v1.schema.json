@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://themis-project.dev/schemas/communication/communication.rebuild_cycle_closed.v1.schema.json",
+  "title": "communication.rebuild_cycle_closed.v1",
+  "description": "A rebuild cycle closed while decisions had joined it (EDR-REBUILD-01 D21). Governance evaluates the rebuild policy of the Release once more. It changes no Finding.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cycle_id", "release_id", "product_id", "project_id", "origin", "state", "decision_id", "joined_decision_ids", "closed_at"],
+  "properties": {
+    "cycle_id": { "type": "integer" },
+    "release_id": { "type": "string", "minLength": 1 },
+    "product_id": { "type": "string" },
+    "project_id": { "type": "string" },
+    "origin": { "enum": ["evaluation", "decision"] },
+    "state": { "enum": ["succeeded", "exhausted", "refused", "stopped"] },
+    "decision_id": { "type": "string" },
+    "joined_decision_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "closed_at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -53,7 +53,8 @@
     "trigger_type": {
       "enum": [
         "new_sbom",
-        "fix_available"
+        "fix_available",
+        "cycle_closed"
       ]
     },
     "outcome": {

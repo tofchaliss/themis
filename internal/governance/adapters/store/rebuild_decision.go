@@ -28,6 +28,19 @@ func enqueueRebuildTrigger(ctx context.Context, tx pgx.Tx, eventID, triggerType,
 	return err
 }
 
+var _ app.RebuildTriggerRecorder = (*Store)(nil)
+
+// RecordRebuildTrigger stores an open trigger that came from another context (a closed rebuild
+// cycle, D21), in the inbox transaction when one rides the context. The same (source, id) twice
+// stores one.
+func (s *Store) RecordRebuildTrigger(ctx context.Context, triggerID, source, triggerType, releaseID string) error {
+	_, err := s.exec(ctx).Exec(ctx, `
+		INSERT INTO rebuild_triggers (trigger_id, trigger_source, trigger_type, release_id)
+		VALUES ($1,$2,$3,$4) ON CONFLICT (trigger_source, trigger_id) DO NOTHING`,
+		triggerID, source, triggerType, releaseID)
+	return err
+}
+
 // PendingRebuildTriggers lists open triggers, oldest first.
 func (s *Store) PendingRebuildTriggers(ctx context.Context, limit int) ([]app.RebuildTrigger, error) {
 	rows, err := s.pool.Query(ctx, `

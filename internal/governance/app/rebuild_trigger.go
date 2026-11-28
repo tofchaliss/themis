@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/themis-project/themis/internal/governance/domain"
@@ -294,4 +295,38 @@ func (r *RebuildDecisionReader) ForRelease(ctx context.Context, releaseID string
 		limit = RebuildDecisionsMaxLimit
 	}
 	return r.store.RebuildTriggerRecords(ctx, releaseID, limit)
+}
+
+// RebuildTriggerRecorder records a trigger that did not come from one of Governance's own
+// events.
+type RebuildTriggerRecorder interface {
+	// RecordRebuildTrigger stores an open trigger. The same (source, id) twice stores one.
+	RecordRebuildTrigger(ctx context.Context, triggerID, source, triggerType, releaseID string) error
+}
+
+// InboundRebuildCycleClosed is communication.rebuild_cycle_closed as the Coordinator takes it:
+// EventID is the envelope id and becomes the trigger id, so a redelivered event is one trigger.
+type InboundRebuildCycleClosed struct {
+	EventID   string
+	ReleaseID string
+}
+
+// rebuildCycleSource is the trigger source of a closed cycle: the context that said so.
+const rebuildCycleSource = "communication"
+
+// WithRebuildTriggers wires where a closed rebuild cycle is recorded as a trigger (D21).
+func (c *Coordinator) WithRebuildTriggers(r RebuildTriggerRecorder) *Coordinator {
+	c.rebuildTriggers = r
+	return c
+}
+
+// OnRebuildCycleClosed records a closed rebuild cycle as a trigger, so that the rebuild policy
+// of the Release is evaluated once more (D21). The trigger worker judges it like every other
+// trigger. A Coordinator with no recorder, or an event that names no Release or carries no id,
+// records nothing and is not an error: there is nothing to retry.
+func (c *Coordinator) OnRebuildCycleClosed(ctx context.Context, in InboundRebuildCycleClosed) error {
+	if c.rebuildTriggers == nil || strings.TrimSpace(in.ReleaseID) == "" || strings.TrimSpace(in.EventID) == "" {
+		return nil
+	}
+	return c.rebuildTriggers.RecordRebuildTrigger(ctx, in.EventID, rebuildCycleSource, domain.RebuildTriggerCycleClosed, in.ReleaseID)
 }

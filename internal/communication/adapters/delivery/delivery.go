@@ -319,6 +319,10 @@ type Config struct {
 	// Release gets before the loop stops and tells a person. Default 2, estate-wide, no
 	// per-Release override. It is not the delivery retry budget (MaxAttempts).
 	RebuildMaxAttempts int
+	// RebuildOpenFrom says what opens a rebuild cycle (EDR-REBUILD-01 step R3):
+	// "evaluation" (the default, the rule before R3: the posture of a new SBOM opens it) or
+	// "decision" (Governance's rebuild decision opens it, and the posture alone opens nothing).
+	RebuildOpenFrom string
 }
 
 // Documented defaults for every knob (and the fallback for any out-of-range value — a
@@ -351,6 +355,7 @@ const (
 //	THEMIS_COMMUNICATION_DECISION_AUDIENCE          audience told a proposal was accepted (default "security-decisions")
 //	THEMIS_COMMUNICATION_EVALUATION_AUDIENCE        audience told a Release's posture after a new SBOM (default "security-decisions")
 //	THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS       rebuild cycles per Release before the loop stops (default 2)
+//	THEMIS_COMMUNICATION_REBUILD_OPEN_FROM          what opens a rebuild cycle: "evaluation" (default) or "decision"
 //
 // The real senders are read by jiraFromEnv / mailFromEnv (see jira.go / mail.go), both OFF by
 // default. Every SECRET among their knobs — the Jira API token, the SMTP password — is read from
@@ -368,6 +373,7 @@ func ConfigFromEnv() Config {
 		MetricsReportInterval: envDuration("THEMIS_COMMUNICATION_METRICS_REPORT_INTERVAL", defaultMetricsReportInterval),
 		DashboardURL:          getenv("THEMIS_COMMUNICATION_DASHBOARD_URL"),
 		RebuildMaxAttempts:    envInt("THEMIS_COMMUNICATION_REBUILD_MAX_ATTEMPTS", defaultRebuildMaxAttempts),
+		RebuildOpenFrom:       getenv("THEMIS_COMMUNICATION_REBUILD_OPEN_FROM"),
 		Workers:               envInt("THEMIS_COMMUNICATION_DELIVERY_WORKERS", defaultWorkers),
 		Batch:                 envInt("THEMIS_COMMUNICATION_DELIVERY_BATCH", defaultBatch),
 		MaxAttempts:           envInt("THEMIS_COMMUNICATION_DELIVERY_MAX_ATTEMPTS", defaultMaxAttempts),
@@ -405,6 +411,9 @@ func (c Config) withDefaults() Config {
 	if c.RebuildMaxAttempts <= 0 {
 		c.RebuildMaxAttempts = defaultRebuildMaxAttempts
 	}
+	if c.RebuildOpenFrom != app.RebuildOpenFromDecision {
+		c.RebuildOpenFrom = app.RebuildOpenFromEvaluation
+	}
 	if c.SLADigestInterval <= 0 {
 		c.SLADigestInterval = defaultSLADigestInterval
 	}
@@ -418,9 +427,16 @@ func (c Config) withDefaults() Config {
 // to tell what the node will do. It prints whether each credential is SET, never its value: a
 // startup line is telemetry, and telemetry is not a place a token may appear even once.
 func (c Config) String() string {
-	return fmt.Sprintf("enabled=%t workers=%d batch=%d max_attempts=%d backoff=%s..%s interval=%s deadletter_audience=%q decision_audience=%q evaluation_audience=%q rebuild_max_attempts=%d jira=[%s] mail=[%s] jenkins=[%s] webhook=[%s] webhook_routes=%v sla_digest_interval=%s",
+	return fmt.Sprintf("enabled=%t workers=%d batch=%d max_attempts=%d backoff=%s..%s interval=%s deadletter_audience=%q decision_audience=%q evaluation_audience=%q rebuild_max_attempts=%d rebuild_open_from=%s jira=[%s] mail=[%s] jenkins=[%s] webhook=[%s] webhook_routes=%v sla_digest_interval=%s",
 		c.Enabled, c.Workers, c.Batch, c.MaxAttempts, c.BackoffInitial, c.BackoffMax, c.Interval, c.DeadLetterAudience,
-		c.DecisionAudience, c.EvaluationAudience, c.RebuildMaxAttempts, c.Jira, c.Mail, c.Jenkins, c.Webhook, c.WebhookRoutes, c.SLADigestInterval)
+		c.DecisionAudience, c.EvaluationAudience, c.RebuildMaxAttempts, firstOf(c.RebuildOpenFrom, app.RebuildOpenFromEvaluation), c.Jira, c.Mail, c.Jenkins, c.Webhook, c.WebhookRoutes, c.SLADigestInterval)
+}
+
+func firstOf(v, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
 }
 
 // envBool reads a "1"/"0" switch; anything unset or unrecognized falls back to def.

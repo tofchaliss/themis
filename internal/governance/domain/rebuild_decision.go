@@ -11,12 +11,15 @@ import (
 // the audit copy; the event is the transport copy (D29). A decision starts no build: opening a
 // cycle and asking a build system is Communication's work in a later step.
 
-// The two triggers of D3.
+// The triggers: the two of D3, and the closed cycle of D21.
 const (
 	// RebuildTriggerNewSBOM: a new SBOM of the Release was judged (release_evaluated, cause new_sbom).
 	RebuildTriggerNewSBOM = "new_sbom"
 	// RebuildTriggerFixAvailable: a vendor fix is newly on record for open rows of the Release.
 	RebuildTriggerFixAvailable = "fix_available"
+	// RebuildTriggerCycleClosed: Communication closed a rebuild cycle of the Release that other
+	// decisions had joined, so the policy is evaluated once more (D21). Step R3.
+	RebuildTriggerCycleClosed = "cycle_closed"
 )
 
 // RebuildTriggerOfEvaluation says whether a finished release evaluation is a rebuild trigger,

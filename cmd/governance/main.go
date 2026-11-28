@@ -349,6 +349,13 @@ func main() {
 			store.NewInboxConsumer(pool, gov.Consumer))
 		go readerLoop(reader, logger.Component("reader"))
 		logger.Info("knowledge-stream reader enabled")
+		// The Communication stream carries one fact for Governance: a rebuild cycle closed
+		// while decisions had joined it, so the policy is evaluated once more (EDR-REBUILD-01
+		// D21). Its own cursor, the same inbox.
+		cycles := inbound.CommunicationSubscription.NewReader(busPool, logger.Component("reader-communication"),
+			store.NewInboxConsumer(pool, gov.Consumer))
+		go readerLoop(cycles, logger.Component("reader-communication"))
+		logger.Info("communication-stream reader enabled")
 	}
 
 	router := chi.NewRouter()

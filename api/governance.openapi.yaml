@@ -2566,7 +2566,7 @@ components:
           type: string
         trigger_type:
           type: string
-          enum: [new_sbom, fix_available]
+          enum: [new_sbom, fix_available, cycle_closed]
         release_id:
           type: string
         received_at:

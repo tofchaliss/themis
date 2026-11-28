@@ -467,12 +467,26 @@ three angles, and two of them proposed fixes that would not have worked.
   every entity as untagged (it cost the first VM run of the rebuild judgement). Fill the field
   in the three handlers, or take it out of the schema for those reads.
 
-- [ ] **The build profile on the rebuild event is the same value, not the same bytes** (id
-  `GOV-BUILD-BYTES-1`, from EDR-REBUILD-01 step R2a, 2026-11-28, design). Registry keeps the
-  profile as text and takes the SHA-256 over it. Governance keeps the decision and the outbox
-  payload in JSON columns, which reorder keys, so a receiver cannot recompute the digest from
-  the event's `build`. Settle in R3 with D36: either the intent reads the stored bytes from
-  Registry by revision, or the event carries the profile as text.
+- [x] **The build profile on the rebuild event is the same value, not the same bytes** (id
+  `GOV-BUILD-BYTES-1`, from EDR-REBUILD-01 step R2a, 2026-11-28, design). Closed in step R3,
+  2026-11-28: the request carries the profile as a JSON value plus the SHA-256 of the stored
+  revision, and "byte for byte" (D36) holds for the intent payload that the signature covers.
+  A connector that wants the profile bytes reads the revision from Registry.
+
+- [ ] **Make `decision` the default for opening a rebuild cycle** (id
+  `COMM-REBUILD-OPEN-FROM-1`, from EDR-REBUILD-01 step R3, 2026-11-28, follow-up).
+  `THEMIS_COMMUNICATION_REBUILD_OPEN_FROM` defaults to `evaluation` so the beta estate does
+  not change by upgrading. Flip the default after the VM check of R6 passes.
+
+- [ ] **A refusal is two statements, not one transaction** (id `COMM-REBUILD-REFUSAL-TX-1`,
+  from EDR-REBUILD-01 step R3, 2026-11-28, hardening). The status call marks the request
+  refused and then counts the refusal on the cycle. A crash between the two leaves a refused
+  request the cycle has not counted. Put both in one store call.
+
+- [ ] **A dead-lettered rebuild request stays `requested`** (id `COMM-REBUILD-DEAD-LETTER-1`,
+  from EDR-REBUILD-01 step R3, 2026-11-28, hardening). The request row moves only when the
+  intent is delivered. If the intent dead-letters, the row and its cycle wait until an
+  operator runs `deliveryctl retry`. Mark the request `uncertain` when its intent dead-letters.
 
 - [ ] **The dashboard gate does not check `actor`** (id `GUI-ACTOR-GATE-1`, from EDR-REBUILD-01
   step R2a, 2026-11-28, hardening). The gate compares `actor_id` and `proposer_id` in a write

@@ -257,7 +257,7 @@ func Wire(
 	return Governance{
 		Handler:         handler.Router(),
 		Store:           st,
-		Consumer:        inbound.NewConsumer(app.NewCoordinator(write).WithEvaluations(st).WithFixNotices(st)).WithLogger(logger),
+		Consumer:        inbound.NewConsumer(app.NewCoordinator(write).WithEvaluations(st).WithFixNotices(st).WithRebuildTriggers(st)).WithLogger(logger),
 		Relay:           relay,
 		Reconcile:       app.NewReconcileService(relay),
 		Evaluations:     evaluations,

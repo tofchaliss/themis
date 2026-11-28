@@ -18,14 +18,15 @@ func TestSubscription(t *testing.T) {
 		"governance.position_established", "governance.position_revised",
 		"governance.release_evaluated", "governance.proposal_accepted",
 		"governance.review_due_soon", "governance.disposition_stale", "governance.sla_breached",
-		"governance.fix_available", // EDR-INCIDENT-01 D1
+		"governance.fix_available",                                       // EDR-INCIDENT-01 D1
+		"governance.rebuild_requested", "governance.rebuild_recommended", // EDR-REBUILD-01 R3
 	} {
 		if !s.InInterest(want) {
 			t.Errorf("interest set missing %s", want)
 		}
 	}
-	if len(s.Interest) != 8 {
-		t.Errorf("interest set = %v, want 8 types", s.Interest)
+	if len(s.Interest) != 10 {
+		t.Errorf("interest set = %v, want 10 types", s.Interest)
 	}
 	// A Governance lifecycle event Communication does not consume is out of interest.
 	if s.InInterest("governance.finding_resolved") {

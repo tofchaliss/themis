@@ -1459,7 +1459,7 @@ export interface components {
             trigger_id: string;
             trigger_source: string;
             /** @enum {string} */
-            trigger_type: "new_sbom" | "fix_available";
+            trigger_type: "new_sbom" | "fix_available" | "cycle_closed";
             release_id: string;
             /** Format: date-time */
             received_at: string;

@@ -180,7 +180,17 @@ func (s *Store) RecordAttempt(ctx context.Context, a app.Attempt) error {
 // MarkDelivered moves the intent to `delivered` and records the outcome metadata. It is
 // guarded on the pending state so a concurrent cancel is not overwritten.
 func (s *Store) MarkDelivered(ctx context.Context, id string, result map[string]string) error {
+	// A rebuild request follows its intent in the same statement (EDR-REBUILD-01 D25, D43): the
+	// signed event is `delivered` (the attempt is reserved, the cool-down starts); the built-in
+	// sender called the build system itself, so delivered and submitted are one moment.
 	return s.transition(ctx, `
+		WITH req AS (
+			UPDATE rebuild_requests
+			SET state = CASE channel WHEN 'jenkins' THEN 'submitted' ELSE 'delivered' END,
+				delivered_at = now(), status_at = now()
+			WHERE intent_id=($2::uuid)::text AND state='requested'
+				AND EXISTS (SELECT 1 FROM delivery_intents WHERE id=$2 AND state='pending')
+		)
 		UPDATE delivery_intents SET state='delivered', result=$1, last_error='', updated_at=now()
 		WHERE id=$2 AND state='pending'`, jsonMap(result), id)
 }

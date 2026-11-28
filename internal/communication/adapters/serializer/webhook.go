@@ -112,6 +112,10 @@ func (r OutwardRenderer) RenderWebhook(ctx context.Context, in app.Intent) (stri
 			doc.Summary += " (" + a + ")"
 		}
 		doc.Summary += ". " + FixAvailableLimit
+	case app.WebhookRebuildRecommended:
+		doc.Summary = fmt.Sprintf("Themis recommends a rebuild of %s: %s component(s) with a known fix, CVEs %s. %s. Nothing was started.",
+			label, firstNonEmpty(s[app.SnapshotRebuildTargetedCount], "0"),
+			firstNonEmpty(listed(s[app.SnapshotTargetedCVEs]), "see the dashboard"), recommendReasonText(s[app.SnapshotRebuildRecommendReason]))
 	case app.WebhookRemediationMetrics:
 		doc.Product = ""
 		doc.Summary = fmt.Sprintf("Remediation: %s open findings; %s of %s running SLA clocks within SLA, %s breached",

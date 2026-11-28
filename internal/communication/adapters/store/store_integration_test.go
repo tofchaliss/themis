@@ -95,7 +95,7 @@ func truncate(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(),
 		`TRUNCATE webhook_health, sla_breach_digest, delivery_attempts, delivery_intents, processed_events, publishable_positions,
-			communication_outbox, publications RESTART IDENTITY CASCADE`); err != nil {
+			communication_outbox, publications, rebuild_cycles, rebuild_holds, release_last_sbom RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 }

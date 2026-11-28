@@ -113,8 +113,76 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** CI rebuild callback (EDR-DELIVERY-01 M2-7). The build job Themis asked for reports the intent it served, the NEW SBOM it uploaded and the image it built. Accepted only from a key holding the `delivery:callback` scope and no other; recorded as governed-external evidence on the intent. It changes no Finding, no Position and no posture. */
+        /** CI rebuild callback (EDR-DELIVERY-01 M2-7). The build job Themis asked for reports the intent it served, the NEW SBOM it uploaded and the image it built. Accepted only from a key holding the `delivery:callback` scope and no other; recorded as governed-external evidence on the intent. It changes no Finding, no Position and no posture. The same route takes the connector's small STATUS call (EDR-REBUILD-01 D28): a body that carries `status` (`submitted`, `refused` or `uncertain`) reports what became of one request and needs neither `sbom_id` nor `image_digest`. */
         post: operations["recordCIRebuildCallback"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{id}/rebuild-cycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The newest rebuild cycle of a Release with its requests, and the decision that is held back, if any (EDR-REBUILD-01 step R3). Read-only. A Release with no cycle and no hold answers with both absent. */
+        get: operations["getReleaseRebuildCycle"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{id}/rebuild-cycle/request-again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make the waiting request of the Release's open cycle again, on a person's word (EDR-REBUILD-01 D20 item 3, D40): the same attempt with the next try number, after a refusal or a `not_submitted`. Admin key, or the key of the Release's Product; the body names the person. */
+        post: operations["requestRebuildAgain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{id}/rebuild-cycle/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop the Release's open rebuild cycle, on a person's word. No further request is made in it; what was already sent is not taken back. Admin key, or the key of the Release's Product; the body names the person. */
+        post: operations["stopRebuildCycle"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rebuild-requests/{intent_id}/settle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Settle an uncertain rebuild request (EDR-REBUILD-01 D24): a person answers `submitted` (the attempt stays used) or `not_submitted` (the attempt is given back and the request may be made again). The answer, the person and the time are recorded. Admin key, or the key of the Release's Product. */
+        post: operations["settleRebuildRequest"];
         delete?: never;
         options?: never;
         head?: never;
@@ -189,23 +257,121 @@ export interface components {
             last_failure_at?: string;
             last_error?: string;
         };
+        /** @description Two reports share this body. Without `status` it is the BUILD report and `sbom_id` and `image_digest` are required. With `status` it is the connector's status call for one request (EDR-REBUILD-01 D28) and only `intent_id` and `status` are required. */
         CIRebuildCallback: {
-            /** @description The ci_rebuild intent this build served (THEMIS_INTENT_ID as the job received it). */
+            /** @description The rebuild intent this report is about (the event id, or THEMIS_INTENT_ID as the job received it). */
             intent_id: string;
-            /** @description The Evidence id of the NEW SBOM the job uploaded. Required (RC-3). */
-            sbom_id: string;
-            /** @description The built image's digest. Required (RC-3). */
-            image_digest: string;
+            /** @description The Evidence id of the NEW SBOM the job uploaded. Required for a build report (RC-3). */
+            sbom_id?: string;
+            /** @description The built image's digest. Required for a build report (RC-3). */
+            image_digest?: string;
             /** @description The job's own build identifier, as given. */
             build_id?: string;
             /** @description The revision built, as given. */
             git_ref?: string;
+            /**
+             * @description What became of the request: the build system accepted the build (`submitted`), the connector did not submit it (`refused`, not an attempt), or the connector cannot tell (`uncertain`, a person settles it).
+             * @enum {string}
+             */
+            status?: "submitted" | "refused" | "uncertain";
+            /** @description Why, for `refused` and `uncertain`. */
+            reason?: string;
+            /** @description The identity the build system gave the build at `submitted` (a queue item or a run id). */
+            build_ref?: string;
+            /** @description Optional. The build system says the build is running. Shown, counted nowhere. */
+            execution_started?: boolean;
         };
         CIRebuildCallbackAck: {
             intent_id: string;
-            sbom_id: string;
+            sbom_id?: string;
+            /** @description The state of the rebuild request after this report, when the intent has one. */
+            state?: string;
             /** Format: date-time */
             received_at: string;
+        };
+        RebuildActorRequest: {
+            /** @description The person who asks. Recorded. */
+            actor: string;
+            note?: string;
+        };
+        RebuildSettleRequest: {
+            /** @enum {string} */
+            answer: "submitted" | "not_submitted";
+            /** @description The person who settles. Recorded. */
+            actor: string;
+            note?: string;
+        };
+        /** @description One request of a rebuild cycle - one intent, one attempt number, one try number. Evidence about a request; it changes no Finding. */
+        RebuildRequest: {
+            intent_id: string;
+            /** Format: int64 */
+            cycle_id: number;
+            release_id: string;
+            decision_id: string;
+            attempt: number;
+            try: number;
+            /** @description webhook (the signed rebuild_requested event) or jenkins (the built-in sender). */
+            channel: string;
+            /** @enum {string} */
+            state: "requested" | "delivered" | "submitted" | "refused" | "uncertain" | "not_submitted" | "build_reported" | "evaluated";
+            reason?: string;
+            build_ref?: string;
+            /** Format: date-time */
+            requested_at: string;
+            /** Format: date-time */
+            delivered_at?: string;
+            /** Format: date-time */
+            status_at?: string;
+            /** Format: date-time */
+            execution_started_at?: string;
+            reported_by?: string;
+            settled_answer?: string;
+            settled_by?: string;
+            /** Format: date-time */
+            settled_at?: string;
+            settle_note?: string;
+        };
+        RebuildCycle: {
+            /** Format: int64 */
+            id: number;
+            release_id: string;
+            /**
+             * @description What opened the cycle - the posture of a new SBOM, or a rebuild decision of Governance.
+             * @enum {string}
+             */
+            origin: "evaluation" | "decision";
+            decision_id?: string;
+            /** @enum {string} */
+            state: "open" | "succeeded" | "exhausted" | "refused" | "stopped";
+            attempts: number;
+            max_attempts?: number;
+            refusals: number;
+            targeted: string[];
+            joined_decision_ids?: string[];
+            baseline_sbom_id?: string;
+            last_sbom_id?: string;
+            closed_by?: string;
+            closed_note?: string;
+            /** Format: date-time */
+            opened_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description A rebuild decision that opened no cycle, and why (EDR-REBUILD-01 D14 item 5). */
+        RebuildHold: {
+            decision_id: string;
+            /** @enum {string} */
+            reason: "cool_down" | "unsigned_route";
+            /** Format: date-time */
+            held_until?: string;
+            /** Format: date-time */
+            recorded_at: string;
+        };
+        RebuildCycleView: {
+            release_id: string;
+            cycle?: components["schemas"]["RebuildCycle"];
+            requests: components["schemas"]["RebuildRequest"][];
+            hold?: components["schemas"]["RebuildHold"];
         };
         /** @description The subject is a UNION (EDR-COMMUNICATION-01 D13.5): exactly one of finding_id (a per-Position artifact, D3) or release_id (the release-scoped VEX rollup, D13 - only artifact_type `vex` is valid there). Supplying both or neither is a 400. */
         CreatePublicationRequest: {
@@ -516,6 +682,125 @@ export interface operations {
             403: components["responses"]["Problem"];
             404: components["responses"]["Problem"];
             409: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseRebuildCycle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildCycleView"];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    requestRebuildAgain: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildActorRequest"];
+            };
+        };
+        responses: {
+            /** @description The new request. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildRequest"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    stopRebuildCycle: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildActorRequest"];
+            };
+        };
+        responses: {
+            /** @description The stopped cycle. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildCycle"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    settleRebuildRequest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                intent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildSettleRequest"];
+            };
+        };
+        responses: {
+            /** @description The settled request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildRequest"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            409: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
             503: components["responses"]["Problem"];
         };
     };

@@ -458,3 +458,32 @@ func TestConsumer_FixPublished(t *testing.T) {
 		t.Error("fix_published must be in the interest set")
 	}
 }
+
+type cycleTriggers struct{ got [][4]string }
+
+func (c *cycleTriggers) RecordRebuildTrigger(_ context.Context, id, source, typ, release string) error {
+	c.got = append(c.got, [4]string{id, source, typ, release})
+	return nil
+}
+
+// communication.rebuild_cycle_closed.v1 (EDR-REBUILD-01 D21) becomes a rebuild trigger under the
+// id of the envelope, and it rides Governance's second binding, the Communication stream.
+func TestConsumer_RebuildCycleClosed(t *testing.T) {
+	rec := &cycleTriggers{}
+	c := inbound.NewConsumer(app.NewCoordinator(app.NewFindingService(newMemRepo(), &ids{}, clk{})).WithRebuildTriggers(rec))
+	env := mkEnv("communication.rebuild_cycle_closed", []byte(`{"cycle_id":"cy-1","release_id":"rel-1","state":"evaluated"}`))
+	env.ID = "ev-1"
+	if err := c.Handle(context.Background(), env); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(rec.got) != 1 || rec.got[0] != [4]string{env.ID, "communication", "cycle_closed", "rel-1"} {
+		t.Fatalf("recorded = %v", rec.got)
+	}
+	if err := c.Handle(context.Background(), mkEnv("communication.rebuild_cycle_closed", []byte(`{nope`))); err == nil {
+		t.Error("malformed payload must be an error (retried), not a drop")
+	}
+	s := inbound.CommunicationSubscription
+	if s.Consumer != "governance" || s.Stream != "communication" || len(s.Interest) != 1 || !s.InInterest("communication.rebuild_cycle_closed") {
+		t.Errorf("subscription = %+v", s)
+	}
+}

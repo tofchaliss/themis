@@ -319,3 +319,41 @@ func TestRebuildDecisionReaderClampsTheLimit(t *testing.T) {
 		}
 	}
 }
+
+type cycleTriggers struct {
+	got [][4]string
+	err error
+}
+
+func (c *cycleTriggers) RecordRebuildTrigger(_ context.Context, id, source, typ, release string) error {
+	c.got = append(c.got, [4]string{id, source, typ, release})
+	return c.err
+}
+
+// EDR-REBUILD-01 D21: a closed rebuild cycle is recorded as a trigger of its own kind, under the
+// id of the event, so a redelivery is the same trigger. An event that names nothing records
+// nothing, and so does a Coordinator with no recorder.
+func TestOnRebuildCycleClosed(t *testing.T) {
+	ctx := context.Background()
+	rec := &cycleTriggers{}
+	coord := app.NewCoordinator(writeSvc(newRepo())).WithRebuildTriggers(rec)
+	if err := coord.OnRebuildCycleClosed(ctx, app.InboundRebuildCycleClosed{EventID: "ev-1", ReleaseID: "rel-1"}); err != nil {
+		t.Fatal(err)
+	}
+	want := [4]string{"ev-1", "communication", domain.RebuildTriggerCycleClosed, "rel-1"}
+	if len(rec.got) != 1 || rec.got[0] != want {
+		t.Fatalf("recorded = %v, want %v", rec.got, want)
+	}
+	for _, in := range []app.InboundRebuildCycleClosed{{EventID: "ev-2"}, {ReleaseID: "rel-1"}, {EventID: " ", ReleaseID: "rel-1"}} {
+		if err := coord.OnRebuildCycleClosed(ctx, in); err != nil || len(rec.got) != 1 {
+			t.Errorf("%+v: err=%v recorded=%d, want nothing recorded", in, err, len(rec.got))
+		}
+	}
+	rec.err = errors.New("db down")
+	if err := coord.OnRebuildCycleClosed(ctx, app.InboundRebuildCycleClosed{EventID: "ev-3", ReleaseID: "rel-1"}); err == nil {
+		t.Error("a store fault must surface so the event is retried")
+	}
+	if err := app.NewCoordinator(writeSvc(newRepo())).OnRebuildCycleClosed(ctx, app.InboundRebuildCycleClosed{EventID: "ev-1", ReleaseID: "rel-1"}); err != nil {
+		t.Errorf("no recorder: %v", err)
+	}
+}
