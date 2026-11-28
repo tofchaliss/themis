@@ -356,3 +356,21 @@ func TestGate_LargeBodies(t *testing.T) {
 		t.Errorf("read-only operator upload = %d, want 403", rec.Code)
 	}
 }
+
+// A project rename goes to Registry with the admin node key, so the gate holds Registry's
+// admin-only rule for the operator (EDR-KERNEL-01 D5): a write-capable product operator is
+// refused, an admin passes, and a PATCH elsewhere is not affected.
+func TestGate_ProjectRenameIsAdminOnly(t *testing.T) {
+	productOp := auth.Principal{KeyID: "k-3", Name: "carol", Scopes: []string{auth.ProductScopePrefix + "p1"}}
+	h, fwd := gateFor(productOp, true, true)
+	if rec := do(h, http.MethodPatch, "/api/registry/projects/j1", `{"name":"x"}`); rec.Code != http.StatusForbidden || *fwd != "" {
+		t.Fatalf("product operator rename = %d forwarded=%q, want 403 and nothing forwarded", rec.Code, *fwd)
+	}
+	if rec := do(h, http.MethodPut, "/api/registry/projects/j1/tags", `{"tags":[]}`); rec.Code != http.StatusOK {
+		t.Fatalf("product operator tags = %d, want forwarded", rec.Code)
+	}
+	h, fwd = gateFor(adminOp, true, true)
+	if rec := do(h, http.MethodPatch, "/api/registry/projects/j1", `{"name":"x"}`); rec.Code != http.StatusOK || *fwd == "" {
+		t.Fatalf("admin rename = %d forwarded=%q, want forwarded", rec.Code, *fwd)
+	}
+}

@@ -205,6 +205,19 @@ had its VM check yet.
   product; the preview lists the sibling projects by name; Raise & accept; the sibling's drawer
   shows "applied from another release" and the scoped proposal within a minute.
 
+## Section 3 — project rename (EDR-KERNEL-01 D5)
+
+The rename API and the Estate page's Rename form landed with unit, handler, proxy-gate and
+store integration tests. The VM round is open.
+
+- [ ] R.1 VM: rename a project with `PATCH /api/v1/projects/{id}` and the admin key; the answer
+  carries the same id and product; the Estate page, a release's posture, the Watches page and
+  a finding's decision scope preview show the new name with no restart.
+- [ ] R.2 VM: a rename to a name another project of the same product carries is `409` and
+  changes nothing; a product-scoped key is `403`.
+- [ ] R.3 VM: the CI job uploads with the NEW name and lands in the renamed project (no new
+  project appears under the product).
+
 ## Gate
 
 - [ ] G.1 `make check` green after the last test lands; then archive this change.

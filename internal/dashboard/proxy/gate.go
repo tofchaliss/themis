@@ -65,9 +65,15 @@ var statelessPosts = map[string]bool{
 // key, never the operator's. The PSIRT bulletin register is admin-only (EDR-PSIRT-01 R2).
 var adminWrites = []string{"/api/knowledge/psirt/bulletins"}
 
-func isAdminWrite(path string) bool {
+// isAdminWrite also covers a project rename (EDR-KERNEL-01 D5): PATCH on a Registry project.
+// It is matched by METHOD as well as path, because a product-scoped operator may still PUT
+// that project's tags.
+func isAdminWrite(r *http.Request) bool {
+	if r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/api/registry/projects/") {
+		return true
+	}
 	for _, prefix := range adminWrites {
-		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+		if r.URL.Path == prefix || strings.HasPrefix(r.URL.Path, prefix+"/") {
 			return true
 		}
 	}
@@ -151,7 +157,7 @@ func (g Gate) Wrap(next http.Handler) http.Handler {
 			writeProblem(w, http.StatusForbidden, "read-only operator", "this operation records a decision and requires a write-capable key")
 			return
 		}
-		if (isAdminWrite(r.URL.Path) || isOwnerSeverityWrite(r.URL.Path)) && !p.IsAdmin() {
+		if (isAdminWrite(r) || isOwnerSeverityWrite(r.URL.Path)) && !p.IsAdmin() {
 			writeProblem(w, http.StatusForbidden, "admin only", "this operation requires the "+auth.ScopeAdmin+" scope")
 			return
 		}

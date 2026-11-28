@@ -269,6 +269,52 @@ paths:
                 $ref: '#/components/schemas/ProjectView'
         '404':
           $ref: '#/components/responses/Problem'
+    patch:
+      operationId: renameProject
+      summary: Rename a project. Admin key only.
+      description: >-
+        Changes the project's NAME and nothing else (EDR-KERNEL-01 D5). Every other context
+        refers to a project by its id and reads the name live from Registry, so findings,
+        decisions, watches and tickets keep pointing at the same project. The name stays unique
+        per product, case folded: a name another project of the same product already carries is
+        `409`, and nothing changes. A change of case only (`alpha` → `Alpha`) is allowed.
+        A CI job that finds-or-creates the project by name must be changed to the new name, or
+        its next upload registers a new project under the old one.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameProjectRequest'
+      responses:
+        '200':
+          description: Renamed (or the name was already this one); the project as it is now.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectView'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          description: A key that is not admin. Renaming is an estate decision, not a CI bot's.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          description: Another project of the same product already has this name (case folded).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /products/{id}:
     get:
       operationId: getProduct
@@ -947,6 +993,12 @@ components:
       properties:
         product_id:
           type: string
+        name:
+          type: string
+    RenameProjectRequest:
+      type: object
+      required: [name]
+      properties:
         name:
           type: string
     RegisterReleaseRequest:

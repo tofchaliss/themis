@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/themis-project/themis/internal/registry/app"
@@ -224,6 +225,25 @@ func (s *Store) GetProject(ctx context.Context, id domain.ProjectID) (domain.Pro
 		return domain.Project{}, err
 	}
 	return domain.NewProject(id, domain.ProductID(productID), name)
+}
+
+// RenameProject sets one project's name (EDR-KERNEL-01 D5). The unique index on
+// (product_id, lower(name)) decides a clash in the same statement, so two concurrent renames
+// to one name cannot both win: the loser is app.ErrProjectNameTaken and its row is unchanged.
+// A missing row is ErrNotFound.
+func (s *Store) RenameProject(ctx context.Context, id domain.ProjectID, name string) error {
+	tag, err := s.pool.Exec(ctx, `UPDATE projects SET name = $2 WHERE id = $1`, string(id), name)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return app.ErrProjectNameTaken
+	}
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // GetProduct loads a Product by id; a missing row yields ErrNotFound.

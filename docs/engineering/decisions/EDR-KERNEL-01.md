@@ -1,6 +1,6 @@
 # EDR-KERNEL-01 — Shared Kernel (M2) Realization
 
-Status: **Grilled — ready for issue breakdown** (4 decisions locked)
+Status: **Grilled — ready for issue breakdown** (4 decisions locked; D5 added 2026-11-24)
 Date: 2026-07-14
 Author: architecture grilling session
 
@@ -86,6 +86,40 @@ The Evidence D7 outbox becomes the reusable M5 component.
 
 *Rejected:* putting the outbox mechanism in the kernel — it has behavior, violating D3 and blurring the
 domain-kernel / platform-infrastructure boundary.
+
+### D5 — A project's name can be corrected; its identity cannot (2026-11-24)
+
+A project registered under a wrong name (a CI job's find-or-create with a mistyped or
+mis-derived name) used to need a delete and a re-upload, which loses every decision made on it.
+`PATCH /projects/{id}` with `{"name": …}` now changes the **name only**. The id and the owning
+product are immutable, and nothing else moves.
+
+Why this is safe: every other context keys the project by **id** and reads the name live from
+Registry over the read seam — Governance (findings, positions, decision scope `project`, watches),
+Evidence, Knowledge, Communication (delivery intents carry `project_id`) and the dashboard. No
+context stores the name, and none caches it. So a rename is visible everywhere on the next read,
+with no event and no restart.
+
+Rules:
+
+1. **Uniqueness is unchanged.** The name stays unique per product, case folded, by the same
+   index `(product_id, lower(name))` that find-or-create relies on (EDR-INTAKE-01 B4). A name
+   another project of the product carries is `409` and the row is unchanged. A case-only change
+   (`alpha` → `Alpha`) is the same row and is allowed. Two concurrent renames to one name cannot
+   both win: the index decides inside the `UPDATE`.
+2. **Admin key only.** A product-scoped key (the CI bot) only needs find-or-create; a bot that
+   could rename would quietly move every later upload's name. The dashboard proxy holds the same
+   rule for the operator, because it forwards with the admin node key (EDR-GUI-01 D4/D11).
+3. **Find-or-create follows the new name.** After a rename, a CI job that still sends the old
+   name finds nothing and **registers a new project** under the old name. The job must be changed
+   with the rename. This is not guarded in code: refusing the old name would break a legitimate
+   later project of that name.
+4. **What does not change:** text already sent (Jira tickets, mails, Teams cards) keeps the name
+   it was rendered with. That is history, not state.
+
+*Rejected:* a rename history table — no consumer needs the old name today, and the request log
+records the call; add it when one does. Renaming products — not asked for; the same reasoning
+applies if it is.
 
 ---
 
