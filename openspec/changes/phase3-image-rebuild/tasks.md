@@ -63,8 +63,14 @@ Every step waits for the owner's go and lands as its own PR.
 - [x] 4.0 `KN-BEHIND-MODULE-1` settled for the judgement (owner decision 2026-11-28: do not
   count, show as own group): Knowledge answers `fix: other_stream`, Governance never targets it
   under `fix_required` and lists it in `other_stream`. No migration.
-- [ ] 4.0a VM check of 4.0: on the checked Release the 92 counted entries split into counted
-  and `other_stream` (expected about 48 and 44).
+- [x] 4.0a VM check of 4.0: on the checked Release the 92 counted entries split into counted
+  and `other_stream` (expected about 48 and 44). PASS 2026-11-28: 48 and 44, groups add up to
+  596 (EDR "VM check of this change").
+- [ ] 4.0b Sample the `other_stream` fix answers by hand: Knowledge gives 379 of 563 on the
+  checked Release. Read 20 across packages and confirm each has no reachable bound (backlog
+  `KN-OTHER-STREAM-SAMPLE-1`).
+  2026-11-28: 20 of 39 packages read, all right (shape b, one Perl module stream). The other
+  19 packages are still to read.
 - [ ] 4.1 Settle the six open points of "Step R2 part 1 as built" that touch the event
   contract (one fixed version or a list, `fix_source`).
 - [ ] 4.2 Trigger queue written with the outbox notes of `release_evaluated` (cause `new_sbom`)

@@ -1314,7 +1314,44 @@ be added later.
 - **Not changed.** The fix-available alert (EDR-INCIDENT-01 D1) still announces such a bound.
   That is the rest of backlog `KN-BEHIND-MODULE-1`.
 
-VM check of this change: pending (task 4.0).
+**VM check of this change (2026-11-28, task 4.0a): PASS.** Same Release as VM run 1 and 2, no
+tag set, installation policy at its defaults.
+
+| What | Before (#275) | After (#277) |
+| --- | --- | --- |
+| Fix answers `known` | 563 | 184 |
+| Fix answers `other_stream` | not a value | 379 |
+| Fix answers `none` / `unknown` | 44 / 33 | 44 / 33 |
+| Considered | 596 | 596 |
+| Counted (`targeted`) | 92 | 48 |
+| Listed in `other_stream` | not a list | 44 |
+| `skipped.fix_other_stream` | not a key | 44 |
+| `skipped` below_floor / scope_component / fix_unknown / decided | 235 / 234 / 33 / 2 | same |
+| Outcome | `none` (no tag) | `none` (no tag) |
+
+- The 92 entries split into 48 and 44, as measured by hand in VM run 2.
+- The groups still add up: 48 + 44 + 235 + 234 + 33 + 2 = 596.
+- The first `other_stream` entry is a base-repository build of a Python library whose four
+  bounds are all module builds of a newer series: shape (b) of the rule.
+- **Observation, not a defect of the judgement.** Knowledge answers `other_stream` for 379 of
+  the 563 occurrences that had a bound (67%). In the judgement only 44 of them surface, because
+  the others are scope components or below the floor and are grouped there first. The share is
+  higher than among the counted entries (48%), which fits: a module-stream advisory lists its
+  whole rebuild set, and scope components come from exactly those advisories. It has not been
+  sampled by hand yet; that is task 4.0b and backlog `KN-OTHER-STREAM-SAMPLE-1`.
+
+**Hand sample of the `other_stream` answers (2026-11-28, task 4.0b).** The 379 answers belong to
+39 different packages, so about ten CVEs each. The first 20 packages by purl were read with
+their bounds:
+
+- 20 of 20 are right. Each install is a base-repository build (`...el8`, two of them
+  `...el8_10.1`) and every one of its two to five bounds is a module build
+  (`...module+el8.x...`). That is shape (b) of the rule: no bound can be reached by a plain
+  update.
+- All 20 are Perl library packages, and the bounds are the builds of a newer Perl module
+  stream. One module stream with many packages and many CVEs explains the high count.
+- Limit of the sample: it is sorted by purl, so it shows one family. The other 19 packages
+  have not been read.
 
 ## Honest limits
 

@@ -431,6 +431,19 @@ three angles, and two of them proposed fixes that would not have worked.
   rebuild judgement lists such components apart. **Still open:** the fix-available alert
   announces a bound of another stream like any other; give it the same rule, or say so on the
   card.
+  **VM check PASS 2026-11-28:** 92 counted entries became 48 counted and 44 listed apart.
+
+- [ ] **Sample the `other_stream` fix answers by hand** (id `KN-OTHER-STREAM-SAMPLE-1`, from the
+  VM check of `KN-BEHIND-MODULE-1`, 2026-11-28, check). On the checked Release Knowledge answers
+  `other_stream` for 379 of 563 occurrences with a bound (67%), against 48% among the entries the
+  judgement counted. The higher share fits the data (module-stream advisories list their whole
+  rebuild set), but nobody has read the rows. Read 20 across different packages from
+  `GET /releases/{id}/fix-verdicts` and confirm for each that no bound is a plain build or a
+  module build of the install's own series. One wrong row means a real fix is hidden from the
+  rebuild judgement, so do this before R2 part 2 sends an event.
+  **2026-11-28:** the 379 rows are 39 packages; the first 20 by purl were read and all are
+  right (base-repository install, every bound a module build of a newer Perl stream). Open:
+  the other 19 packages.
 
 - [ ] **Registry's single-entity views list `tags` and never fill them** (id `RG-VIEW-TAGS-1`,
   from the same VM check, 2026-11-28, defect). `ProductView`, `ProjectView` and `ReleaseView`
