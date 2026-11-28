@@ -127,3 +127,14 @@ func TestRebuildPolicyStoreErrorsSurface(t *testing.T) {
 		t.Fatalf("history error: %v", err)
 	}
 }
+
+// The database keeps microseconds. The service cuts the time before storing, so the answer to
+// a change and a later read carry the same time (found in the R1 VM check, 2026-11-28).
+func TestRebuildPolicyPutCutsTimeToMicrosecond(t *testing.T) {
+	at := time.Date(2026, 11, 28, 5, 49, 14, 755407026, time.UTC)
+	svc := app.NewRebuildPolicyService(&fakeRebuildPolicyStore{}, rebuildClock{at})
+	rec, err := svc.PutInstallation(context.Background(), domain.DefaultRebuildPolicy(), "alice")
+	if err != nil || !rec.UpdatedAt.Equal(time.Date(2026, 11, 28, 5, 49, 14, 755407000, time.UTC)) {
+		t.Fatalf("UpdatedAt = %v err = %v, want it cut to the microsecond", rec.UpdatedAt, err)
+	}
+}

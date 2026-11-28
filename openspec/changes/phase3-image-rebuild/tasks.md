@@ -19,8 +19,9 @@ Every step waits for the owner's go and lands as its own PR.
 - [x] 1.4 API: `GET` / `PUT /rebuild-policy`, `GET /rebuild-policy/history`; admin to change;
   a field left out is refused; wiring; tests.
 - [x] 1.5 `make check` and `make vet-tags` green.
-- [ ] 1.6 VM check: read the defaults, change the policy twice, read the history, try a
-  read-only key.
+- [x] 1.6 VM check PASSED 2026-11-28: defaults at version 0, two changes, a refused change
+  (field left out, 400), history newest first. A read-only key was not tried on the VM; the
+  handler tests cover it. Result in the EDR, "Step R1 as built".
 
 ## Group 2 — R1a Product and Release overrides
 

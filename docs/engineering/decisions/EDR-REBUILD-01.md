@@ -1117,7 +1117,17 @@ The owner gave the go for R1 on 2026-11-27. The tasks are in
   not yet applied (D14 applies it when a cycle opens).
 - **The cool-down is stored in whole seconds**, from 0 to one year. The upper bound only stops a
   typing mistake.
-- **Open test:** the VM check (task 1.6).
+- **VM check PASSED 2026-11-28** (task 1.6, main `dc39448`, auth on, admin key). Governance
+  restarted and applied migration 28. Before any change the policy read version 0, mode `ask`,
+  floor `high`, cool-down 86400 seconds, and the history was empty. Two changes gave versions 1
+  and 2. A change without `fix_required` was refused with HTTP 400 and "fix_required is
+  required", and stored nothing. A third change set the starting values back as version 3. The
+  history then showed versions 3, 2, 1, each with the actor and the time. Not tried on the VM:
+  a read-only key on `PUT` (no such key is at hand there); the refusal is covered by the handler
+  tests.
+- **Found in the VM check, fixed 2026-11-28:** the answer to a change carried the time in
+  nanoseconds and the history carried it in microseconds, the database's precision. The service
+  now cuts the time to the microsecond before storing, so both read the same.
 
 ## Honest limits
 
