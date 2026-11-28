@@ -68,6 +68,9 @@ type Governance struct {
 	// fix-published notices and announces one governance.fix_available.v1 per release. Always
 	// wired; the composition root runs it on THEMIS_FIX_AVAILABLE_INTERVAL (0 disables).
 	FixAvailable *app.FixAvailableSweep
+	// RebuildTriggers judges the recorded rebuild triggers (EDR-REBUILD-01 step R2 part 2). Nil
+	// when the Registry or the Knowledge read seam is missing.
+	RebuildTriggers *app.RebuildTriggerWorker
 	// Scope applies scoped decisions (EDR-SYNC-01): the composition root runs its sweep on
 	// THEMIS_SCOPE_SWEEP_INTERVAL. Nil without a Registry seam — the owners of a release cannot
 	// be resolved, so a scoped decision stays pending, visibly, rather than guessed at.
@@ -165,10 +168,21 @@ func Wire(
 	if kn != nil {
 		fixVerdicts = kn
 	}
+	rebuildEval := app.NewRebuildEvaluationService(rebuildPolicy, st, fixVerdicts, sysClock{})
 	handler := govhttp.NewHandler(write, read).WithLogger(logger).WithSLA(sla).
 		WithMetrics(app.NewMetricsService(st, estate, sla, sysClock{})).
 		WithRebuildPolicy(rebuildPolicy).
-		WithRebuildEvaluation(app.NewRebuildEvaluationService(rebuildPolicy, st, fixVerdicts, sysClock{}))
+		WithRebuildEvaluation(rebuildEval).
+		WithRebuildDecisions(app.NewRebuildDecisionReader(st))
+	// Step R2 part 2: the worker that judges the recorded triggers (a new SBOM that was judged,
+	// a fix that became available) and records a decision with its event. It needs both read
+	// seams: without Registry there is no mode, and without Knowledge no fix verdict, and a
+	// trigger judged on "everything unknown" would record "nothing counts" for a Release that
+	// was never judged. Without them no worker is wired and the triggers simply hold.
+	var rebuildTriggers *app.RebuildTriggerWorker
+	if reg != nil && kn != nil {
+		rebuildTriggers = app.NewRebuildTriggerWorker(st, rebuildEval, idGen{}, sysClock{}, evaluationLog{logger})
+	}
 	if reg != nil {
 		handler = handler.WithProductResolver(reg)
 	}
@@ -241,18 +255,19 @@ func Wire(
 		scope.WithSeverityCopy(severity)
 	}
 	return Governance{
-		Handler:      handler.Router(),
-		Store:        st,
-		Consumer:     inbound.NewConsumer(app.NewCoordinator(write).WithEvaluations(st).WithFixNotices(st)).WithLogger(logger),
-		Relay:        relay,
-		Reconcile:    app.NewReconcileService(relay),
-		Evaluations:  evaluations,
-		Rejudge:      rejudge,
-		ReviewBy:     app.NewReviewBySweep(write, st, sysClock{}),
-		SLA:          sla,
-		FixAvailable: app.NewFixAvailableSweep(st, sysClock{}),
-		Scope:        scope,
-		Scores:       scores,
+		Handler:         handler.Router(),
+		Store:           st,
+		Consumer:        inbound.NewConsumer(app.NewCoordinator(write).WithEvaluations(st).WithFixNotices(st)).WithLogger(logger),
+		Relay:           relay,
+		Reconcile:       app.NewReconcileService(relay),
+		Evaluations:     evaluations,
+		Rejudge:         rejudge,
+		ReviewBy:        app.NewReviewBySweep(write, st, sysClock{}),
+		SLA:             sla,
+		FixAvailable:    app.NewFixAvailableSweep(st, sysClock{}),
+		RebuildTriggers: rebuildTriggers,
+		Scope:           scope,
+		Scores:          scores,
 	}
 }
 

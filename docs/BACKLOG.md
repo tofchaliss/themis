@@ -402,9 +402,15 @@ three angles, and two of them proposed fixes that would not have worked.
   **R2 part 1 built 2026-11-28** (owner go for R2 the same day): tag scope and effective mode,
   the judgement of one Release as a read (`GET /releases/{id}/rebuild-evaluation`), and one new
   Knowledge read (`GET /releases/{id}/fix-verdicts`); no migration, nothing is sent; VM check
-  PASSED 2026-11-28 on the second run (the first found a tag-read defect, fixed the same day). Next: R2 part 2 (the two triggers, the stored decision, the two events), which first
-  settles the open points of EDR "Step R2 part 1 as built"; the module-stream point
-  (`KN-BEHIND-MODULE-1`) was decided and built for the judgement 2026-11-28.
+  PASSED 2026-11-28 on the second run (the first found a tag-read defect, fixed the same day).
+  The module-stream point (`KN-BEHIND-MODULE-1`) was decided and built for the judgement
+  2026-11-28. **R2 part 2 built 2026-11-28** (owner confirmed the scope the same day): rebuild
+  triggers written with the `release_evaluated` (new SBOM) and `fix_available` notes, a worker
+  that judges them, the decision record with frozen facts, the events
+  `governance.rebuild_recommended.v1` and `governance.rebuild_requested.v1`, and the read
+  `GET /releases/{id}/rebuild-decisions`; Governance migration 30; nothing consumes the events
+  and no build starts; VM check pending (EDR "Step R2 part 2 as built"). Next: R2a (build
+  profile) or R3 (Communication keeps the cycle from the events), each on the owner's go.
 
 - [ ] **A known fix for language packages** (id `KN-FIX-STANDING-LANG-1`, from EDR-REBUILD-01
   step R2 part 1, 2026-11-28, feature). Knowledge records the vendor bounds an open occurrence is

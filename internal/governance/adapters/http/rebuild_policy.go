@@ -413,8 +413,8 @@ func toRebuildEntries(entries []app.RebuildEvaluationEntry) []gen.RebuildTargetE
 			Severity: t.Severity, Score: t.Score,
 			ScoreSource:    gen.RebuildTargetEntryScoreSource(t.ScoreSource),
 			KnownExploited: t.KnownExploited,
-			ClaimClass:     gen.RebuildTargetEntryClaimClass(rebuildClaimClass(t.ClaimClass)),
-			Position:       rebuildPosition(t.Position),
+			ClaimClass:     gen.RebuildTargetEntryClaimClass(domain.RebuildClaimClassName(t.ClaimClass)),
+			Position:       domain.RebuildPositionName(t.Position),
 			CountedBecause: make([]gen.RebuildTargetEntryCountedBecause, 0, len(t.CountedBecause)),
 		}
 		if e.FixedVersions == nil {
@@ -430,23 +430,4 @@ func toRebuildEntries(entries []app.RebuildEvaluationEntry) []gen.RebuildTargetE
 		out = append(out, e)
 	}
 	return out
-}
-
-// rebuildClaimClass is D34's claim class: `carrier`, `scope`, and `unknown` for everything else
-// (an empty or unreadable class acts as carrier and is said to be unknown).
-func rebuildClaimClass(c string) string {
-	switch c {
-	case "carrier", domain.ClaimScope:
-		return c
-	default:
-		return "unknown"
-	}
-}
-
-// rebuildPosition is D34's position: `none`, or the stance in force.
-func rebuildPosition(s domain.Stance) string {
-	if s == "" {
-		return "none"
-	}
-	return string(s)
 }

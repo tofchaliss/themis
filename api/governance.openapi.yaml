@@ -1238,6 +1238,38 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /releases/{releaseId}/rebuild-decisions:
+    get:
+      operationId: getReleaseRebuildDecisions
+      summary: >-
+        The rebuild triggers of this Release and how each ended (EDR-REBUILD-01 step R2,
+        part 2), newest first. A trigger is a new SBOM that was judged, or a fix that became
+        available (D3). Each one is judged once. It ends in `none` with the reason, or in
+        `recommend` or `request` with the recorded decision and its frozen facts (D27, D29).
+        A trigger not judged yet reads `settled` false. Reading starts nothing. Read scope.
+      parameters:
+        - name: releaseId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: How many triggers to return. Default 20, at most 200.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildTriggerList'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /faultlines/{faultlineId}/findings:
     get:
       operationId: getFaultlineFindings
@@ -2511,6 +2543,143 @@ components:
             module stream. They are NOT targeted and never part of a request - switching a
             module stream is a person's change, not a rebuild. Listed so that a person can act.
             `fixed_versions` are the builds of the other stream.
+          items:
+            $ref: '#/components/schemas/RebuildTargetEntry'
+    RebuildTriggerList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/RebuildTriggerRecord'
+    RebuildTriggerRecord:
+      type: object
+      description: One rebuild trigger of a Release and how it ended.
+      required: [trigger_id, trigger_source, trigger_type, release_id, received_at, settled,
+                 considered, targeted_count]
+      properties:
+        trigger_id:
+          type: string
+          description: The id of the event that caused the judgement (D27).
+        trigger_source:
+          type: string
+        trigger_type:
+          type: string
+          enum: [new_sbom, fix_available]
+        release_id:
+          type: string
+        received_at:
+          type: string
+          format: date-time
+        settled:
+          type: boolean
+          description: False while the trigger waits to be judged. The fields below are then absent or zero.
+        settled_at:
+          type: string
+          format: date-time
+        outcome:
+          type: string
+          enum: [none, recommend, request]
+        reason:
+          type: string
+          enum: [mode_off, nothing_counts, gave_up]
+          description: >-
+            Set with outcome `none`. `mode_off` - the effective mode of the Release is off (no
+            rebuild tag, or a level says off). `nothing_counts` - the mode allows a rebuild and
+            no component counts. `gave_up` - the Release could not be judged for 24 hours and
+            the trigger was closed unjudged.
+        effective_mode:
+          type: string
+          enum: ['off', ask, auto]
+        effective_mode_set_by:
+          type: string
+          enum: [installation, policy, tag]
+        considered:
+          type: integer
+        targeted_count:
+          type: integer
+        decision:
+          $ref: '#/components/schemas/RebuildDecision'
+    RebuildDecision:
+      type: object
+      description: >-
+        One recorded rebuild decision with the facts frozen as they were read (D29). It is also
+        what `governance.rebuild_recommended.v1` and `governance.rebuild_requested.v1` carry.
+        A decision starts no build.
+      required: [decision_id, outcome, decided_at, product_id, project_id, installation_mode,
+                 effective_mode, effective_mode_set_by, tag, tag_level, policy, considered,
+                 skipped, targeted, other_stream]
+      properties:
+        decision_id:
+          type: string
+        outcome:
+          type: string
+          enum: [recommend, request]
+        decided_at:
+          type: string
+          format: date-time
+        product_id:
+          type: string
+        project_id:
+          type: string
+        installation_mode:
+          type: string
+          enum: ['off', ask, auto]
+        effective_mode:
+          type: string
+          enum: [ask, auto]
+        effective_mode_set_by:
+          type: string
+          enum: [installation, policy, tag]
+        tag:
+          type: string
+          description: The rebuild tag that applied.
+        tag_level:
+          type: string
+          description: Where that tag was read (release, project or product).
+        policy:
+          type: object
+          description: The policy in force as the decision read it - which record, which version, its values.
+          required: [scope_kind, scope_id, version, fix_required, severity_floor,
+                     count_known_exploited, skip_decided, carrier_only, cool_down_seconds, mode]
+          properties:
+            scope_kind:
+              type: string
+              enum: [installation, product, release]
+            scope_id:
+              type: string
+            version:
+              type: integer
+            fix_required:
+              type: boolean
+            severity_floor:
+              type: string
+            count_known_exploited:
+              type: boolean
+            skip_decided:
+              type: boolean
+            carrier_only:
+              type: boolean
+            cool_down_seconds:
+              type: integer
+              format: int64
+            mode:
+              type: string
+              enum: ['off', ask, auto]
+        considered:
+          type: integer
+        skipped:
+          type: object
+          description: How many occurrences did not count, by reason.
+          additionalProperties:
+            type: integer
+        targeted:
+          type: array
+          items:
+            $ref: '#/components/schemas/RebuildTargetEntry'
+        other_stream:
+          type: array
           items:
             $ref: '#/components/schemas/RebuildTargetEntry'
     RebuildTargetEntry:

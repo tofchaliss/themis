@@ -71,14 +71,19 @@ Every step waits for the owner's go and lands as its own PR.
   `KN-OTHER-STREAM-SAMPLE-1`).
   2026-11-28: 20 of 39 packages read, all right (shape b, one Perl module stream). The other
   19 packages are still to read.
-- [ ] 4.1 Settle the six open points of "Step R2 part 1 as built" that touch the event
-  contract (one fixed version or a list, `fix_source`).
-- [ ] 4.2 Trigger queue written with the outbox notes of `release_evaluated` (cause `new_sbom`)
-  and `fix_available`; a worker that evaluates off the inbox transaction.
-- [ ] 4.3 Decision record with the frozen facts (D27, D29); migration.
-- [ ] 4.4 Events `governance.rebuild_requested.v1` and `governance.rebuild_recommended.v1`;
-  confirm Communication ignores event types it does not know.
-- [ ] 4.5 VM check.
+- [x] 4.1 Settle the open points of "Step R2 part 1 as built" that touch the event contract:
+  the event keeps the list `fixed_versions`; `fix_source` stays `knowledge_verdict` (EDR "Step
+  R2 part 2 as built").
+- [x] 4.2 Trigger queue `rebuild_triggers`, written in the same transaction as the
+  `release_evaluated` note (cause `new_sbom`) and the `fix_available` note; a worker that
+  judges off the inbox transaction, every 30 seconds.
+- [x] 4.3 Decision record `rebuild_decisions` with the frozen facts (D27, D29); migration 30,
+  reversible. Read `GET /releases/{id}/rebuild-decisions`.
+- [x] 4.4 Events `governance.rebuild_requested.v1` and `governance.rebuild_recommended.v1`
+  with frozen schemas and contract tests; Communication's consumer ignores event types it does
+  not know (its `default` case), confirmed in the code.
+- [ ] 4.5 VM check: migration 30 applies, a forced trigger is judged, a tagged Release gives a
+  decision and one event, an untagged one gives `none` with the reason, nothing is sent out.
 
 ## Later groups
 
