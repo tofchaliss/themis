@@ -108,9 +108,62 @@ Every step waits for the owner's go and lands as its own PR.
   PASS 2026-11-28 (EDR "VM check of R2a").
 - [x] 5.6a The same card in the React GUI (`/next/`), which is the GUI in daily use; #280 had
   it in the old GUI only. Component tests, `npm run check`, bundle rebuilt.
-- [ ] 5.7 Look at the build profile card in the React GUI on the VM (backlog
-  `GUI-BUILD-PROFILE-CHECK-1`).
+- [x] 5.7 Look at the build profile card in the React GUI on the VM. PASS 2026-11-28 after
+  #281: the card shows for a picked Project, and the owner saved and removed a profile through
+  it (EDR "VM check of R2a").
 
-## Later groups
+## Group 6 — R3 Communication acts on the events (owner go 2026-11-28 for R3 to R6)
 
-- [ ] R3 to R6 as in the EDR's order of work, each on the owner's go.
+- [x] 6.1 Switch `THEMIS_COMMUNICATION_REBUILD_OPEN_FROM` (`evaluation` default, `decision`).
+- [x] 6.2 Communication migration 12: cycle origin and frozen decision, `rebuild_requests`,
+  `rebuild_holds`, `release_last_sbom`; down and up tested.
+- [x] 6.3 Consume `governance.rebuild_requested.v1` and `rebuild_recommended.v1`; join an open
+  cycle (D20), cool-down hold, new intent id per try (D40).
+- [x] 6.4 Request rendered once as `themis.rebuild.requested.v1`, same bytes on every retry
+  (D36); unsigned route refused at startup and at send time (D42); Jenkins sender as one
+  connector (D43).
+- [x] 6.5 Status call on `POST /callbacks/ci-rebuild` (`submitted`, `refused`, `uncertain`),
+  three refusals close the cycle, mails, the 24 hour silence sweep.
+- [x] 6.6 Person actions: read the cycle, settle, request again, stop.
+- [x] 6.7 `communication.rebuild_cycle_closed.v1` and Governance trigger type `cycle_closed`
+  (Governance migration 31, second bus cursor) (D21).
+- [x] 6.8 `make vet-tags`, lint, clean-arch, arch-test, unit and store tests green.
+- [ ] 6.9 VM check: part of R6.
+
+## Group 7 — R4 mode ask: the standing recommendation and "start rebuild" (same owner go)
+
+- [x] 7.1 Governance migration 32: state of a recommendation, approval, one standing per
+  Release; outcome `unchanged`, trigger type `mode_changed`; down and up tested.
+- [x] 7.2 Trigger worker: unchanged, supersede, withdraw, expire first, hold after approval
+  (D41, D44).
+- [x] 7.3 Approval `POST /rebuild-recommendations/{decision_id}/approve` with the policy lock,
+  fresh tags, fail closed (D15, D22, D45, D46); read `GET /releases/{id}/rebuild-recommendation`.
+- [x] 7.4 Expiry sweep and `governance.rebuild_recommendation_expired.v1` (D26, D32).
+- [x] 7.5 Communication: closure said for every decision cycle; notices name the decision,
+  the replaced one and the expiry (D45).
+- [x] 7.6 React GUI: "Rebuild recommendation" card with "Start rebuild" on the Release page;
+  component tests, `npm run check`, bundle rebuilt.
+- [x] 7.7 `make vet-tags`, lint, clean-arch, arch-test, unit and store tests green.
+- [ ] 7.8 VM check: part of R6.
+
+## Group 8 — R5 reference build connector (same owner go)
+
+- [x] 8.1 Nested Go module `connectors/jenkins-rebuild` (standard library only, imports no
+  Themis code); own repository later (`CONN-REBUILD-OWN-REPO-1`).
+- [x] 8.2 Signed event intake with the durable record first (D12) and the required checks
+  (D18): type, age, allow-list per Product and Project, parameter schema per job.
+- [x] 8.3 Value rules with a command-syntax test per rule (D31).
+- [x] 8.4 Stored states, per-intent claim with counter, recovery pass, "ask before calling
+  again" (D37, D39).
+- [x] 8.5 Jenkins client: submit as form parameters, search of queue and builds in two
+  passes, credential check that fails closed (D33).
+- [x] 8.6 Status call to Themis, sent again until confirmed (D28).
+- [x] 8.7 README, example configuration (loaded by a test), `make connector-check` in
+  `check` and `check-ci`.
+- [ ] 8.8 Run against a real Jenkins (`CONN-REBUILD-REAL-JENKINS-1`), part of R6 step 7.
+
+## Group 9 — R6 VM check (handed to the owner 2026-11-28)
+
+- [ ] 9.1 The seven steps of "Step R6" in the EDR, on the test VM. Closes 6.9 and 7.8.
+- [ ] 9.2 After a pass: move the default of `THEMIS_COMMUNICATION_REBUILD_OPEN_FROM` to
+  `decision` (`COMM-REBUILD-OPEN-FROM-1`).

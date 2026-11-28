@@ -61,6 +61,12 @@ const (
 	// (EDR-INCIDENT-01 D1): one per release per Governance sweep. "Fix available" is the
 	// vendor's statement; "patched" is proven only by new evidence for the release (D5).
 	WebhookFixAvailable = "fix_available"
+	// WebhookRebuildRequested is the request to a build connector (EDR-REBUILD-01 D6): a signed
+	// document in CloudEvents shape. Its route is refused without a signing secret.
+	WebhookRebuildRequested = "rebuild_requested"
+	// WebhookRebuildRecommended tells people that Themis recommends a rebuild and a person
+	// decides (mode ask, or no build profile). It starts nothing.
+	WebhookRebuildRecommended = "rebuild_recommended"
 )
 
 // SnapshotWebhookEvent is the snapshot key naming a webhook's event kind.
@@ -106,6 +112,10 @@ const notificationReviewDue = "review_due_soon"
 // notificationFixAvailable marks the mail that says a vendor fix is newly on record for things
 // a Release has open (EDR-INCIDENT-01 D1).
 const notificationFixAvailable = "fix_available"
+
+// notificationRebuild marks the mail that tells a person about one rebuild request: a refusal,
+// a cycle stopped by refusals, or an uncertain build (EDR-REBUILD-01 D20, D24).
+const notificationRebuild = "rebuild_notice"
 
 // IntentLineage is the originating envelope's identity, recorded so an outward effect can
 // always be traced back to the fact that caused it. EventSeq is deliberately absent: the bus
@@ -156,6 +166,17 @@ type Intent struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+// IsRebuildNotification reports whether this mail tells a person about a rebuild request.
+func (i Intent) IsRebuildNotification() bool {
+	return i.Snapshot[snapshotKeyNotification] == notificationRebuild
+}
+
+// IsRebuildRequest reports whether this intent asks for a build: the built-in sender's
+// ci_rebuild, or the signed rebuild_requested event.
+func (i Intent) IsRebuildRequest() bool {
+	return i.Type == IntentCIRebuild || (i.Type == IntentWebhook && i.Snapshot[SnapshotWebhookEvent] == WebhookRebuildRequested)
 }
 
 // IsReviewDueNotification reports whether this mail warns that a review date is near (D2).
@@ -316,6 +337,9 @@ type DeliveryIntentConfig struct {
 	// WebhookRoutes maps a webhook event kind to the governed audience it posts to (D4). A kind
 	// absent from the map is not sent.
 	WebhookRoutes map[string]string
+	// SignedAudiences names the webhook audiences that have a signing secret. A rebuild_requested
+	// route to an audience outside it sends nothing (EDR-REBUILD-01 D6).
+	SignedAudiences map[string]bool
 }
 
 // Default destination names, used for any field left empty.
@@ -512,6 +536,108 @@ func (s *DeliveryIntentService) EnqueueCIRebuild(ctx context.Context, lineage In
 	putIfSet(in.Snapshot, SnapshotPriorSBOMID, priorSBOMID)
 	in.Snapshot[SnapshotTargetedCVEs] = strings.Join(targeted, ",")
 	in.Snapshot[SnapshotAttempt] = strconv.Itoa(attempt)
+	return s.create(ctx, in)
+}
+
+// Snapshot keys of a rebuild request and of a notice about one (EDR-REBUILD-01 R3).
+const (
+	// SnapshotRebuildDecision is Governance's decision as it arrived; the request payload is
+	// built from it once (D36).
+	SnapshotRebuildDecision   = "rebuild_decision"
+	SnapshotRebuildDecisionID = "decision_id"
+	SnapshotRebuildCycleID    = "cycle_id"
+	SnapshotRebuildTry        = "try"
+	SnapshotRebuildNotice     = "rebuild_notice_kind"
+	SnapshotRebuildIntentID   = "rebuild_intent_id"
+	SnapshotRebuildChannel    = "rebuild_channel"
+	SnapshotRebuildNoticeText = "rebuild_reason"
+	SnapshotRebuildBuildRef   = "rebuild_build_ref"
+	// SnapshotRebuildTargetedCount and SnapshotRebuildRecommendReason are carried by the
+	// rebuild_recommended webhook.
+	SnapshotRebuildTargetedCount   = "rebuild_targeted_count"
+	SnapshotRebuildRecommendReason = "rebuild_recommend_reason"
+	// SnapshotRebuildSupersedes names the recommendation a new one replaces (D45 item 4), and
+	// SnapshotRebuildExpired ("1") marks the notice of a recommendation that ran out (D26).
+	SnapshotRebuildSupersedes  = "rebuild_supersedes"
+	SnapshotRebuildExpired     = "rebuild_expired"
+	rebuildRequestOriginPrefix = "rebuild:"
+)
+
+// ErrUnsignedRebuildRoute — the rebuild_requested route leads to an audience with no signing
+// secret. An unsigned request to build is not sent (EDR-REBUILD-01 D6).
+var ErrUnsignedRebuildRoute = errors.New("communication: the rebuild_requested route has no signing secret")
+
+// RebuildChannel says how a rebuild request for the Release would leave: the signed event when
+// a rebuild_requested route applies (the route wins over the built-in sender, D6), the built-in
+// Jenkins sender when none does, and ChannelUnsigned when the route has no signing secret.
+func (s *DeliveryIntentService) RebuildChannel(ctx context.Context, releaseID string) string {
+	audience, _, ok := s.webhookRoute(ctx, WebhookRebuildRequested, releaseID)
+	switch {
+	case !ok:
+		return ChannelJenkins
+	case !s.cfg.SignedAudiences[audience]:
+		return ChannelUnsigned
+	default:
+		return ChannelWebhook
+	}
+}
+
+// EnqueueRebuildRequest records one request of a decision cycle (D23, D40): the signed event
+// when a route applies, else the built-in sender's ci_rebuild. Its identity is the cycle, the
+// attempt number and the try number, so a request made again is a new intent and a redelivered
+// trigger is not. It returns the channel the request leaves on.
+func (s *DeliveryIntentService) EnqueueRebuildRequest(ctx context.Context, lineage IntentLineage, cycle RebuildCycle, attempt, try, maxAttempts int) (Intent, string, error) {
+	if strings.TrimSpace(cycle.ReleaseID) == "" {
+		return Intent{}, "", ErrNoSubject
+	}
+	origin := rebuildRequestOriginPrefix + strconv.FormatInt(cycle.ID, 10) + ":" + strconv.Itoa(attempt) + ":" + strconv.Itoa(try)
+	facts := map[string]string{
+		SnapshotRebuildCycleID: strconv.FormatInt(cycle.ID, 10), SnapshotRebuildTry: strconv.Itoa(try),
+		SnapshotRebuildDecisionID: cycle.DecisionID, SnapshotRebuildMaxAttempts: strconv.Itoa(maxAttempts),
+		SnapshotRebuildAttempt: strconv.Itoa(attempt),
+	}
+	audience, byTag, ok := s.webhookRoute(ctx, WebhookRebuildRequested, cycle.ReleaseID)
+	if !ok {
+		in, err := s.EnqueueCIRebuild(ctx, lineage, origin, cycle.ReleaseID, cycle.ProductID, cycle.ProjectID,
+			cycle.LastSBOMID, cycle.Targeted, attempt, facts)
+		return in, ChannelJenkins, err
+	}
+	if !s.cfg.SignedAudiences[audience] {
+		return Intent{}, "", ErrUnsignedRebuildRoute
+	}
+	in := s.newIntent(IntentWebhook, audience, lineage, origin, facts)
+	in.ReleaseID, in.ProductID, in.ProjectID = cycle.ReleaseID, cycle.ProductID, cycle.ProjectID
+	in.Snapshot[SnapshotWebhookEvent] = WebhookRebuildRequested
+	in.Snapshot[SnapshotRebuildDecision] = string(cycle.Decision)
+	in.Snapshot[SnapshotAttempt] = strconv.Itoa(attempt)
+	in.Snapshot[SnapshotTargetedCVEs] = strings.Join(cycle.Targeted, ",")
+	in.Snapshot["release_id"] = cycle.ReleaseID
+	putIfSet(in.Snapshot, SnapshotWebhookRoutedByTag, byTag)
+	putIfSet(in.Snapshot, "product_id", cycle.ProductID)
+	putIfSet(in.Snapshot, "project_id", cycle.ProjectID)
+	putIfSet(in.Snapshot, SnapshotPriorSBOMID, cycle.LastSBOMID)
+	in, err := s.create(ctx, in)
+	return in, ChannelWebhook, err
+}
+
+// EnqueueRebuildNotice records the mail that tells the evaluation audience about one rebuild
+// request: the connector refused it, the refusals stopped the cycle, or nobody can tell whether
+// a build was submitted. One mail per request and kind.
+func (s *DeliveryIntentService) EnqueueRebuildNotice(ctx context.Context, req RebuildRequest, kind string) (Intent, error) {
+	if strings.TrimSpace(req.ReleaseID) == "" || strings.TrimSpace(req.IntentID) == "" {
+		return Intent{}, ErrNoSubject
+	}
+	lineage := IntentLineage{SourceContext: "communication", EventType: "communication.rebuild_" + kind,
+		EventID: req.IntentID, EventTime: s.clock.Now()}
+	in := s.newIntent(IntentEmail, s.cfg.EvaluationAudience, lineage, "rebuild-notice:"+kind+":"+req.IntentID, map[string]string{
+		SnapshotRebuildNotice: kind, SnapshotRebuildIntentID: req.IntentID, SnapshotRebuildChannel: req.Channel,
+		SnapshotRebuildCycleID: strconv.FormatInt(req.CycleID, 10), SnapshotRebuildDecisionID: req.DecisionID,
+		SnapshotRebuildAttempt: strconv.Itoa(req.Attempt), SnapshotRebuildTry: strconv.Itoa(req.Try),
+		SnapshotRebuildNoticeText: req.Reason, SnapshotRebuildBuildRef: req.BuildRef,
+	})
+	in.ReleaseID = req.ReleaseID
+	in.Snapshot[snapshotKeyNotification] = notificationRebuild
+	in.Snapshot["release_id"] = req.ReleaseID
 	return s.create(ctx, in)
 }
 

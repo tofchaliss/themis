@@ -49,6 +49,27 @@ var Subscription = eventbus.Subscription{
 		eventFaultlineEnriched, eventFaultlineSuperseded, eventReleaseCorrelationCompleted, eventFixPublished},
 }
 
+// eventRebuildCycleClosed — Communication closed a rebuild cycle (EDR-REBUILD-01 D21, D44). It
+// ends the hold of an approved recommendation and may be recorded as a rebuild trigger; it
+// changes no Finding.
+const eventRebuildCycleClosed = "communication.rebuild_cycle_closed"
+
+// CommunicationSubscription is Governance's second bus binding: the Communication stream, for
+// the one fact above. It has its own cursor; the handler is the same inbox-wrapped Consumer.
+var CommunicationSubscription = eventbus.Subscription{
+	Consumer: "governance",
+	Stream:   "communication",
+	Interest: []string{eventRebuildCycleClosed},
+}
+
+// rebuildCycleClosedDTO mirrors the fields of communication.rebuild_cycle_closed.v1 this
+// consumer reads.
+type rebuildCycleClosedDTO struct {
+	ReleaseID  string   `json:"release_id"`
+	DecisionID string   `json:"decision_id"`
+	Joined     []string `json:"joined_decision_ids"`
+}
+
 // Consumer translates raw Knowledge events into coordinator calls.
 type Consumer struct {
 	coord  *app.Coordinator
@@ -98,6 +119,14 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		return c.coord.OnComponentRetired(ctx, app.InboundComponentRetired{
 			FaultlineID: dto.FaultlineID, ReleaseID: dto.ReleaseID,
 			PURL: dto.PURL, Reason: dto.Reason,
+		})
+	case eventRebuildCycleClosed:
+		var dto rebuildCycleClosedDTO
+		if err := json.Unmarshal(env.Payload, &dto); err != nil {
+			return err
+		}
+		return c.coord.OnRebuildCycleClosed(ctx, app.InboundRebuildCycleClosed{
+			EventID: env.ID, ReleaseID: dto.ReleaseID, DecisionID: dto.DecisionID, Joined: dto.Joined,
 		})
 	case eventFixPublished:
 		var dto fixPublishedDTO

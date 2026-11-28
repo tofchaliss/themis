@@ -113,6 +113,31 @@ func (c WebhookConfig) checkTargets() error {
 	return c.checkFormats()
 }
 
+// SignedAudiences names the audiences that have a signing secret.
+func (c WebhookConfig) SignedAudiences() map[string]bool {
+	out := map[string]bool{}
+	for name, secret := range c.Secrets {
+		if secret != "" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+// UnsignedRebuildRoutes lists the rebuild_requested routes (plain and by tag) whose audience has
+// no signing secret, sorted. Such a route sends nothing (EDR-REBUILD-01 D6).
+func (c WebhookConfig) UnsignedRebuildRoutes(routes map[string]string) []string {
+	var out []string
+	for route, audience := range routes {
+		kind, _, _ := strings.Cut(route, "#")
+		if kind == app.WebhookRebuildRequested && c.Secrets[audience] == "" {
+			out = append(out, route+"="+audience)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // String names the audiences and whether each has a secret — never a URL path or a secret,
 // since an incoming-webhook URL is itself a credential.
 func (c WebhookConfig) String() string {
@@ -190,6 +215,15 @@ func (d *RealWebhookDeliverer) DeliverIntent(ctx context.Context, in app.Intent)
 	}
 	_, stored := app.SplitPayload(in.PayloadBytes)
 	body, sendErr := d.cfg.shapeBody(in.Destination, stored)
+	if in.IsRebuildRequest() {
+		// A request to build goes out signed and as it was stored, or not at all
+		// (EDR-REBUILD-01 D6, D36). No health is spent on a request that was never sent.
+		if d.cfg.Secrets[in.Destination] == "" {
+			return Result{Excerpt: "webhook: unsigned rebuild request refused"},
+				fmt.Errorf("webhook: audience %q has no signing secret, and a rebuild request is never sent unsigned (set %s)", in.Destination, WebhookSecretEnv(in.Destination))
+		}
+		body, sendErr = stored, nil
+	}
 	var res Result
 	if sendErr != nil {
 		res = Result{Excerpt: excerpt(sendErr.Error())}

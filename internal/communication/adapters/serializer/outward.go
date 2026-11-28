@@ -116,6 +116,9 @@ func (r OutwardRenderer) RenderIntentPayload(ctx context.Context, in app.Intent)
 	case in.Type == app.IntentEmail && in.IsDeadLetterNotification():
 		subject, body := RenderOpsDeadLetterEmail(in)
 		return app.BuildPayload(subject, body), nil
+	case in.Type == app.IntentEmail && in.IsRebuildNotification():
+		subject, body := r.RenderRebuildNoticeEmail(ctx, in)
+		return app.BuildPayload(subject, body), nil
 	case in.Type == app.IntentEmail && in.IsReviewDueNotification():
 		subject, body := r.RenderReviewDueEmail(ctx, in)
 		return app.BuildPayload(subject, body), nil
@@ -134,6 +137,12 @@ func (r OutwardRenderer) RenderIntentPayload(ctx context.Context, in app.Intent)
 	case in.Type == app.IntentCIRebuild:
 		subject, body := r.renderCIRebuild(ctx, in)
 		return app.BuildPayload(subject, body), nil
+	case in.Type == app.IntentWebhook && in.IsRebuildRequest():
+		summary, body, err := r.RenderRebuildRequested(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		return app.BuildPayload(summary, body), nil
 	case in.Type == app.IntentWebhook:
 		summary, body, err := r.RenderWebhook(ctx, in)
 		if err != nil {

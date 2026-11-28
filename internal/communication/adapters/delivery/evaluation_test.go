@@ -163,6 +163,21 @@ func (c *cyclesMem) UpdateCycle(_ context.Context, cy app.RebuildCycle) error {
 	return nil
 }
 
+func (c *cyclesMem) LatestCycle(_ context.Context, releaseID string) (app.RebuildCycle, bool, error) {
+	if r, ok := c.rows[releaseID]; ok {
+		return *r, true, nil
+	}
+	return app.RebuildCycle{}, false, nil
+}
+func (c *cyclesMem) CycleByID(_ context.Context, id int64) (app.RebuildCycle, bool, error) {
+	for _, r := range c.rows {
+		if r.ID == id {
+			return *r, true, nil
+		}
+	}
+	return app.RebuildCycle{}, false, nil
+}
+
 // loopHarness is the worker harness with the loop on the consumer and a mutable posture.
 type loopHarness struct {
 	*harness

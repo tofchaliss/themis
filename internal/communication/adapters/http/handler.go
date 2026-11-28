@@ -23,10 +23,11 @@ import (
 type Handler struct {
 	write   *app.PublicationService
 	read    *app.ReadService
-	rollups *app.RollupService // release-scoped VEX rollups (D13); nil = not configured
+	rollups *app.RollupService         // release-scoped VEX rollups (D13); nil = not configured
 	intents *app.DeliveryIntentService // CI rebuild callbacks (N-M2h); nil = outward delivery off
 	health  app.WebhookHealthStore     // webhook destination health (D4); nil = 503
 	reports *app.RemediationReports    // remediation metrics report (D6); nil = 503
+	loop    *app.RebuildLoop           // rebuild cycles and requests (EDR-REBUILD-01 R3); nil = 503
 }
 
 // WithRemediationReports wires the remediation-metrics report (EDR-REMEDIATION-01 D6).

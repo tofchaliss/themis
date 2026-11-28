@@ -1084,7 +1084,7 @@ not say which new rules reach it. Decided:
 | R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form. Built 2026-11-28, with the copy onto the event and "no profile, no request" | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule; the status call, attempt reservation, refusal counter and try number (D20, D28, D40); settling `uncertain` (D24) | Communication, API |
 | R4 | mode `ask`: the "start rebuild" action in API and GUI; one standing recommendation and its states (D41, D44, D45, D46); the expiry sweep (D32) | Governance or Communication API, GUI |
-| R5 | reference build connector, with the durable event record of D12, the stored states and recovery worker of D37, the per-intent claim of D39, and the required checks of D18 | new repository |
+| R5 | reference build connector, with the durable event record of D12, the stored states and recovery worker of D37, the per-intent claim of D39, and the required checks of D18. Built 2026-11-28 as a Go module of its own under `connectors/jenkins-rebuild/` until the repository exists | new repository (for now a nested module here) |
 | R6 | VM check: one release tagged, one fix published, one build, one comparison | test VM |
 
 R1 changes the domain model and an API, R3 changes event contracts, R5 is a new repository. Each
@@ -1499,335 +1499,6 @@ The first build (#280) put the card into the old GUI only. That was a mistake of
 current GUI": the owner works in the React GUI, and found no card there on the VM check. The
 React card followed the same day.
 
-**Honest limits of this step.** Governance does not check that a Product id exists in
-  Registry, and it does not check a Release id when an `admin` writes. A policy written for an
-  id that does not exist applies to nothing; it shows on the list read and can be removed.
-- **Not in R1a.** The GUI page for the policies (backlog `GUI-REBUILD-POLICY-1`). Nothing
-  evaluates a Release and no build is asked for; that is still R2.
-- **VM check PASSED 2026-11-28** (task 2.4, main `f90b036`, auth on, admin key; one Product,
-  two Releases of two of its Projects). Governance applied migration 29. In order:
-  1. Before any change both Releases took the installation policy, ceiling `ask`.
-  2. A Product policy with mode `off` and floor `medium` got version 1. Both Releases then took
-     it: level `product`, ceiling `off`, set by `policy`.
-  3. A Release policy with mode `auto` and floor `low` on the first Release got version 1. That
-     Release took its own policy whole (floor `low`), and its ceiling was `ask`, set by
-     `installation`: the Release asked for `auto` and the installation's `ask` held (D17).
-  4. The second Release still took the Product policy.
-  5. The list showed three entries: installation, product, release.
-  6. Both removals answered `removed: true` as version 2 with the actor. The Product history
-     showed the removal first, then version 1.
-  7. After the removals the first Release was back on the installation policy.
-  Every answer carried `tags_applied: false`. Not tried on the VM: a `product:<id>` key (none is
-  at hand there); the handler tests cover who may change.
-
-### Step R2 part 1 as built (2026-11-28)
-
-The owner gave the go for R2 on 2026-11-28. R2 is built in two parts. **Part 1 is the judgement
-as a read**: Themis can say, for one Release, whether a rebuild would be asked for and for which
-components. It stores nothing, publishes nothing and starts nothing. **Part 2** is the two
-triggers (D3), the stored decision (D27, D29) and the two events (D9).
-
-- **Knowledge: one new read** (an API addition in a second context, told to the owner before
-  building). `GET /releases/{id}/fix-verdicts` returns every live occurrence of the Release
-  with its recorded verdict and a `fix` value: `known` (open, and below at least one vendor
-  bound for its own package and world), `none` (already cleared, or compared and no bound on
-  record) or `unknown` (Themis could not compare). It serves what the occurrence verdict
-  already recorded (`verdict_behind`, EDR-INCIDENT-01 D1). Nothing is judged or written. This
-  is D30 as built: Governance orders no version strings.
-- **Tags** (D4, D17 value 3). `ResolveRebuildTag` reads the own tags of the Release, its Project
-  and its Product, from Registry's tag reads `GET /<kind>/{id}/tags` (no Registry change). `rebuild:off` on any
-  level wins. Otherwise the nearest level with `rebuild:ask` or `rebuild:auto` decides. A level
-  carrying both reads `ask`, because a tag only restricts. No rebuild tag is `off`.
-- **Effective mode** (D17 whole). The lowest of the installation mode, the mode of the policy in
-  force and the tag, with which of the three set it. When the tag and the policies give the same
-  mode, the policy side is named. A Release with no tag reads "set by `tag`": the missing tag
-  is what keeps it out. `GET /releases/{id}/rebuild-policy/in-force` now carries `tag`,
-  `effective_mode`, `effective_mode_set_by` and `tags_applied: true`.
-- **The judgement.** `GET /releases/{id}/rebuild-evaluation` (read scope). It looks at every
-  open component occurrence of every Finding that is not resolved or archived, applies the
-  policy in force, and returns: the policy, the tag, the effective mode, the `outcome`
-  (`none`, `recommend` for mode ask, `request` for mode auto), each counted component with the
-  fields of D34, and `skipped`: how many occurrences did not count, by the first rule that left
-  each out (`decided`, `scope_component`, `no_fix`, `fix_unknown`, `below_floor`). A Release
-  whose mode is `off` still shows what would count; its outcome is `none`.
-- **Failure directions.** Registry unreadable (Product or tags): 503, no judgement. A tag list
-  that could not be read never reads as "no tag". Knowledge unreadable: the read still answers,
-  `fix_verdicts_read` is false, every fix is unknown, so nothing counts under `fix_required`.
-- **D34 identity confirmed.** `finding_components` has the primary key (finding id, purl), so
-  the pair is unique and no occurrence index is needed.
-
-**Where part 1 differs from the decisions, and why. Each is open for part 2.**
-
-1. **A known fix exists only for RPM and APK components.** Knowledge records the bounds an
-   occurrence is below only where its fixed-verdict compares: RPM (same EL major) and APK. A
-   language package (npm, Go, Maven, PyPI) reads `unknown` and so never counts while
-   `fix_required` is on. That is the safe direction of D30. Widening it is Knowledge work
-   (backlog `KN-FIX-STANDING-LANG-1`).
-2. **`fixed_versions` is a list, not one `fixed_version`.** An occurrence can be below several
-   bounds (two errata, or a module stream beside the plain build). Governance may not order
-   them (D30). Part 2 must decide how the event names one, or keep the list.
-3. **`fix_source` is `knowledge_verdict`, not a feed name.** The match row does not store which
-   feed stated the bound, and the advisory is computed, not stored. Part 2 decides whether
-   Knowledge stores it.
-4. **Severity is the score priority and the SLA read, not the component assessment.** The
-   calculated assessment is in shadow (EDR-SCORING-01 9.1: computed and shown, not used). So
-   `score_source` is `base_score`, or `owner_set` when a person set the severity, and
-   `assessment.state` is `not_assessed` (or `not_eligible` for a scope component). `assessed`
-   comes with the shadow exit (S7).
-5. **A stale decision still counts as decided.** A `not_affected` or `accepted_risk` Position
-   that was re-surfaced is still skipped by `skip_decided` until a person decides again. This
-   follows D3: a stale decision re-opens a question for a person, and a build does not answer it.
-6. **A row the re-verdict sweep has not reached yet** is served as last judged. It can miss a
-   bound that arrived since; the next sweep brings it up to date.
-
-7. **A module-stream bound counts as a known fix, also for an install outside that stream**
-   (found on the VM check below). Knowledge records every same-EL-major bound the install is
-   below, and that includes builds of another module stream. Example: `python3-ply 3.9-9.el8`
-   is "below" four `3.11-10.module+el8...` builds. A plain rebuild does not pick those up, so
-   the request would be made, the build would run, and the comparison would show the Finding
-   still open. On the checked Release 44 of 92 counted entries had only module-stream bounds.
-   Knowledge's open reason already says "likely not reachable" for this shape, but the
-   structured `verdict_behind` does not tell the two apart. Part 2 must not send an event
-   before this is settled (backlog `KN-BEHIND-MODULE-1`).
-
-**VM check, first run 2026-11-28** (task 3.5, main after #275, auth on, admin key; one Release).
-
-- Knowledge answered for 640 live occurrences: 563 `known`, 44 `none`, 33 `unknown`.
-- With no rebuild tag: `tags_applied` true, tag mode `off`, effective mode `off` set by `tag`,
-  ceiling `ask`. Outcome `none`. Correct.
-- The judgement looked at 596 open occurrences: 92 counted, 235 below the floor, 234 scope
-  components, 33 fix unknown, 2 decided, 0 no fix. The sum is 596.
-- One CVE gave 37 of the 92 counted entries (one flaw, many packages of one build).
-- **Defect found: a tagged Release read as untagged.** `rebuild:ask` was set on the Release and
-  the judgement still said tag mode `off`. Cause: the client read `tags` from Registry's
-  single-entity views (`GET /releases/{id}` and the like), which the API schema lists but the
-  handler never fills; only the list views and the tag reads carry tags. So the read broke the
-  rule it states, "a tag list that could not be read never reads as no tag". The safe
-  direction held (nothing could be asked for), but no Release could ever take part.
-  **Fix:** the client reads each level's own tags from `GET /<kind>/{id}/tags`, and an answer
-  without a `tags` field is an error. Registry follow-up: backlog `RG-VIEW-TAGS-1`.
-- The tag steps (ask on the Release, off on the Product) are to be run again after the fix.
-
-**VM check, second run 2026-11-28: PASSED** (task 3.5, main `27dffe3` with the tag fix; the same
-Release). In order:
-
-1. No rebuild tag: outcome `none`, mode `off`, set by `tag`.
-2. `rebuild:ask` on the Release: outcome `recommend`, mode `ask`, tag level `release`, 92
-   counted. Set by `installation`, because the tag and the installation policy both say `ask`
-   and the policy side is named on a tie.
-3. `rebuild:auto` on the Release: still `recommend`, mode `ask`, set by `installation`. The tag
-   asked for `auto` and the installation's `ask` held (D17).
-4. `rebuild:off` added on the Product, with `rebuild:auto` still on the Release: outcome `none`,
-   mode `off`, set by `tag`, tag level `product`. Off on any level wins (D4).
-5. Both tags removed: back to step 1.
-
-Nothing was sent at any step. Not tried on the VM: a tag on the Project level, mode `auto` on
-the installation (so `request` was not seen), and Knowledge switched off; the unit tests cover
-all three. Part 1 is closed. The count of 92 still holds the module-stream entries of open
-point 7.
-
-**Open point 7 decided and built (owner, 2026-11-28).** The owner chose: a fix that exists only
-in another module stream does **not** count for a rebuild, and is shown as its own group. The
-other two choices were "count them like today" and "make it a policy field"; a field can still
-be added later.
-
-- **Knowledge.** `GET /releases/{id}/fix-verdicts` has a fourth `fix` value, `other_stream`: the
-  occurrence is open and below vendor bounds, and none of them can be reached by a plain update.
-  The rule is the structured form of the two shapes the open reason already states in prose:
-  (a) the install and every bound are module builds and no bound shares the install's upstream
-  series; (b) the install is a base-repository build and every bound is a module build. One
-  reachable bound (a plain build, or a module build of the install's own series) keeps it
-  `known`. The value is derived on read from the stored version and bounds, so there is no
-  migration, no stored row changes and no `VerdictGeneration` bump.
-- **Governance.** Under `fix_required` an `other_stream` occurrence is never targeted. When it
-  is severe enough to count otherwise, it is listed in `other_stream` on
-  `GET /releases/{id}/rebuild-evaluation` with the builds of the other stream, and counted under
-  `skipped.fix_other_stream`. When it is below the floor it is counted under `below_floor`
-  only. With `fix_required` off the stream does not matter. An older Governance reads the new
-  value as `unknown`, which also does not count.
-- **Not changed.** The fix-available alert (EDR-INCIDENT-01 D1) still announces such a bound.
-  That is the rest of backlog `KN-BEHIND-MODULE-1`.
-
-**VM check of this change (2026-11-28, task 4.0a): PASS.** Same Release as VM run 1 and 2, no
-tag set, installation policy at its defaults.
-
-| What | Before (#275) | After (#277) |
-| --- | --- | --- |
-| Fix answers `known` | 563 | 184 |
-| Fix answers `other_stream` | not a value | 379 |
-| Fix answers `none` / `unknown` | 44 / 33 | 44 / 33 |
-| Considered | 596 | 596 |
-| Counted (`targeted`) | 92 | 48 |
-| Listed in `other_stream` | not a list | 44 |
-| `skipped.fix_other_stream` | not a key | 44 |
-| `skipped` below_floor / scope_component / fix_unknown / decided | 235 / 234 / 33 / 2 | same |
-| Outcome | `none` (no tag) | `none` (no tag) |
-
-- The 92 entries split into 48 and 44, as measured by hand in VM run 2.
-- The groups still add up: 48 + 44 + 235 + 234 + 33 + 2 = 596.
-- The first `other_stream` entry is a base-repository build of a Python library whose four
-  bounds are all module builds of a newer series: shape (b) of the rule.
-- **Observation, not a defect of the judgement.** Knowledge answers `other_stream` for 379 of
-  the 563 occurrences that had a bound (67%). In the judgement only 44 of them surface, because
-  the others are scope components or below the floor and are grouped there first. The share is
-  higher than among the counted entries (48%), which fits: a module-stream advisory lists its
-  whole rebuild set, and scope components come from exactly those advisories. It has not been
-  sampled by hand yet; that is task 4.0b and backlog `KN-OTHER-STREAM-SAMPLE-1`.
-
-**Hand sample of the `other_stream` answers (2026-11-28, task 4.0b).** The 379 answers belong to
-39 different packages, so about ten CVEs each. The first 20 packages by purl were read with
-their bounds:
-
-- 20 of 20 are right. Each install is a base-repository build (`...el8`, two of them
-  `...el8_10.1`) and every one of its two to five bounds is a module build
-  (`...module+el8.x...`). That is shape (b) of the rule: no bound can be reached by a plain
-  update.
-- All 20 are Perl library packages, and the bounds are the builds of a newer Perl module
-  stream. One module stream with many packages and many CVEs explains the high count.
-- Limit of the sample: it is sorted by purl, so it shows one family. The other 19 packages
-  have not been read.
-
-### Step R2 part 2 as built (2026-11-28)
-
-The owner confirmed the scope of part 2 on 2026-11-28 (a Governance migration, one new read,
-two new events). Part 2 makes the judgement of part 1 run by itself and records what it said.
-**It starts no build.** Nothing consumes the two new events yet; Communication ignores event
-types it does not know, and its own rebuild loop (EDR-DELIVERY-01 M2-8) is unchanged until R3.
-
-- **Triggers (D3).** A trigger is a row in `rebuild_triggers`, written **in the same
-  transaction** as the event that causes it: the `release_evaluated` note of a new SBOM, or the
-  `fix_available` note. A re-discovery writes none. The trigger id is that event's id and the
-  source is `governance` (D27), so a trigger exists exactly when its event does and a repeated
-  write adds nothing.
-- **The worker.** Every 30 seconds it takes the open triggers, oldest first, and judges each
-  Release with the judgement of part 1. It then closes the trigger in **one transaction** with
-  what follows. It runs off the inbox transaction. It is wired only when both the Registry and
-  the Knowledge read seams are; without them triggers are recorded and wait.
-- **Outcome none.** The trigger keeps the reason and nothing else is written: `mode_off` (the
-  effective mode is off: no rebuild tag, or a level says off) or `nothing_counts` (the mode
-  allows a rebuild and no component counts).
-- **Outcome recommend or request (D27, D29).** A row in `rebuild_decisions` with a new decision
-  id and the facts frozen as JSON: the Release, Product and Project, the trigger, the effective
-  mode and who set it, the tag and its level, the policy in force with its scope, version and
-  **values**, the counts, every targeted entry with the fields of D34, and the `other_stream`
-  list. In the same transaction one event goes to the outbox with the Release as subject:
-  `governance.rebuild_recommended.v1` for mode ask, `governance.rebuild_requested.v1` for mode
-  auto. The event carries the same decision; the record is the audit copy (D29). Both have a
-  frozen v1 schema and a contract test.
-- **A trigger that cannot be judged** (Registry or Knowledge cannot be read) stays open and is
-  tried again on the next pass; the failure is logged once per trigger, not on every pass. Part 1's read answers with every fix unknown in that case; the
-  worker must not, or "nothing counts" would be recorded for a Release that was never judged.
-  After 24 hours the trigger is closed with reason `gave_up`: a rebuild asked for a day late
-  answers a question nobody is asking any more, and the next trigger judges the Release afresh.
-- **The read.** `GET /releases/{id}/rebuild-decisions` (read scope, `limit` default 20, at
-  most 200): the triggers of the Release, newest first, each open or closed, with the outcome,
-  the reason, and the decision when there is one.
-- **Storage.** Governance migration 30, reversible.
-
-**Open points of part 1, as settled for part 2.**
-
-1. **The event keeps `fixed_versions` as a list** (point 2). Governance orders no version
-   strings (D30), so it cannot pick one.
-2. **`fix_source` stays `knowledge_verdict`** (point 3). Naming the feed needs Knowledge to
-   store it; that stays backlog work.
-3. Points 1, 4, 5 and 6 are unchanged and carried by the event as they are: language packages
-   read unknown, the severity is the base score, a stale decision still counts as decided, and
-   a row the sweep has not reached is served as last judged.
-
-**What part 2 does not do, on purpose.**
-
-1. **No "do not ask twice".** Every trigger gives its own decision. One open cycle per Release
-   (D13) and the cool-down (D14) belong to the cycle, which Communication keeps from R3. Until
-   then two triggers on one Release give two decisions and two events that nobody acts on.
-2. **No approval.** A recommendation is recorded and published; approving it (D22) is a later
-   step.
-3. **No build profile on the event** (D10, step R2a). Added by step R2a, see below.
-4. **Mode `off` does not stop anything that is open**, because nothing is open yet. The
-   question stays with the owner for R3.
-
-**VM check of part 2 (2026-11-28, task 4.5): PASS.** Main after #278, auth on, the same
-Release as before, installation policy version 4 (mode ask). The two triggers were test rows
-written by hand into `rebuild_triggers` (source `vm-check`, type `fix_available`), because no
-new SBOM and no new fix arrived during the check.
-
-| Step | Expected | Seen |
-| --- | --- | --- |
-| Governance restart | migration 30 applied | `schema_migrations` reads 30 |
-| Worker | enabled | "rebuild-trigger worker enabled" in the log |
-| Trigger 1, Release has no tag | `none`, reason `mode_off`, no decision | `none`, `mode_off`, mode `off`, 48 would count, no decision |
-| Tag `rebuild:ask` set, trigger 2 | `recommend` with a decision | `recommend`, mode `ask` set by `installation`, tag `rebuild:ask` at level `release`, policy version 4 |
-| Frozen facts | as the judgement read | considered 596, targeted 48, other_stream 44, skipped 235 / 234 / 44 / 33 / 2 |
-| Outbox | one rebuild event | one `governance.rebuild_recommended` with schema `governance.rebuild_recommended.v1` |
-| `rebuild_decisions` | one row | one row, outcome `recommend` |
-| Tag removed | tags empty | tags empty |
-| Governance error log | nothing | nothing |
-
-- Each trigger was closed within one 45 second wait.
-- The numbers of the decision are the numbers of the read of part 1 on the same data, so the
-  worker and the read give one answer.
-- Nothing was sent out: no ticket, no mail, no card, no build.
-- **Not exercised on the VM:** a trigger written by a real event (the two write sites are
-  covered by the integration tests only), mode `auto` and the `rebuild_requested` event, and
-  the `gave_up` path. The first real `fix_available` or new SBOM on the VM is the natural
-  check of the write sites (backlog `GOV-REBUILD-TRIGGER-LIVE-1`).
-- The two test triggers and the one test decision stay in the VM database as the record of
-  this check; they are marked by the source `vm-check`.
-
-### Step R2a as built (2026-11-28)
-
-Owner go 2026-11-28, scope chosen by the owner: all three parts (Registry, the copy onto the
-event, a form in the current GUI).
-
-**Registry (D10 items 1 to 5).**
-
-1. Table `registry_build_profiles` (Registry migration 6, reversible). Records are only added:
-   every save and every removal is a new row with its own revision number (counted per
-   Project or Release from 1), the actor, the name of the API key, and the time. The current
-   value of a level is its latest row.
-2. The profile is kept as TEXT in compact form, with the keys in the order they were written.
-   The SHA-256 is taken over exactly these bytes, and the read API serves exactly these bytes.
-3. Checks on write: one JSON object, at most 16 KiB, at most 5 levels deep, and no key named
-   like a secret (`password`, `token`, `secret`, `apikey`, `credential`; any case, `_` and `-`
-   ignored, at any depth). Values are never looked at: the check guards against a mistake and
-   proves nothing.
-4. Addresses, all under `/api/v1`:
-   - `GET`, `PUT`, `DELETE` `/projects/{id}/build-profile`
-   - `GET`, `PUT`, `DELETE` `/releases/{id}/build-profile`
-   - `GET /releases/{id}/build-profile/resolved`: the profile in force for the Release (its
-     own, else its Project's) with `found`, `scope`, revision and digest.
-   Writers are `admin` or the Product's own key, as for tags. `PUT` takes `{profile, actor}`;
-   `DELETE` takes `?actor=`.
-5. A Release profile replaces the Project's as a whole. A removed Release profile gives the
-   Release its Project's profile again.
-
-**Governance (D10 items 6 and 7, D16).**
-
-1. The trigger worker reads the resolved profile from Registry only when the judgement would
-   ask for something (outcome `recommend` or `request`). An outcome of `none` reads nothing.
-2. **No profile, no request.** Mode `auto` with no profile gives a recommendation. Every
-   recommendation now says why it is one, in the new field `recommend_reason`: `mode_ask` or
-   `no_build_profile`. With no profile the reason is `no_build_profile` in both modes, because
-   that is what must be fixed first.
-3. With a profile, the decision and its event carry `build` (the profile) and `build_profile`
-   (`scope`, `revision`, `sha256`). The value is frozen in the decision row: a later edit in
-   Registry changes the next decision and not this one.
-4. **The read fails closed.** A Registry that cannot be reached, an answer with no `found`
-   field, or a "found" answer with a part missing keeps the trigger open and it is tried again,
-   up to the 24 hour limit. Only an explicit `found: false` reads as "no profile". **An older
-   Registry without the new address therefore holds every counting trigger open: upgrade and
-   restart Registry before or together with Governance.**
-5. The two event schemas `governance.rebuild_recommended.v1` and
-   `governance.rebuild_requested.v1` gained fields and kept their version, because nothing
-   reads these events yet (Communication acts on them from R3). `rebuild_requested` now
-   requires `build` and `build_profile`; `rebuild_recommended` requires `recommend_reason`.
-
-**GUI.** The Estate page of the current GUI has a "Build profile" card under the tag editor.
-It follows the picked Project, or the Release whose "tags, build profile…" link was clicked. It
-shows the stored profile, which profile is in force for a Release, and the history; it saves
-and removes with the signed-in user as actor. The form checks only that the text is one JSON
-object; every other rule is Registry's, and its refusal is shown as it came. The no-secrets
-rule is stated on the form (D10 item 3).
-
 **Honest limits of this step.**
 
 1. **`build` on the event is the same JSON value, not the same bytes.** Governance keeps the
@@ -1841,7 +1512,7 @@ rule is stated on the form (D10 item 3).
    query. The GUI always sends the signed-in user, but a hand-made request through the
    dashboard could name someone else. The API key name is recorded beside it either way
    (backlog `GUI-ACTOR-GATE-1`).
-3. Checked on the VM, see below. The form in the React GUI was not yet looked at there.
+3. Checked on the VM, see below.
 
 **VM check of R2a (2026-11-28, task 5.6): PASS.** Main after #280, auth on, the same Release
 as in the earlier checks, installation policy mode ask. Registry was restarted first, then
@@ -1869,10 +1540,328 @@ Governance and the dashboard. The two triggers were test rows written by hand in
   with a profile (the `rebuild_requested` event with `build`), and an unreachable Registry
   keeping a trigger open. These are covered by the tests.
 - **The form was looked for and not found:** the owner uses the React GUI, and #280 had the
-  card in the old GUI only. The React card was built after this check and still needs its own
-  look on the VM (task 5.7, backlog `GUI-BUILD-PROFILE-CHECK-1`).
+  card in the old GUI only. The React card followed in #281.
+- **The React card on the VM (2026-11-28, after #281): PASS.** The owner opened Estate,
+  picked a Project, and the "Build profile" card was there under the tag editor, with the
+  no-secrets rule and "No profile is stored on this project". The owner then saved a profile
+  and removed it through the card, and reported both as working. Registry's refusal of a
+  secret-like key was seen through the API in this check, and through the card only in the
+  tests.
 - The test profile was removed again; its two history rows and the two test triggers stay as
   the record of this check.
+
+### Step R3 as built (2026-11-28)
+
+Owner go 2026-11-28 for R3 to R6 in one run ("complete the remaining everything"). Where a
+choice was still open the recommended pick was taken; each pick is named below as **Pick**.
+
+**The switch.** `THEMIS_COMMUNICATION_REBUILD_OPEN_FROM` on the Communication node says what
+opens a rebuild cycle.
+
+1. `evaluation` (the default, and what an unset or unknown value means): the posture of a new
+   SBOM opens the cycle, as before this step. A running estate changes nothing by upgrading.
+2. `decision`: Governance's `governance.rebuild_requested.v1` opens the cycle. A posture alone
+   opens nothing; it is still what judges a build that came back.
+
+The default moves to `decision` after the VM check of R6 (backlog `COMM-REBUILD-OPEN-FROM-1`).
+
+**What Communication stores (migration 12, reversible).**
+
+1. The cycle gains its origin (`evaluation` or `decision`), the decision text frozen at the
+   start, product and project, the count of refusals, the ids of decisions that joined it, and
+   who closed it with which note. Two new closing states: `refused` and `stopped`.
+2. `rebuild_requests`: one row per intent, unique per (cycle, attempt, try). The intent's
+   origin id is `rebuild:<cycle>:<attempt>:<try>`, so a request made again is a new intent
+   (D40). States: `requested`, `delivered`, `submitted`, `refused`, `uncertain`,
+   `not_submitted`, `build_reported`, `evaluated`. `not_submitted` is an addition to D25's
+   table: a person settled an uncertain request as "no build was started".
+3. `rebuild_holds`: one row per Release for a decision that was not acted on, with the reason
+   (`cool_down` or `unsigned_route`) and, for a cool-down, until when.
+4. `release_last_sbom`: the newest SBOM seen per Release. A decision carries no SBOM id, so
+   this is the baseline of a decision cycle. It is empty when no upload came since this
+   version was deployed; the cycle then has no baseline and the first new SBOM is judged
+   against nothing.
+
+**How a decision is acted on (mode `decision`).**
+
+1. A cycle is open for the Release: the decision joins it (its id is stored on the cycle) and
+   no second request goes out (D20).
+2. No cycle is open and the last delivered request of the Release is younger than the
+   cool-down of the decision: a hold is stored and nothing is sent. The cool-down gates only
+   the opening of a cycle, never a try inside one.
+3. Otherwise a cycle opens with the decision frozen on it, and the first request is written
+   with its intent in one transaction.
+4. `governance.rebuild_recommended.v1` is consumed and stored nowhere yet; R4 gives it a home.
+
+**Where the request goes.**
+
+1. A webhook route for `rebuild_requested` wins. With no such route the built-in Jenkins
+   sender is used (`ci_rebuild` intent), which under this record is one connector among others
+   (D43).
+2. A route for `rebuild_requested` must be signed (D42). An unsigned one is named in an ERROR
+   line at startup, the sender refuses it again at send time, nothing is sent, no cycle opens,
+   and a hold `unsigned_route` is stored.
+3. The request body is CloudEvents `themis.rebuild.requested.v1`. It is rendered once, stored
+   with the intent, and the same bytes are sent on every retry; a Teams format on the route is
+   ignored for this event (D36).
+4. **Pick (`GOV-BUILD-BYTES-1`).** The request carries the build profile as a JSON value and
+   the SHA-256 of the revision Registry stores. "Byte for byte" (D36) holds for the intent
+   payload, which is what the signature covers. A connector that wants the profile bytes reads
+   the revision from Registry. The backlog item is closed with this.
+5. Marking the intent delivered moves the request in the same SQL statement: `delivered` for
+   a webhook, `submitted` for the Jenkins sender, which has the queue answer in hand (D43).
+
+**What the connector says back.** The status call rides the existing
+`POST /callbacks/ci-rebuild`, with the same key, and a body that carries `status`:
+
+1. `submitted`: the build system took the job. This is the counting point (D38).
+2. `refused` with a reason: the attempt is given back (D28) and the next try is written. Three
+   refusals close the cycle as `refused`, and the evaluation audience gets a mail.
+3. `uncertain`: the connector cannot tell. Nothing is sent again by itself; a person settles
+   it. A mail goes to the evaluation audience.
+4. A sweep every 15 minutes marks a webhook request that was delivered and silent for 24 hours
+   as `uncertain`.
+5. A call without `status` is the build report as before, and it now accepts the intent of
+   any rebuild request.
+
+**What a person can do.** All four need the admin key or a key of the cycle's Product, and the
+writes name an actor.
+
+1. `GET /releases/{id}/rebuild-cycle`: the cycle, its requests and the hold.
+2. `POST /rebuild-requests/{intent_id}/settle`: say whether an uncertain request did start a
+   build (`submitted`) or did not (`not_submitted`, the attempt is given back).
+3. `POST /releases/{id}/rebuild-cycle/request-again`: a new try with a new intent id (D40).
+4. `POST /releases/{id}/rebuild-cycle/stop`: close the cycle as `stopped` with a note.
+
+**Pick (mode `off` and a running cycle).** Setting the mode to `off` does not stop an open
+cycle. A build may already run, and stopping the record would not stop the build. A person
+stops a cycle with the stop action. This closes the open question of R2.
+
+**Closing a cycle goes back to Governance (D21).**
+
+1. When a cycle closes and decisions had joined it, Communication writes
+   `communication.rebuild_cycle_closed.v1` in the same transaction as the close.
+2. D21 is narrowed here: with no joined decision no trigger is recorded. A cycle that closes
+   with a set that cannot be fixed would otherwise ask Governance again without end. (Step R4
+   changed where the rule sits: Communication now says so for every cycle opened from a
+   decision, and Governance decides whether the closure is a trigger.)
+3. Governance reads the Communication stream with a second cursor and stores the event as a
+   trigger of a third type, `cycle_closed` (Governance migration 31, reversible), source
+   `communication`, trigger id = the id of the event. The same event twice is one trigger.
+   The trigger worker judges it like the other two.
+
+**Known limits of this step.**
+
+1. A refusal updates the request and then the cycle in two statements, not one transaction
+   (`COMM-REBUILD-REFUSAL-TX-1`). A crash between the two leaves a refused request on a cycle
+   that has not counted it.
+2. A request whose intent dead-lettered stays `requested` until an operator runs
+   `deliveryctl retry` (`COMM-REBUILD-DEAD-LETTER-1`).
+3. Nothing of this was seen on the VM yet; that is R6.
+
+**Checked.** Unit tests: Communication `app` 100%, inbound 95%, serializer 98%, delivery 95%,
+HTTP 97%; Governance `app` and `domain` 100%, inbound 96%. Store tests on a real database:
+Communication 85%, Governance 83%, both migrations down and up. `make lint`, `make vet-tags`,
+`make clean-arch`, `make arch-test` and the GUI `npm run check` are green.
+
+### Step R4 as built (2026-11-28)
+
+Same owner go as R3. Where a choice was open the recommended pick was taken and is named as
+**Pick**.
+
+**What a recommendation is now.** A rebuild decision with outcome `recommend` has a state:
+`standing`, `approved`, `superseded`, `expired` or `withdrawn` (D44). Governance migration 32
+adds the state to `rebuild_decisions`, with the approval, and a unique index that allows one
+`standing` row per Release. Recommendations recorded before this step: the newest of each
+Release became `standing` (its 7 days count from its own time), the older ones `superseded`.
+
+**What the trigger worker does with it (D41, D44).**
+
+1. A standing recommendation past its 7 days is expired first, with its event. The rest of the
+   judgement then sees no standing recommendation, so the same ask makes a new one and a person
+   is told.
+2. The result is the same ask as the standing one (same targeted components, same policy
+   record and version, same build profile revision, same reason): the trigger ends in
+   `unchanged` and points to the standing decision. No decision, no event, no notice.
+3. The result is a different ask: the standing one becomes `superseded` and the new decision
+   carries `supersedes`. Both happen in the transaction that stores the new one.
+4. Nothing counts, or the mode is `off`: the standing one becomes `withdrawn`.
+5. The mode is `auto`: the standing one becomes `withdrawn` and the request goes out directly.
+6. A write that rested on a standing recommendation that moved first writes nothing. The
+   trigger stays open and is judged again on the next pass (D44 item 5).
+
+**After an approval (D44 item 7).** While an approved recommendation's cycle is not known to
+be closed, a trigger in mode `ask` makes no new recommendation. It ends in `none` with reason
+`cycle_open`, and the approved recommendation is flagged. Communication now says that a cycle
+closed for every cycle opened from a decision. Governance then ends the hold, and records the
+closure as a trigger when a decision had joined the cycle or a trigger had been kept back.
+
+**Pick (the hold has an end of its own).** The hold ends with the closure, or 24 hours after
+the approval, whichever comes first. A request can be held or refused on the way (cool-down,
+unsigned route, a node that still opens cycles from the posture), and then no cycle ever
+closes. A recommendation made after the 24 hours and approved joins a cycle that is still open
+(D20), so the bound can cost one more notice and never a second build.
+
+**The approval: `POST /rebuild-recommendations/{decision_id}/approve` (D15, D22, D45, D46).**
+
+1. The body names the person: `actor_id`. Without it the call is refused. The dashboard gate
+   compares `actor_id` with the signed-in user, so through the GUI the name is the session's.
+2. The key must be `admin` or `product:<id>` of the Product the recommendation froze. A read
+   key, a callback key and a key of another Product get 403.
+3. Order of the checks: not standing; then the 7 days (the expiry is recorded with its event
+   by this call if nobody did yet); then "no build profile" (stays standing, nothing to ask);
+   then the mode.
+4. The tags are read fresh from Registry in the call. If they cannot be read the answer is 503
+   and the recommendation stays standing.
+5. The write is one transaction. It takes a lock that every policy write also takes, reads the
+   versions of the installation, Product and Release policy again and compares them with what
+   the mode was computed from. If they differ nothing is written and the call starts over, at
+   most three times.
+6. Mode `ask`: the recommendation becomes `approved`, the approval is stored on it (actor, key
+   name and scopes, time, the three policy versions, the tag and when it was read), and
+   `governance.rebuild_requested.v1` is written to the outbox with the frozen facts, outcome
+   `request`, the same decision id and the approval.
+7. Any other mode: the recommendation becomes `withdrawn` and a trigger of type `mode_changed`
+   is recorded. The call starts nothing.
+8. Answers: 200 `approved`; 409 with `result` `not_standing` (and the id of the standing one),
+   `expired`, `withdrawn` (and the mode in force) or `no_build_profile`.
+
+**Pick (the lock).** D46 item 3 names `SELECT ... FOR SHARE` on the policy rows as the means.
+Built is one advisory lock: the approval holds it shared, every policy write takes it
+exclusive. It does what D46 asks (no policy change can commit between the check and the state
+change) and also covers a policy that does not exist yet, which has no row to lock (item 4).
+
+**The read: `GET /releases/{id}/rebuild-recommendation`.** The newest recommendation of the
+Release with its state, `expires_at`, `can_approve`, and the approval. A standing one past its
+time reads `expired` even before the sweep recorded it.
+
+**Expiry (D26, D32).** A sweep on the cadence of `THEMIS_REVIEW_BY_INTERVAL` moves standing
+recommendations older than 7 days to `expired` and writes
+`governance.rebuild_recommendation_expired.v1`. The move is one conditional statement, so the
+sweep, an approval and a trigger cannot record the same expiry twice.
+
+**Notices (D45).** Communication tells people on the `rebuild_recommended` route: once per
+recommendation, naming its decision id; a recommendation that replaces another says which one;
+an expired one says so. An `unchanged` trigger sends nothing.
+
+**GUI.** The Release page of the React GUI shows a card "Rebuild recommendation" when the
+Release has one: state, how many components and which CVEs, when it expires, who started it.
+"Start rebuild" asks for a yes and sends the approval as the signed-in user. Every refusal is
+shown with its reason.
+
+**Events and schemas.** `governance.rebuild_requested.v1` gained `approval`; both rebuild
+events gained `supersedes` and the trigger type `mode_changed`; new
+`governance.rebuild_recommendation_expired.v1`. `communication.rebuild_cycle_closed.v1` may
+now carry an empty list of joined decisions.
+
+**Known limits of this step.**
+
+1. The approval of a recommendation whose request Communication then holds (cool-down,
+   unsigned route) is recorded as approved, and no build starts. The hold is visible on
+   `GET /releases/{id}/rebuild-cycle` of Communication, not on the recommendation
+   (`GOV-REBUILD-APPROVED-HELD-1`).
+2. The GUI card does not show the rebuild cycle and its requests yet
+   (`GUI-REBUILD-CYCLE-1`).
+3. Nothing of this was seen on the VM yet; that is R6.
+
+**Checked.** Governance `domain` and `app` 100%, HTTP 98%, inbound 96%; Communication `app`
+100%. Store tests on a real database: Governance 83%, Communication 85%, migration 32 down and
+up. `make lint`, `make vet-tags`, `make clean-arch`, `make arch-test`; GUI `npm run check` and
+the bundle rebuilt.
+
+### Step R5 as built (2026-11-28)
+
+Same owner go as R3. Where a choice was open the recommended pick was taken and is named as
+**Pick**.
+
+**What it is.** A small program, `themis-rebuild-connector`, that receives the signed request
+`themis.rebuild.requested.v1`, checks it, starts one job in Jenkins through the Jenkins API,
+and tells Themis the result with the status call. It uses the Go standard library only and
+imports nothing from Themis. Its own guide is `connectors/jenkins-rebuild/README.md`.
+
+**Pick: where it lives.** D8 says "own repository". A repository could not be created in this
+step, so the connector lives in `connectors/jenkins-rebuild/` as a Go module of its own
+(module `github.com/themis-project/themis-rebuild-connector`). The Themis build does not
+compile it and it cannot import Themis code, so the boundary D8 wants holds. Moving it later
+is one `git subtree split` (the README says how). Backlog `CONN-REBUILD-OWN-REPO-1`.
+
+**How each decision is met.**
+
+1. **D12, durable record first.** `POST /events` stores the request under the event id before
+   it answers. The same id again returns the stored state and starts nothing.
+2. **D18, required checks.** Signature, event type, age (default 24 hours), allow-list of jobs
+   per Product and Project, parameter schema per job. The connector does not start with an
+   empty allow-list, with a job that has no schema, or with a missing secret. An unknown field
+   in the configuration is an error.
+3. **D31, value rules.** Seven built-in rules (`branch`, `image_tag`, `registry_path`, `enum`,
+   `bool`, `int`, `text`), each with a length limit. A list or an object is refused. Values go
+   to Jenkins as form parameters only. A test runs a list of command-syntax values against
+   every rule.
+4. **D33, narrow credential.** At start the connector asks Jenkins who it is and which jobs it
+   can see. It starts only when every allowed job is visible and no other job is. The stated
+   exception is `accept_broad_credential`, logged at every start and shown on `/status`.
+   **Pick:** Jenkins has no call for "jobs this user may build", so the check uses the jobs
+   the user can see. That is the wider right, so the check errs to the safe side.
+5. **D37, stored states.** `received`, `submitting`, `submitted`, `refused`, `uncertain`, and
+   a flag `reported`. A recovery pass at start and every 30 seconds picks up every record that
+   is not finished or not reported.
+6. **D39, one worker per intent.** The claim is one conditional write with a counter. A result
+   names the counter, so a worker that lost its claim cannot write. A record left in
+   `submitting` is never called again directly: the connector asks Jenkins first. The call
+   timeout must be shorter than the claim, and the configuration is refused otherwise.
+7. **D39 item 5, when "no build found" is believed.** The search reads the queue and the
+   newest 100 builds of the job, twice, a few seconds apart. "Not found" counts only when both
+   passes agree and the builds read reach back before the request arrived. Otherwise the
+   request becomes `uncertain`.
+8. **D28, the status call.** `POST` to `/callbacks/ci-rebuild` with a key of scope
+   `delivery:callback`. It is sent again until Themis confirms it.
+9. **D38.** The connector reports `submitted` when Jenkins accepts the build. It does not
+   report the start of execution; the new SBOM is what tells Themis the build ran.
+
+**Pick: the store.** One JSON file per request in a directory, with a file lock, replaced by
+rename. Several instances may share it on one host or on a file system with working locks. A
+database store is a second implementation of the `Store` interface
+(`CONN-REBUILD-STORE-DB-1`).
+
+**What the job receives beside the build profile.** `THEMIS_INTENT_ID`, `THEMIS_PRODUCT_ID`,
+`THEMIS_PROJECT_ID`, `THEMIS_RELEASE_ID`, `THEMIS_PRIOR_SBOM_ID`, `THEMIS_ATTEMPT`,
+`THEMIS_TARGETED_CVES`. A build profile may not set a name that starts with `THEMIS_`.
+
+**A build change, stated.** The Makefile has a new target `connector-check` (vet and tests of
+the nested module), and `make check` and `make check-ci` run it. Without it no gate would
+ever compile the connector. This is on the "must ask" list; it was done under the owner's go
+for the whole run and is named here so it can be taken out again.
+
+**Known limits of this step.**
+
+1. Tested against a fake Jenkins and a fake Themis only. No real Jenkins has seen it
+   (`CONN-REBUILD-REAL-JENKINS-1`).
+2. More than 100 builds of one job between the request and the search gives `uncertain`, not
+   a second call.
+3. The credential check sees visibility, not the build right.
+4. The connector's coverage is not in the coverage gate of this repository; its tests run in
+   `connector-check` (statement coverage 94% when measured by hand).
+
+**Checked.** `go vet`, `go test` and `go test -race` of the module; `make connector-check`.
+
+### Step R6: the VM check (handed to the owner 2026-11-28, result pending)
+
+The check runs on the test VM by the owner's hand. It covers, in this order:
+
+1. Migrations: Governance at 32, Communication at 12 (`scripts/vm-verify.sh`).
+2. Communication with `THEMIS_COMMUNICATION_REBUILD_OPEN_FROM=decision` and a signed
+   `rebuild_requested` route to a local connector.
+3. One Release tagged `rebuild:ask` with a build profile.
+4. A trigger for that Release, then the standing recommendation on
+   `GET /releases/{id}/rebuild-recommendation` and on the Release page of the GUI.
+5. Approval ("Start rebuild"), then the cycle and its request on
+   `GET /releases/{id}/rebuild-cycle`.
+6. The connector's record and the status call back to Themis.
+7. With a real Jenkins: one build, one new SBOM, one comparison.
+
+Steps 1 to 6 need no Jenkins job to succeed: with no reachable Jenkins the connector refuses
+to start (D33), which is itself one thing to see. Step 7 needs a Jenkins the owner picks.
+Results go here and into tasks 6.9, 7.8 and 9.1.
 
 ## Honest limits
 

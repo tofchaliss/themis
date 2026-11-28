@@ -64,6 +64,8 @@ func TestIntegrationContractV1_CommunicationEvents(t *testing.T) {
 		{app.EventPublicationCreated, domain.PublicationCreated{PublicationID: "pub-1", Type: domain.ArtifactVEX, Stance: domain.StanceAffected, ReleaseID: "rel-1", FaultlineID: "fl-1", CVE: "CVE-2024-1", OccurredAt: now}},
 		{app.EventPublicationDelivered, domain.PublicationDelivered{PublicationID: "pub-1", Channel: "vex-feed", OccurredAt: now}},
 		{app.EventPublicationSuperseded, domain.PublicationSuperseded{PublicationID: "pub-1", SupersededByID: "pub-2", OccurredAt: now}},
+		{app.EventRebuildCycleClosed, app.CycleClosedEvent(app.RebuildCycle{ID: 7, ReleaseID: "rel-1", ProductID: "prod-1", ProjectID: "proj-1",
+			State: app.CycleExhausted, DecisionID: "dec-1", Joined: []string{"dec-2"}, UpdatedAt: now})},
 	}
 	for _, tc := range cases {
 		t.Run(tc.eventType, func(t *testing.T) {

@@ -112,6 +112,8 @@ func (r OutwardRenderer) RenderWebhook(ctx context.Context, in app.Intent) (stri
 			doc.Summary += " (" + a + ")"
 		}
 		doc.Summary += ". " + FixAvailableLimit
+	case app.WebhookRebuildRecommended:
+		doc.Summary = rebuildRecommendedSummary(label, s)
 	case app.WebhookRemediationMetrics:
 		doc.Product = ""
 		doc.Summary = fmt.Sprintf("Remediation: %s open findings; %s of %s running SLA clocks within SLA, %s breached",
@@ -165,4 +167,22 @@ func dateOnly(s string) string {
 		return s[:10]
 	}
 	return s
+}
+
+// rebuildRecommendedSummary words the two notices of the rebuild_recommended route: a new
+// recommendation (one per recommendation, D45 item 3) and its expiry (D26). Every notice names
+// the decision id, so a late one cannot lead to a wrong approval (D45 item 5).
+func rebuildRecommendedSummary(label string, s map[string]string) string {
+	id := firstNonEmpty(s[app.SnapshotRebuildDecisionID], "unknown")
+	if s[app.SnapshotRebuildExpired] != "" {
+		return fmt.Sprintf("The rebuild recommendation for %s (decision %s, %s component(s)) expired after 7 days with no answer. Nothing was started. The next trigger evaluates the release again.",
+			label, id, firstNonEmpty(s[app.SnapshotRebuildTargetedCount], "0"))
+	}
+	out := fmt.Sprintf("Themis recommends a rebuild of %s: %s component(s) with a known fix, CVEs %s. %s. Nothing was started. Decision %s.",
+		label, firstNonEmpty(s[app.SnapshotRebuildTargetedCount], "0"),
+		firstNonEmpty(listed(s[app.SnapshotTargetedCVEs]), "see the dashboard"), recommendReasonText(s[app.SnapshotRebuildRecommendReason]), id)
+	if old := s[app.SnapshotRebuildSupersedes]; old != "" {
+		out += " It replaces recommendation " + old + ", which can no longer be approved."
+	}
+	return out
 }

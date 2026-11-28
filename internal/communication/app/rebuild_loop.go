@@ -78,6 +78,23 @@ type RebuildCycle struct {
 	State          string
 	OpenedAt       time.Time
 	UpdatedAt      time.Time
+
+	// The fields below are set on a cycle that a rebuild DECISION opened (EDR-REBUILD-01 R3).
+	// A cycle the posture opened leaves them empty and has Origin CycleOriginEvaluation.
+	Origin     string
+	DecisionID string
+	// Decision is the decision as it arrived. Every request of the cycle builds its payload
+	// from it, so the facts do not change inside a cycle (D21, D40).
+	Decision  []byte
+	ProductID string
+	ProjectID string
+	// Refusals counts the connector's "not submitted" answers (D20). It is not Attempts.
+	Refusals int
+	// Joined are the decisions that arrived while this cycle was open (D13).
+	Joined []string
+	// ClosedBy and ClosedNote are set when a person stopped the cycle.
+	ClosedBy   string
+	ClosedNote string
 }
 
 // RebuildCycles is the store port for cycle state.
@@ -86,8 +103,13 @@ type RebuildCycles interface {
 	OpenCycle(ctx context.Context, releaseID string) (RebuildCycle, bool, error)
 	// CreateCycle persists a new open cycle and returns it with its id.
 	CreateCycle(ctx context.Context, c RebuildCycle) (RebuildCycle, error)
-	// UpdateCycle persists the cycle's mutable state (last SBOM, attempts, state, updated at).
+	// UpdateCycle persists the cycle's mutable state (last SBOM, attempts, refusals, joined
+	// decisions, state, who closed it, updated at).
 	UpdateCycle(ctx context.Context, c RebuildCycle) error
+	// LatestCycle returns the Release's newest cycle in any state, found=false when it has none.
+	LatestCycle(ctx context.Context, releaseID string) (RebuildCycle, bool, error)
+	// CycleByID returns one cycle, found=false when no cycle has that id.
+	CycleByID(ctx context.Context, id int64) (RebuildCycle, bool, error)
 }
 
 // RebuildOutcome is what one evaluation meant for the loop.
@@ -106,6 +128,8 @@ type RebuildOutcome struct {
 	// the build job as THEMIS_PRIOR_SBOM_ID.
 	PriorSBO string
 	cycle    RebuildCycle
+	// nextTry is the try number of the request Raise makes for a decision cycle (D40).
+	nextTry int
 }
 
 // Snapshot renders the outcome as intent snapshot facts; a clean outcome records nothing.
@@ -138,6 +162,11 @@ type RebuildLoop struct {
 	intents     *DeliveryIntentService
 	clock       Clock
 	maxAttempts int
+	// requests and openFrom are set by WithDecisions (EDR-REBUILD-01 R3). Without them the loop
+	// is the one of M2-8: the posture opens a cycle and no decision is acted on.
+	requests RebuildRequests
+	openFrom string
+	closed   CycleClosedNotifier
 }
 
 // NewRebuildLoop wires the loop. maxAttempts below 1 takes M2-8's default of 2.
@@ -168,10 +197,22 @@ func (l *RebuildLoop) Evaluate(ctx context.Context, releaseID, sbomID, originEve
 		current = append(current, domain.PostureRow{CVE: r.CVE, BaseScore: r.BaseScore})
 	}
 	now := l.clock.Now()
+	if l.requests != nil && strings.TrimSpace(sbomID) != "" {
+		if err := l.requests.SaveLastSBOM(ctx, releaseID, sbomID, now); err != nil {
+			return RebuildOutcome{}, err
+		}
+	}
 
 	cycle, found, err := l.cycles.OpenCycle(ctx, releaseID)
 	if err != nil {
 		return RebuildOutcome{}, err
+	}
+	if found && cycle.Origin == CycleOriginDecision {
+		return l.evaluateDecisionCycle(ctx, cycle, current, sbomID, now)
+	}
+	if !found && l.OpensFromDecision() {
+		// The decision opens the cycle now (D9). The posture alone opens nothing.
+		return RebuildOutcome{State: OutcomeClean}, nil
 	}
 	if !found {
 		set := domain.NewTargetedSet(current)
@@ -208,7 +249,7 @@ func (l *RebuildLoop) Evaluate(ctx context.Context, releaseID, sbomID, originEve
 		return RebuildOutcome{}, err
 	}
 	out.cycle = cycle
-	return out, nil
+	return out, l.cycleClosed(ctx, cycle)
 }
 
 // Raise asks the build system for the rebuild an outcome calls for — exactly when NextAttempt
@@ -218,6 +259,9 @@ func (l *RebuildLoop) Evaluate(ctx context.Context, releaseID, sbomID, originEve
 func (l *RebuildLoop) Raise(ctx context.Context, lineage IntentLineage, originEventID string, out RebuildOutcome, productID, projectID string) (Intent, bool, error) {
 	if out.NextAttempt <= 0 {
 		return Intent{}, false, nil
+	}
+	if out.cycle.Origin == CycleOriginDecision {
+		return l.ask(ctx, lineage, out.cycle, out.NextAttempt, out.nextTry)
 	}
 	in, err := l.intents.EnqueueCIRebuild(ctx, lineage, originEventID, out.cycle.ReleaseID, productID, projectID,
 		out.PriorSBO, out.Open, out.NextAttempt, map[string]string{

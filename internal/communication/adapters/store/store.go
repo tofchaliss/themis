@@ -38,6 +38,7 @@ var schemaRefByEventType = map[string]string{
 	app.EventPublicationCreated:    "communication.publication_created.v1",
 	app.EventPublicationDelivered:  "communication.publication_delivered.v1",
 	app.EventPublicationSuperseded: "communication.publication_superseded.v1",
+	app.EventRebuildCycleClosed:    "communication.rebuild_cycle_closed.v1",
 }
 
 // schemaRefFor returns the pinned v1 schema_ref for a published event type. An unmapped

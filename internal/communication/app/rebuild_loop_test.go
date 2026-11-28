@@ -16,6 +16,8 @@ type cyclesMem struct {
 	openErr   error
 	createErr error
 	updateErr error
+	latestErr error
+	byIDErr   error
 }
 
 func newCyclesMem() *cyclesMem { return &cyclesMem{rows: map[string]*app.RebuildCycle{}} }
@@ -45,6 +47,27 @@ func (c *cyclesMem) UpdateCycle(_ context.Context, cy app.RebuildCycle) error {
 	}
 	c.rows[cy.ReleaseID] = &cy
 	return nil
+}
+
+func (c *cyclesMem) LatestCycle(_ context.Context, releaseID string) (app.RebuildCycle, bool, error) {
+	if c.latestErr != nil {
+		return app.RebuildCycle{}, false, c.latestErr
+	}
+	if r, ok := c.rows[releaseID]; ok {
+		return *r, true, nil
+	}
+	return app.RebuildCycle{}, false, nil
+}
+func (c *cyclesMem) CycleByID(_ context.Context, id int64) (app.RebuildCycle, bool, error) {
+	if c.byIDErr != nil {
+		return app.RebuildCycle{}, false, c.byIDErr
+	}
+	for _, r := range c.rows {
+		if r.ID == id {
+			return *r, true, nil
+		}
+	}
+	return app.RebuildCycle{}, false, nil
 }
 
 type postureMem struct {

@@ -34,6 +34,14 @@ func (d *decisionStore) RebuildTriggerRecords(_ context.Context, _ string, limit
 	return d.records, d.err
 }
 
+func (*decisionStore) RebuildRecommendationStatus(context.Context, string) (app.RebuildRecommendationStatus, error) {
+	return app.RebuildRecommendationStatus{}, nil
+}
+
+func (*decisionStore) ExpireRebuildRecommendation(context.Context, string, time.Time, app.OutboxNote) (bool, error) {
+	return false, nil
+}
+
 func decisionServer(t *testing.T, st *decisionStore) *httptest.Server {
 	t.Helper()
 	repo := newRepo()

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://themis-project.dev/schemas/governance/governance.rebuild_requested.v1.schema.json",
   "title": "governance.rebuild_requested.v1",
-  "description": "Integration-contract v1 for a rebuild request (EDR-REBUILD-01 D9, D27, D29): the effective mode of the Release is auto and at least one component counts, and a build profile applies to the Release (no profile, no request: D10 item 6). The facts are frozen as the decision read them (D29); the record in Governance is the audit copy. A FACT about a decision: no Finding, Position or proposal changes, and Governance starts no build.",
+  "description": "Integration-contract v1 for a rebuild request (EDR-REBUILD-01 D9, D27, D29): the effective mode of the Release is auto, or it is ask and a person approved the recommendation (then `approval` is set and the decision id is the recommendation's: D15, D27); at least one component counts, and a build profile applies to the Release (no profile, no request: D10 item 6). The facts are frozen as the decision read them (D29); the record in Governance is the audit copy. A FACT about a decision: no Finding, Position or proposal changes, and Governance starts no build.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -53,7 +53,9 @@
     "trigger_type": {
       "enum": [
         "new_sbom",
-        "fix_available"
+        "fix_available",
+        "cycle_closed",
+        "mode_changed"
       ]
     },
     "outcome": {
@@ -357,6 +359,78 @@
         "sha256": {
           "type": "string",
           "description": "Hex SHA-256 of the stored profile bytes, which are the bytes of `build`."
+        }
+      }
+    },
+    "supersedes": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Decision id of the recommendation this one replaces (EDR-REBUILD-01 D45 item 4). Absent when it replaces none."
+    },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Set when the request follows a recommendation a person approved (EDR-REBUILD-01 D15, D22, D46). The decision id is then the id of that recommendation.",
+      "required": [
+        "actor",
+        "key_name",
+        "key_scopes",
+        "approved_at",
+        "policy_versions",
+        "tag",
+        "tag_level",
+        "tags_read_at"
+      ],
+      "properties": {
+        "actor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "key_name": {
+          "type": "string"
+        },
+        "key_scopes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "approved_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "policy_versions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "installation",
+            "product",
+            "release"
+          ],
+          "properties": {
+            "installation": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "product": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "release": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "tag": {
+          "type": "string"
+        },
+        "tag_level": {
+          "type": "string"
+        },
+        "tags_read_at": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     }

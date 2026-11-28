@@ -238,6 +238,9 @@ type RebuildPolicyForRelease struct {
 	// force and the tag. EffectiveSetBy names the value that set it.
 	EffectiveMode  domain.RebuildMode
 	EffectiveSetBy string
+	// Versions are the versions of the three records that were read for this answer (0 where
+	// none is stored). An approval checks them again under a lock (D46 item 3).
+	Versions domain.RebuildPolicyVersions
 }
 
 // ReleaseTagLevels is the own tags of a Release, of its Project and of its Product, with the
@@ -290,6 +293,7 @@ func (s *RebuildPolicyService) InForce(ctx context.Context, releaseID string) (R
 		return RebuildPolicyForRelease{}, err
 	}
 	out := RebuildPolicyForRelease{ReleaseID: releaseID, ProductID: productID, InForce: inst, InstallationMode: inst.Policy.Mode}
+	out.Versions.Installation = inst.Version
 	var product, release *domain.RebuildPolicy
 	prodRec, found, err := s.store.RebuildPolicy(ctx, RebuildScopeProduct, productID)
 	if err != nil {
@@ -297,6 +301,7 @@ func (s *RebuildPolicyService) InForce(ctx context.Context, releaseID string) (R
 	}
 	if found {
 		product, out.InForce = &prodRec.Policy, prodRec
+		out.Versions.Product = prodRec.Version
 	}
 	relRec, found, err := s.store.RebuildPolicy(ctx, RebuildScopeRelease, releaseID)
 	if err != nil {
@@ -304,6 +309,7 @@ func (s *RebuildPolicyService) InForce(ctx context.Context, releaseID string) (R
 	}
 	if found {
 		release, out.InForce = &relRec.Policy, relRec
+		out.Versions.Release = relRec.Version
 	}
 	res := domain.ResolveRebuildPolicy(inst.Policy, product, release)
 	out.ModeCeiling, out.ModeSetBy = res.ModeCeiling, res.ModeSetBy

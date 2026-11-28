@@ -690,6 +690,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/releases/{releaseId}/rebuild-recommendation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The newest rebuild recommendation of this Release, in whatever state it is (EDR-REBUILD-01 step R4). 404 when the Release never had one. Reading starts nothing. Read scope. */
+        get: operations["getReleaseRebuildRecommendation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/rebuild-recommendations/{decisionId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start the rebuild a recommendation asks for (mode `ask`; EDR-REBUILD-01 D15, D22, D45, D46). Only the standing recommendation of a Release can be approved, only inside its 7 days, and only while the effective mode is exactly `ask`. The approval publishes `governance.rebuild_requested.v1` with the frozen facts and the approval; it evaluates nothing and builds nothing itself. Needs a named actor and a key that is `admin` or `product:<id>` of the Release's own Product. */
+        post: operations["approveRebuildRecommendation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/faultlines/{faultlineId}/findings": {
         parameters: {
             query?: never;
@@ -1459,7 +1493,7 @@ export interface components {
             trigger_id: string;
             trigger_source: string;
             /** @enum {string} */
-            trigger_type: "new_sbom" | "fix_available";
+            trigger_type: "new_sbom" | "fix_available" | "cycle_closed" | "mode_changed";
             release_id: string;
             /** Format: date-time */
             received_at: string;
@@ -1468,12 +1502,12 @@ export interface components {
             /** Format: date-time */
             settled_at?: string;
             /** @enum {string} */
-            outcome?: "none" | "recommend" | "request";
+            outcome?: "none" | "recommend" | "request" | "unchanged";
             /**
              * @description Set with outcome `none`. `mode_off` - the effective mode of the Release is off (no rebuild tag, or a level says off). `nothing_counts` - the mode allows a rebuild and no component counts. `gave_up` - the Release could not be judged for 24 hours and the trigger was closed unjudged.
              * @enum {string}
              */
-            reason?: "mode_off" | "nothing_counts" | "gave_up";
+            reason?: "mode_off" | "nothing_counts" | "gave_up" | "cycle_open";
             /** @enum {string} */
             effective_mode?: "off" | "ask" | "auto";
             /** @enum {string} */
@@ -1540,6 +1574,66 @@ export interface components {
             };
             targeted: components["schemas"]["RebuildTargetEntry"][];
             other_stream: components["schemas"]["RebuildTargetEntry"][];
+            /** @description Decision id of the recommendation this one replaced (D45 item 4). Absent when it replaced none. */
+            supersedes?: string;
+        };
+        /** @description What an approval recorded (EDR-REBUILD-01 D15, D22, D46): who, with which key, when, and the inputs of the effective mode it rested on. A key is a credential, not a person; the actor name is what the caller stated. */
+        RebuildApproval: {
+            actor: string;
+            key_name: string;
+            key_scopes: string[];
+            /** Format: date-time */
+            approved_at: string;
+            /** @description The versions of the three policy records that were checked; 0 where none is stored. */
+            policy_versions: {
+                installation: number;
+                product: number;
+                release: number;
+            };
+            tag: string;
+            tag_level: string;
+            /** Format: date-time */
+            tags_read_at: string;
+        };
+        /** @description A rebuild recommendation with its state (EDR-REBUILD-01 D41, D44). A recommendation is a rebuild decision with outcome `recommend`; its decision id is its identity (D27). A Release has at most one in state `standing`, and only that one can be approved. */
+        RebuildRecommendation: {
+            decision: components["schemas"]["RebuildDecision"];
+            /**
+             * @description `standing` - open, waiting for a person. `approved` - a person approved it and the request was published. `superseded` - a later trigger gave a different result. `expired` - 7 days passed with no answer; a standing one past `expires_at` reads `expired` here even before the sweep recorded it. `withdrawn` - a later trigger found nothing to ask for, or the mode is no longer `ask`.
+             * @enum {string}
+             */
+            state: "standing" | "approved" | "superseded" | "expired" | "withdrawn";
+            /** Format: date-time */
+            state_at: string;
+            /**
+             * Format: date-time
+             * @description The decision time plus 7 days (D15 item 4).
+             */
+            expires_at: string;
+            /** @description True for a standing recommendation inside its 7 days that has a build profile. The approval itself checks the mode again (D45). */
+            can_approve: boolean;
+            superseded_by?: string;
+            approval?: components["schemas"]["RebuildApproval"];
+            /** @description Set in state `approved`. True once Governance heard the rebuild cycle close. */
+            cycle_closed?: boolean;
+        };
+        RebuildApprovalRequest: {
+            /** @description The person who approves (D22). Required; the AI can never approve. */
+            actor_id: string;
+        };
+        RebuildApprovalAnswer: {
+            /**
+             * @description `approved` - the request was published. `not_standing` - this decision is not the standing recommendation; `standing_decision_id` names the one that is. `expired` - past its 7 days. `withdrawn` - the mode in force is no longer `ask`; the recommendation was withdrawn, the Release is judged again, and this call started no build. `no_build_profile` - no build profile applies, so nothing could be asked; the recommendation stays standing.
+             * @enum {string}
+             */
+            result: "approved" | "not_standing" | "expired" | "withdrawn" | "no_build_profile";
+            decision_id: string;
+            release_id: string;
+            /** @enum {string} */
+            state: "standing" | "approved" | "superseded" | "expired" | "withdrawn";
+            standing_decision_id?: string;
+            /** @enum {string} */
+            effective_mode?: "off" | "ask" | "auto";
         };
         /** @description One counted component of one Finding (D34). The pair finding_id + purl is unique. */
         RebuildTargetEntry: {
@@ -3116,6 +3210,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RebuildTriggerList"];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseRebuildRecommendation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildRecommendation"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    approveRebuildRecommendation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                decisionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildApprovalRequest"];
+            };
+        };
+        responses: {
+            /** @description Approved; the request was published. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildApprovalAnswer"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            /** @description Not approved, and nothing was started. `result` says why, and `standing_decision_id` names the recommendation that can be approved, when one can. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildApprovalAnswer"];
                 };
             };
             500: components["responses"]["Problem"];

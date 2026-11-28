@@ -24,6 +24,23 @@ type triggerStore struct {
 	settled   []settled
 	records   []app.RebuildTriggerRecord
 	limit     int
+	// step R4: the recommendations the worker reads, and the expiries it records.
+	status    app.RebuildRecommendationStatus
+	statusErr error
+	expired   []app.OutboxNote
+	expireErr error
+}
+
+func (s *triggerStore) RebuildRecommendationStatus(context.Context, string) (app.RebuildRecommendationStatus, error) {
+	return s.status, s.statusErr
+}
+
+func (s *triggerStore) ExpireRebuildRecommendation(_ context.Context, _ string, _ time.Time, note app.OutboxNote) (bool, error) {
+	if s.expireErr != nil {
+		return false, s.expireErr
+	}
+	s.expired = append(s.expired, note)
+	return true, nil
 }
 
 func (s *triggerStore) PendingRebuildTriggers(context.Context, int) ([]app.RebuildTrigger, error) {
@@ -317,5 +334,66 @@ func TestRebuildDecisionReaderClampsTheLimit(t *testing.T) {
 		if err != nil || len(got) != 1 || st.limit != want {
 			t.Errorf("limit %d -> %d (want %d) err %v", in, st.limit, want, err)
 		}
+	}
+}
+
+type cycleTriggers struct {
+	got       [][4]string
+	closed    [][]string
+	retrigger bool
+	err       error
+	markErr   error
+}
+
+func (c *cycleTriggers) RecordRebuildTrigger(_ context.Context, id, source, typ, release string) error {
+	c.got = append(c.got, [4]string{id, source, typ, release})
+	return c.err
+}
+
+func (c *cycleTriggers) MarkRebuildCyclesClosed(_ context.Context, ids []string) (bool, error) {
+	c.closed = append(c.closed, ids)
+	return c.retrigger, c.markErr
+}
+
+// EDR-REBUILD-01 D21, D44 item 7: a closed rebuild cycle ends the hold of the approved
+// recommendations it carried. It becomes a trigger, under the id of the event, only when
+// something waited for it: a decision that joined, or a trigger that was kept back.
+func TestOnRebuildCycleClosed(t *testing.T) {
+	ctx := context.Background()
+	rec := &cycleTriggers{}
+	coord := app.NewCoordinator(writeSvc(newRepo())).WithRebuildTriggers(rec)
+	in := app.InboundRebuildCycleClosed{EventID: "ev-1", ReleaseID: "rel-1", DecisionID: "dec-1", Joined: []string{"dec-2", " "}}
+	if err := coord.OnRebuildCycleClosed(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	want := [4]string{"ev-1", "communication", domain.RebuildTriggerCycleClosed, "rel-1"}
+	if len(rec.got) != 1 || rec.got[0] != want || len(rec.closed) != 1 || len(rec.closed[0]) != 2 || rec.closed[0][0] != "dec-1" || rec.closed[0][1] != "dec-2" {
+		t.Fatalf("recorded = %v closed = %v", rec.got, rec.closed)
+	}
+	// Nobody joined and nothing was kept back: the hold ends, and no trigger is recorded.
+	alone := app.InboundRebuildCycleClosed{EventID: "ev-2", ReleaseID: "rel-1", DecisionID: "dec-1"}
+	if err := coord.OnRebuildCycleClosed(ctx, alone); err != nil || len(rec.got) != 1 || len(rec.closed) != 2 {
+		t.Fatalf("alone: err %v recorded %v closed %v", err, rec.got, rec.closed)
+	}
+	// A trigger was kept back by the approved recommendation: the closure is a trigger.
+	rec.retrigger = true
+	if err := coord.OnRebuildCycleClosed(ctx, alone); err != nil || len(rec.got) != 2 {
+		t.Fatalf("kept back: err %v recorded %v", err, rec.got)
+	}
+	for _, in := range []app.InboundRebuildCycleClosed{{EventID: "ev-2"}, {ReleaseID: "rel-1"}, {EventID: " ", ReleaseID: "rel-1"}} {
+		if err := coord.OnRebuildCycleClosed(ctx, in); err != nil || len(rec.got) != 2 {
+			t.Errorf("%+v: err=%v recorded=%d, want nothing recorded", in, err, len(rec.got))
+		}
+	}
+	rec.err = errors.New("db down")
+	if err := coord.OnRebuildCycleClosed(ctx, in); err == nil {
+		t.Error("a store fault must surface so the event is retried")
+	}
+	rec.markErr = errors.New("db down")
+	if err := coord.OnRebuildCycleClosed(ctx, alone); err == nil {
+		t.Error("a fault while ending the hold must surface")
+	}
+	if err := app.NewCoordinator(writeSvc(newRepo())).OnRebuildCycleClosed(ctx, in); err != nil {
+		t.Errorf("no recorder: %v", err)
 	}
 }

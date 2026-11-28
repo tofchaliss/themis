@@ -180,7 +180,10 @@ paths:
         CI rebuild callback (EDR-DELIVERY-01 M2-7). The build job Themis asked for reports the
         intent it served, the NEW SBOM it uploaded and the image it built. Accepted only from a key
         holding the `delivery:callback` scope and no other; recorded as governed-external evidence
-        on the intent. It changes no Finding, no Position and no posture.
+        on the intent. It changes no Finding, no Position and no posture. The same route takes the
+        connector's small STATUS call (EDR-REBUILD-01 D28): a body that carries `status`
+        (`submitted`, `refused` or `uncertain`) reports what became of one request and needs
+        neither `sbom_id` nor `image_digest`.
       requestBody:
         required: true
         content:
@@ -201,6 +204,144 @@ paths:
         '404':
           $ref: '#/components/responses/Problem'
         '409':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /releases/{id}/rebuild-cycle:
+    get:
+      operationId: getReleaseRebuildCycle
+      summary: >
+        The newest rebuild cycle of a Release with its requests, and the decision that is held
+        back, if any (EDR-REBUILD-01 step R3). Read-only. A Release with no cycle and no hold
+        answers with both absent.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildCycleView'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /releases/{id}/rebuild-cycle/request-again:
+    post:
+      operationId: requestRebuildAgain
+      summary: >
+        Make the waiting request of the Release's open cycle again, on a person's word
+        (EDR-REBUILD-01 D20 item 3, D40): the same attempt with the next try number, after a
+        refusal or a `not_submitted`. Admin key, or the key of the Release's Product; the body
+        names the person.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RebuildActorRequest'
+      responses:
+        '201':
+          description: The new request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildRequest'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /releases/{id}/rebuild-cycle/stop:
+    post:
+      operationId: stopRebuildCycle
+      summary: >
+        Stop the Release's open rebuild cycle, on a person's word. No further request is made in
+        it; what was already sent is not taken back. Admin key, or the key of the Release's
+        Product; the body names the person.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RebuildActorRequest'
+      responses:
+        '200':
+          description: The stopped cycle.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildCycle'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /rebuild-requests/{intent_id}/settle:
+    post:
+      operationId: settleRebuildRequest
+      summary: >
+        Settle an uncertain rebuild request (EDR-REBUILD-01 D24): a person answers `submitted`
+        (the attempt stays used) or `not_submitted` (the attempt is given back and the request
+        may be made again). The answer, the person and the time are recorded. Admin key, or the
+        key of the Release's Product.
+      parameters:
+        - name: intent_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RebuildSettleRequest'
+      responses:
+        '200':
+          description: The settled request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildRequest'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '500':
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
@@ -316,34 +457,159 @@ components:
           type: string
     CIRebuildCallback:
       type: object
-      required: [intent_id, sbom_id, image_digest]
+      required: [intent_id]
+      description: >-
+        Two reports share this body. Without `status` it is the BUILD report and `sbom_id` and
+        `image_digest` are required. With `status` it is the connector's status call for one
+        request (EDR-REBUILD-01 D28) and only `intent_id` and `status` are required.
       properties:
         intent_id:
           type: string
-          description: The ci_rebuild intent this build served (THEMIS_INTENT_ID as the job received it).
+          description: The rebuild intent this report is about (the event id, or THEMIS_INTENT_ID as the job received it).
         sbom_id:
           type: string
-          description: The Evidence id of the NEW SBOM the job uploaded. Required (RC-3).
+          description: The Evidence id of the NEW SBOM the job uploaded. Required for a build report (RC-3).
         image_digest:
           type: string
-          description: The built image's digest. Required (RC-3).
+          description: The built image's digest. Required for a build report (RC-3).
         build_id:
           type: string
           description: The job's own build identifier, as given.
         git_ref:
           type: string
           description: The revision built, as given.
+        status:
+          type: string
+          enum: [submitted, refused, uncertain]
+          description: >-
+            What became of the request: the build system accepted the build (`submitted`), the
+            connector did not submit it (`refused`, not an attempt), or the connector cannot tell
+            (`uncertain`, a person settles it).
+        reason:
+          type: string
+          description: Why, for `refused` and `uncertain`.
+        build_ref:
+          type: string
+          description: The identity the build system gave the build at `submitted` (a queue item or a run id).
+        execution_started:
+          type: boolean
+          description: Optional. The build system says the build is running. Shown, counted nowhere.
     CIRebuildCallbackAck:
       type: object
-      required: [intent_id, sbom_id, received_at]
+      required: [intent_id, received_at]
       properties:
         intent_id:
           type: string
         sbom_id:
           type: string
+        state:
+          type: string
+          description: The state of the rebuild request after this report, when the intent has one.
         received_at:
           type: string
           format: date-time
+    RebuildActorRequest:
+      type: object
+      required: [actor]
+      properties:
+        actor:
+          type: string
+          description: The person who asks. Recorded.
+        note:
+          type: string
+    RebuildSettleRequest:
+      type: object
+      required: [answer, actor]
+      properties:
+        answer:
+          type: string
+          enum: [submitted, not_submitted]
+        actor:
+          type: string
+          description: The person who settles. Recorded.
+        note:
+          type: string
+    RebuildRequest:
+      type: object
+      description: One request of a rebuild cycle - one intent, one attempt number, one try number. Evidence about a request; it changes no Finding.
+      required: [intent_id, cycle_id, release_id, decision_id, attempt, try, channel, state, requested_at]
+      properties:
+        intent_id: { type: string }
+        cycle_id: { type: integer, format: int64 }
+        release_id: { type: string }
+        decision_id: { type: string }
+        attempt: { type: integer }
+        try: { type: integer }
+        channel:
+          type: string
+          description: webhook (the signed rebuild_requested event) or jenkins (the built-in sender).
+        state:
+          type: string
+          enum: [requested, delivered, submitted, refused, uncertain, not_submitted, build_reported, evaluated]
+        reason: { type: string }
+        build_ref: { type: string }
+        requested_at: { type: string, format: date-time }
+        delivered_at: { type: string, format: date-time }
+        status_at: { type: string, format: date-time }
+        execution_started_at: { type: string, format: date-time }
+        reported_by: { type: string }
+        settled_answer: { type: string }
+        settled_by: { type: string }
+        settled_at: { type: string, format: date-time }
+        settle_note: { type: string }
+    RebuildCycle:
+      type: object
+      required: [id, release_id, origin, state, attempts, refusals, targeted, opened_at, updated_at]
+      properties:
+        id: { type: integer, format: int64 }
+        release_id: { type: string }
+        origin:
+          type: string
+          enum: [evaluation, decision]
+          description: What opened the cycle - the posture of a new SBOM, or a rebuild decision of Governance.
+        decision_id: { type: string }
+        state:
+          type: string
+          enum: [open, succeeded, exhausted, refused, stopped]
+        attempts: { type: integer }
+        max_attempts: { type: integer }
+        refusals: { type: integer }
+        targeted:
+          type: array
+          items: { type: string }
+        joined_decision_ids:
+          type: array
+          items: { type: string }
+        baseline_sbom_id: { type: string }
+        last_sbom_id: { type: string }
+        closed_by: { type: string }
+        closed_note: { type: string }
+        opened_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RebuildHold:
+      type: object
+      description: A rebuild decision that opened no cycle, and why (EDR-REBUILD-01 D14 item 5).
+      required: [decision_id, reason, recorded_at]
+      properties:
+        decision_id: { type: string }
+        reason:
+          type: string
+          enum: [cool_down, unsigned_route]
+        held_until: { type: string, format: date-time }
+        recorded_at: { type: string, format: date-time }
+    RebuildCycleView:
+      type: object
+      required: [release_id, requests]
+      properties:
+        release_id: { type: string }
+        cycle:
+          $ref: '#/components/schemas/RebuildCycle'
+        requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/RebuildRequest'
+        hold:
+          $ref: '#/components/schemas/RebuildHold'
     CreatePublicationRequest:
       type: object
       required: [artifact_type, format]

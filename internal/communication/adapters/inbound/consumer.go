@@ -54,6 +54,14 @@ const (
 	// eventFixAvailable — a vendor fix is newly on record for CVEs one release has open
 	// (EDR-INCIDENT-01 D1): a webhook when routed, and a mail to the evaluation audience.
 	eventFixAvailable = "governance.fix_available"
+	// The two rebuild decisions of Governance (EDR-REBUILD-01 D9, step R3). `rebuild_requested`
+	// opens a cycle and asks the build side, when this node opens cycles from decisions;
+	// `rebuild_recommended` only tells people, when its webhook route is set.
+	eventRebuildRequested   = "governance.rebuild_requested"
+	eventRebuildRecommended = "governance.rebuild_recommended"
+	// eventRebuildRecommendationExpired — a recommendation waited 7 days unanswered (D26, step
+	// R4). People are told on the `rebuild_recommended` route; nothing starts.
+	eventRebuildRecommendationExpired = "governance.rebuild_recommendation_expired"
 )
 
 // Subscription declares Communication's bus binding (EB-07 / D7): it consumes the Governance
@@ -69,6 +77,7 @@ var Subscription = eventbus.Subscription{
 		eventReleaseEvaluated, eventProposalAccepted,
 		eventReviewDueSoon, eventDispositionStale, eventSLABreached,
 		eventFixAvailable,
+		eventRebuildRequested, eventRebuildRecommended, eventRebuildRecommendationExpired,
 	},
 }
 
@@ -139,6 +148,12 @@ func (c *Consumer) Handle(ctx context.Context, env event.Envelope) error {
 		return c.recordSLABreach(ctx, env)
 	case eventFixAvailable:
 		return c.recordFixAvailable(ctx, env)
+	case eventRebuildRequested:
+		return c.recordRebuildRequested(ctx, env)
+	case eventRebuildRecommended:
+		return c.recordRebuildRecommended(ctx, env)
+	case eventRebuildRecommendationExpired:
+		return c.recordRebuildRecommendationExpired(ctx, env)
 	default:
 		return nil // not a Communication-consumed event — ignore
 	}
@@ -380,6 +395,112 @@ func (c *Consumer) recordDecisionMailIntent(ctx context.Context, env event.Envel
 	if errors.Is(err, app.ErrNoSubject) {
 		return nil // no decision subject to notify about
 	}
+	return err
+}
+
+// rebuildDecisionDTO mirrors the fields of governance.rebuild_requested.v1 and
+// governance.rebuild_recommended.v1 this consumer reads (snake_case on the producer side). The
+// whole payload is kept beside them: the request to the build side is built from it.
+type rebuildDecisionDTO struct {
+	DecisionID      string `json:"decision_id"`
+	ReleaseID       string `json:"release_id"`
+	ProductID       string `json:"product_id"`
+	ProjectID       string `json:"project_id"`
+	TriggerType     string `json:"trigger_type"`
+	RecommendReason string `json:"recommend_reason"`
+	Supersedes      string `json:"supersedes"`
+	Policy          struct {
+		CoolDownSeconds int64 `json:"cool_down_seconds"`
+	} `json:"policy"`
+	Targeted []struct {
+		CVE string `json:"cve"`
+	} `json:"targeted"`
+}
+
+// cves returns the distinct CVEs of the targeted components, sorted.
+func (d rebuildDecisionDTO) cves() []string {
+	seen := map[string]bool{}
+	for _, t := range d.Targeted {
+		if cve := strings.TrimSpace(t.CVE); cve != "" {
+			seen[cve] = true
+		}
+	}
+	return sortedKeys(seen)
+}
+
+// recordRebuildRequested hands a rebuild decision to the loop: it joins the Release's open
+// cycle, is held back by the cool-down, or opens a cycle and makes the first request (D13, D14).
+// A node with no loop, or one that still opens cycles from the posture, records nothing.
+func (c *Consumer) recordRebuildRequested(ctx context.Context, env event.Envelope) error {
+	if c.loop == nil {
+		return nil
+	}
+	var dto rebuildDecisionDTO
+	if err := json.Unmarshal(env.Payload, &dto); err != nil {
+		return err
+	}
+	_, err := c.loop.Request(ctx, lineageOf(env), app.RebuildDecisionFacts{
+		DecisionID: dto.DecisionID, ReleaseID: dto.ReleaseID, ProductID: dto.ProductID, ProjectID: dto.ProjectID,
+		TriggerType: dto.TriggerType, CoolDown: time.Duration(dto.Policy.CoolDownSeconds) * time.Second,
+		CVEs: dto.cves(), Raw: append([]byte(nil), env.Payload...),
+	})
+	return err
+}
+
+// recordRebuildRecommended posts the recommendation when its webhook route is set. It starts
+// nothing: a person decides (D5).
+func (c *Consumer) recordRebuildRecommended(ctx context.Context, env event.Envelope) error {
+	if c.intents == nil {
+		return nil
+	}
+	var dto rebuildDecisionDTO
+	if err := json.Unmarshal(env.Payload, &dto); err != nil {
+		return err
+	}
+	if strings.TrimSpace(dto.ReleaseID) == "" {
+		return nil
+	}
+	cves := dto.cves()
+	if len(cves) > fixAvailableListLimit {
+		cves = cves[:fixAvailableListLimit]
+	}
+	_, _, err := c.intents.EnqueueWebhook(ctx, lineageOf(env), env.ID, app.WebhookRebuildRecommended, dto.ReleaseID, dto.ProductID, dto.ProjectID, "",
+		map[string]string{
+			app.SnapshotRebuildDecisionID: dto.DecisionID, app.SnapshotRebuildRecommendReason: dto.RecommendReason,
+			app.SnapshotRebuildTargetedCount: strconv.Itoa(len(dto.Targeted)), app.SnapshotTargetedCVEs: strings.Join(cves, ","),
+			app.SnapshotRebuildSupersedes: dto.Supersedes,
+		})
+	return err
+}
+
+// rebuildExpiredDTO mirrors the fields of governance.rebuild_recommendation_expired.v1 this
+// consumer reads.
+type rebuildExpiredDTO struct {
+	DecisionID    string `json:"decision_id"`
+	ReleaseID     string `json:"release_id"`
+	ProductID     string `json:"product_id"`
+	ProjectID     string `json:"project_id"`
+	TargetedCount int    `json:"targeted_count"`
+}
+
+// recordRebuildRecommendationExpired tells people, on the same route as the recommendation,
+// that it ran out unanswered (D26). It starts nothing.
+func (c *Consumer) recordRebuildRecommendationExpired(ctx context.Context, env event.Envelope) error {
+	if c.intents == nil {
+		return nil
+	}
+	var dto rebuildExpiredDTO
+	if err := json.Unmarshal(env.Payload, &dto); err != nil {
+		return err
+	}
+	if strings.TrimSpace(dto.ReleaseID) == "" {
+		return nil
+	}
+	_, _, err := c.intents.EnqueueWebhook(ctx, lineageOf(env), env.ID, app.WebhookRebuildRecommended, dto.ReleaseID, dto.ProductID, dto.ProjectID, "",
+		map[string]string{
+			app.SnapshotRebuildDecisionID: dto.DecisionID, app.SnapshotRebuildExpired: "1",
+			app.SnapshotRebuildTargetedCount: strconv.Itoa(dto.TargetedCount),
+		})
 	return err
 }
 

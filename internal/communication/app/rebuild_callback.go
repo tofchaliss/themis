@@ -67,7 +67,7 @@ func (s *DeliveryIntentService) RecordRebuildCallback(ctx context.Context, cb Re
 	if err != nil {
 		return RebuildCallback{}, err
 	}
-	if in.Type != IntentCIRebuild {
+	if !in.IsRebuildRequest() {
 		return RebuildCallback{}, ErrNotRebuildIntent
 	}
 	if cb.ReceivedAt.IsZero() {

@@ -63,12 +63,17 @@ func (h *Handler) RecordCIRebuildCallback(w http.ResponseWriter, r *http.Request
 	if !decode(w, r, &body) {
 		return
 	}
-	cb := app.RebuildCallback{
-		IntentID: body.IntentId, SBOMID: body.SbomId, ImageDigest: body.ImageDigest,
-		BuildID: deref(body.BuildId), GitRef: deref(body.GitRef),
-	}
+	reportedBy := ""
 	if p, ok := auth.PrincipalFrom(r.Context()); ok {
-		cb.ReportedBy = "key:" + strings.TrimSpace(p.KeyID)
+		reportedBy = "key:" + strings.TrimSpace(p.KeyID)
+	}
+	if body.Status != nil {
+		h.recordRebuildStatus(w, r, body, reportedBy)
+		return
+	}
+	cb := app.RebuildCallback{
+		IntentID: body.IntentId, SBOMID: deref(body.SbomId), ImageDigest: deref(body.ImageDigest),
+		BuildID: deref(body.BuildId), GitRef: deref(body.GitRef), ReportedBy: reportedBy,
 	}
 	stored, err := h.intents.RecordRebuildCallback(r.Context(), cb)
 	switch {
@@ -89,5 +94,16 @@ func (h *Handler) RecordCIRebuildCallback(w http.ResponseWriter, r *http.Request
 		writeProblem(w, http.StatusInternalServerError, "cannot record callback", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusAccepted, gen.CIRebuildCallbackAck{IntentId: stored.IntentID, SbomId: stored.SBOMID, ReceivedAt: stored.ReceivedAt})
+	ack := gen.CIRebuildCallbackAck{IntentId: stored.IntentID, SbomId: &stored.SBOMID, ReceivedAt: stored.ReceivedAt}
+	// The request of a decision cycle moves to build_reported (EDR-REBUILD-01 D25). The build
+	// report itself is already stored, so a failure here is told and not hidden.
+	if h.loop != nil {
+		if err := h.loop.BuildReported(r.Context(), stored.IntentID); err != nil {
+			writeProblem(w, http.StatusInternalServerError, "callback recorded, request state not updated", err.Error())
+			return
+		}
+		state := app.RequestBuildReported
+		ack.State = &state
+	}
+	writeJSON(w, http.StatusAccepted, ack)
 }

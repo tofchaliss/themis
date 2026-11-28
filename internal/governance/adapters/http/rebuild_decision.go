@@ -100,6 +100,9 @@ func toRebuildDecision(d domain.RebuildDecision) gen.RebuildDecision {
 			Sha256   string                               `json:"sha256"`
 		}{Revision: d.BuildProfile.Revision, Scope: gen.RebuildDecisionBuildProfileScope(d.BuildProfile.Scope), Sha256: d.BuildProfile.SHA256}
 	}
+	if d.Supersedes != "" {
+		out.Supersedes = strptr(d.Supersedes)
+	}
 	p := d.Policy
 	out.Policy.ScopeKind = gen.RebuildDecisionPolicyScopeKind(p.ScopeKind)
 	out.Policy.ScopeId = p.ScopeID

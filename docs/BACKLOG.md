@@ -467,12 +467,57 @@ three angles, and two of them proposed fixes that would not have worked.
   every entity as untagged (it cost the first VM run of the rebuild judgement). Fill the field
   in the three handlers, or take it out of the schema for those reads.
 
-- [ ] **The build profile on the rebuild event is the same value, not the same bytes** (id
-  `GOV-BUILD-BYTES-1`, from EDR-REBUILD-01 step R2a, 2026-11-28, design). Registry keeps the
-  profile as text and takes the SHA-256 over it. Governance keeps the decision and the outbox
-  payload in JSON columns, which reorder keys, so a receiver cannot recompute the digest from
-  the event's `build`. Settle in R3 with D36: either the intent reads the stored bytes from
-  Registry by revision, or the event carries the profile as text.
+- [x] **The build profile on the rebuild event is the same value, not the same bytes** (id
+  `GOV-BUILD-BYTES-1`, from EDR-REBUILD-01 step R2a, 2026-11-28, design). Closed in step R3,
+  2026-11-28: the request carries the profile as a JSON value plus the SHA-256 of the stored
+  revision, and "byte for byte" (D36) holds for the intent payload that the signature covers.
+  A connector that wants the profile bytes reads the revision from Registry.
+
+- [ ] **Make `decision` the default for opening a rebuild cycle** (id
+  `COMM-REBUILD-OPEN-FROM-1`, from EDR-REBUILD-01 step R3, 2026-11-28, follow-up).
+  `THEMIS_COMMUNICATION_REBUILD_OPEN_FROM` defaults to `evaluation` so the beta estate does
+  not change by upgrading. Flip the default after the VM check of R6 passes.
+
+- [ ] **A refusal is two statements, not one transaction** (id `COMM-REBUILD-REFUSAL-TX-1`,
+  from EDR-REBUILD-01 step R3, 2026-11-28, hardening). The status call marks the request
+  refused and then counts the refusal on the cycle. A crash between the two leaves a refused
+  request the cycle has not counted. Put both in one store call.
+
+- [ ] **A dead-lettered rebuild request stays `requested`** (id `COMM-REBUILD-DEAD-LETTER-1`,
+  from EDR-REBUILD-01 step R3, 2026-11-28, hardening). The request row moves only when the
+  intent is delivered. If the intent dead-letters, the row and its cycle wait until an
+  operator runs `deliveryctl retry`. Mark the request `uncertain` when its intent dead-letters.
+
+- [ ] **An approved recommendation whose request is held shows no hold** (id
+  `GOV-REBUILD-APPROVED-HELD-1`, from EDR-REBUILD-01 step R4, 2026-11-28, follow-up). After an
+  approval Communication may hold the request (cool-down, unsigned route). Governance shows
+  the recommendation as approved; the hold is only on Communication's
+  `GET /releases/{id}/rebuild-cycle`. Show the hold beside the approval.
+
+- [ ] **Move the build connector to its own repository** (id `CONN-REBUILD-OWN-REPO-1`, from
+  EDR-REBUILD-01 step R5, 2026-11-28, owner action). D8 wants a repository of its own. The
+  connector lives in `connectors/jenkins-rebuild/` as a nested Go module until the owner
+  creates one. Then: `git subtree split`, push, remove the directory and the Makefile target
+  `connector-check` here.
+
+- [ ] **Run the build connector against a real Jenkins** (id `CONN-REBUILD-REAL-JENKINS-1`,
+  from EDR-REBUILD-01 step R5, 2026-11-28, verification). Only a fake Jenkins has seen it.
+  To see: the `Location` of a queued build, the queue and build lists with the
+  `THEMIS_INTENT_ID` parameter, `whoAmI`, and the job tree of a user with a narrow right.
+
+- [ ] **A database store for the build connector** (id `CONN-REBUILD-STORE-DB-1`, from
+  EDR-REBUILD-01 step R5, 2026-11-28, follow-up). The file store needs one host or a file
+  system with working locks. Several hosts need the `Store` interface on a database.
+
+- [ ] **The build connector is outside the coverage gate** (id `CONN-REBUILD-COVERAGE-1`, from
+  EDR-REBUILD-01 step R5, 2026-11-28, hardening). `make connector-check` runs its tests;
+  `scripts/check-coverage.sh` does not measure the nested module. Settle together with the
+  move to its own repository.
+
+- [ ] **Show the rebuild cycle and its requests in the GUI** (id `GUI-REBUILD-CYCLE-1`, from
+  EDR-REBUILD-01 step R4, 2026-11-28, follow-up). The Release page shows the recommendation
+  and "Start rebuild". The cycle, its requests, the hold, and the actions settle, request
+  again and stop exist only as API.
 
 - [ ] **The dashboard gate does not check `actor`** (id `GUI-ACTOR-GATE-1`, from EDR-REBUILD-01
   step R2a, 2026-11-28, hardening). The gate compares `actor_id` and `proposer_id` in a write
@@ -481,13 +526,12 @@ three angles, and two of them proposed fixes that would not have worked.
   write-capable user could record another name. Add `actor` (body and query) to the gate's
   check; this changes the security model, so it needs the owner's go.
 
-- [ ] **Look at the build profile form on a deployment** (id `GUI-BUILD-PROFILE-CHECK-1`, from the
-  VM check of EDR-REBUILD-01 step R2a, 2026-11-28, check). The API was checked on the VM. The
-  card on the Estate page of the React GUI was driven only in a headless browser against a
-  mocked Registry. Open Estate, pick a product and a project, and confirm the "Build profile"
-  card shows the history, saves a profile, shows Registry's refusal for a secret-like key, and
-  removes it. Also not exercised outside the tests: a Release's own profile, and mode `auto`
-  with a profile.
+- [ ] **Build profile paths not yet exercised on a deployment** (id `GUI-BUILD-PROFILE-CHECK-1`,
+  from the VM check of EDR-REBUILD-01 step R2a, 2026-11-28, check). Seen on the VM: the API,
+  and the card in the React GUI with save and remove. Still covered by the tests only: a
+  Release's own profile replacing its Project's, mode `auto` with a profile (the
+  `rebuild_requested` event with `build`), and Registry's refusal of a secret-like key shown
+  in the card. Check them with the first real use, at the latest in step R6.
 
 - [ ] **GUI page for the rebuild policies** (id `GUI-REBUILD-POLICY-1`, from EDR-REBUILD-01 step
   R1a, 2026-11-28, feature). One page that lists every policy in force (`GET /rebuild-policies`),

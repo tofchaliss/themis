@@ -108,6 +108,9 @@ type Coordinator struct {
 	evaluations PendingEvaluations
 	// fixes records the fix-published notices (EDR-INCIDENT-01 D1); nil ignores the fact.
 	fixes FixNoticeStore
+	// rebuildTriggers records a closed rebuild cycle as a trigger (EDR-REBUILD-01 D21); nil
+	// ignores the fact.
+	rebuildTriggers RebuildTriggerRecorder
 }
 
 // NewCoordinator wires the coordinator over the Finding service.
