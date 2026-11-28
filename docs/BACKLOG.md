@@ -402,9 +402,15 @@ three angles, and two of them proposed fixes that would not have worked.
   **R2 part 1 built 2026-11-28** (owner go for R2 the same day): tag scope and effective mode,
   the judgement of one Release as a read (`GET /releases/{id}/rebuild-evaluation`), and one new
   Knowledge read (`GET /releases/{id}/fix-verdicts`); no migration, nothing is sent; VM check
-  PASSED 2026-11-28 on the second run (the first found a tag-read defect, fixed the same day). Next: R2 part 2 (the two triggers, the stored decision, the two events), which first
-  settles the open points of EDR "Step R2 part 1 as built"; the module-stream point
-  (`KN-BEHIND-MODULE-1`) was decided and built for the judgement 2026-11-28.
+  PASSED 2026-11-28 on the second run (the first found a tag-read defect, fixed the same day).
+  The module-stream point (`KN-BEHIND-MODULE-1`) was decided and built for the judgement
+  2026-11-28. **R2 part 2 built 2026-11-28** (owner confirmed the scope the same day): rebuild
+  triggers written with the `release_evaluated` (new SBOM) and `fix_available` notes, a worker
+  that judges them, the decision record with frozen facts, the events
+  `governance.rebuild_recommended.v1` and `governance.rebuild_requested.v1`, and the read
+  `GET /releases/{id}/rebuild-decisions`; Governance migration 30; nothing consumes the events
+  and no build starts; VM check pending (EDR "Step R2 part 2 as built"). Next: R2a (build
+  profile) or R3 (Communication keeps the cycle from the events), each on the owner's go.
 
 - [ ] **A known fix for language packages** (id `KN-FIX-STANDING-LANG-1`, from EDR-REBUILD-01
   step R2 part 1, 2026-11-28, feature). Knowledge records the vendor bounds an open occurrence is
@@ -431,6 +437,19 @@ three angles, and two of them proposed fixes that would not have worked.
   rebuild judgement lists such components apart. **Still open:** the fix-available alert
   announces a bound of another stream like any other; give it the same rule, or say so on the
   card.
+  **VM check PASS 2026-11-28:** 92 counted entries became 48 counted and 44 listed apart.
+
+- [ ] **Sample the `other_stream` fix answers by hand** (id `KN-OTHER-STREAM-SAMPLE-1`, from the
+  VM check of `KN-BEHIND-MODULE-1`, 2026-11-28, check). On the checked Release Knowledge answers
+  `other_stream` for 379 of 563 occurrences with a bound (67%), against 48% among the entries the
+  judgement counted. The higher share fits the data (module-stream advisories list their whole
+  rebuild set), but nobody has read the rows. Read 20 across different packages from
+  `GET /releases/{id}/fix-verdicts` and confirm for each that no bound is a plain build or a
+  module build of the install's own series. One wrong row means a real fix is hidden from the
+  rebuild judgement, so do this before R2 part 2 sends an event.
+  **2026-11-28:** the 379 rows are 39 packages; the first 20 by purl were read and all are
+  right (base-repository install, every bound a module build of a newer Perl stream). Open:
+  the other 19 packages.
 
 - [ ] **Registry's single-entity views list `tags` and never fill them** (id `RG-VIEW-TAGS-1`,
   from the same VM check, 2026-11-28, defect). `ProductView`, `ProjectView` and `ReleaseView`

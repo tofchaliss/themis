@@ -323,6 +323,15 @@ func main() {
 	default:
 		logger.Warn("scope sweep DISABLED (THEMIS_SCOPE_SWEEP_INTERVAL=0) — scoped decisions reach Findings born later only, and decision copies stay pending")
 	}
+	// The rebuild-trigger worker (EDR-REBUILD-01 step R2 part 2): it judges each recorded trigger
+	// and records a decision with its event. It asks no build system for anything.
+	if gov.RebuildTriggers != nil {
+		go gov.RebuildTriggers.RunEvery(ctx, app.DefaultRebuildTriggerInterval)
+		logger.Info("rebuild-trigger worker enabled",
+			observability.String("poll", app.DefaultRebuildTriggerInterval.String()))
+	} else {
+		logger.Warn("rebuild-trigger worker DISABLED (needs THEMIS_REGISTRY_URL and THEMIS_KNOWLEDGE_URL) — rebuild triggers are recorded and wait unjudged")
+	}
 	if gov.Evaluations != nil {
 		go gov.Evaluations.Run(ctx)
 		logger.Info("release-evaluation worker enabled",

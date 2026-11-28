@@ -63,16 +63,27 @@ Every step waits for the owner's go and lands as its own PR.
 - [x] 4.0 `KN-BEHIND-MODULE-1` settled for the judgement (owner decision 2026-11-28: do not
   count, show as own group): Knowledge answers `fix: other_stream`, Governance never targets it
   under `fix_required` and lists it in `other_stream`. No migration.
-- [ ] 4.0a VM check of 4.0: on the checked Release the 92 counted entries split into counted
-  and `other_stream` (expected about 48 and 44).
-- [ ] 4.1 Settle the six open points of "Step R2 part 1 as built" that touch the event
-  contract (one fixed version or a list, `fix_source`).
-- [ ] 4.2 Trigger queue written with the outbox notes of `release_evaluated` (cause `new_sbom`)
-  and `fix_available`; a worker that evaluates off the inbox transaction.
-- [ ] 4.3 Decision record with the frozen facts (D27, D29); migration.
-- [ ] 4.4 Events `governance.rebuild_requested.v1` and `governance.rebuild_recommended.v1`;
-  confirm Communication ignores event types it does not know.
-- [ ] 4.5 VM check.
+- [x] 4.0a VM check of 4.0: on the checked Release the 92 counted entries split into counted
+  and `other_stream` (expected about 48 and 44). PASS 2026-11-28: 48 and 44, groups add up to
+  596 (EDR "VM check of this change").
+- [ ] 4.0b Sample the `other_stream` fix answers by hand: Knowledge gives 379 of 563 on the
+  checked Release. Read 20 across packages and confirm each has no reachable bound (backlog
+  `KN-OTHER-STREAM-SAMPLE-1`).
+  2026-11-28: 20 of 39 packages read, all right (shape b, one Perl module stream). The other
+  19 packages are still to read.
+- [x] 4.1 Settle the open points of "Step R2 part 1 as built" that touch the event contract:
+  the event keeps the list `fixed_versions`; `fix_source` stays `knowledge_verdict` (EDR "Step
+  R2 part 2 as built").
+- [x] 4.2 Trigger queue `rebuild_triggers`, written in the same transaction as the
+  `release_evaluated` note (cause `new_sbom`) and the `fix_available` note; a worker that
+  judges off the inbox transaction, every 30 seconds.
+- [x] 4.3 Decision record `rebuild_decisions` with the frozen facts (D27, D29); migration 30,
+  reversible. Read `GET /releases/{id}/rebuild-decisions`.
+- [x] 4.4 Events `governance.rebuild_requested.v1` and `governance.rebuild_recommended.v1`
+  with frozen schemas and contract tests; Communication's consumer ignores event types it does
+  not know (its `default` case), confirmed in the code.
+- [ ] 4.5 VM check: migration 30 applies, a forced trigger is judged, a tagged Release gives a
+  decision and one event, an untagged one gives `none` with the reason, nothing is sent out.
 
 ## Later groups
 

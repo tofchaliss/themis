@@ -1314,7 +1314,104 @@ be added later.
 - **Not changed.** The fix-available alert (EDR-INCIDENT-01 D1) still announces such a bound.
   That is the rest of backlog `KN-BEHIND-MODULE-1`.
 
-VM check of this change: pending (task 4.0).
+**VM check of this change (2026-11-28, task 4.0a): PASS.** Same Release as VM run 1 and 2, no
+tag set, installation policy at its defaults.
+
+| What | Before (#275) | After (#277) |
+| --- | --- | --- |
+| Fix answers `known` | 563 | 184 |
+| Fix answers `other_stream` | not a value | 379 |
+| Fix answers `none` / `unknown` | 44 / 33 | 44 / 33 |
+| Considered | 596 | 596 |
+| Counted (`targeted`) | 92 | 48 |
+| Listed in `other_stream` | not a list | 44 |
+| `skipped.fix_other_stream` | not a key | 44 |
+| `skipped` below_floor / scope_component / fix_unknown / decided | 235 / 234 / 33 / 2 | same |
+| Outcome | `none` (no tag) | `none` (no tag) |
+
+- The 92 entries split into 48 and 44, as measured by hand in VM run 2.
+- The groups still add up: 48 + 44 + 235 + 234 + 33 + 2 = 596.
+- The first `other_stream` entry is a base-repository build of a Python library whose four
+  bounds are all module builds of a newer series: shape (b) of the rule.
+- **Observation, not a defect of the judgement.** Knowledge answers `other_stream` for 379 of
+  the 563 occurrences that had a bound (67%). In the judgement only 44 of them surface, because
+  the others are scope components or below the floor and are grouped there first. The share is
+  higher than among the counted entries (48%), which fits: a module-stream advisory lists its
+  whole rebuild set, and scope components come from exactly those advisories. It has not been
+  sampled by hand yet; that is task 4.0b and backlog `KN-OTHER-STREAM-SAMPLE-1`.
+
+**Hand sample of the `other_stream` answers (2026-11-28, task 4.0b).** The 379 answers belong to
+39 different packages, so about ten CVEs each. The first 20 packages by purl were read with
+their bounds:
+
+- 20 of 20 are right. Each install is a base-repository build (`...el8`, two of them
+  `...el8_10.1`) and every one of its two to five bounds is a module build
+  (`...module+el8.x...`). That is shape (b) of the rule: no bound can be reached by a plain
+  update.
+- All 20 are Perl library packages, and the bounds are the builds of a newer Perl module
+  stream. One module stream with many packages and many CVEs explains the high count.
+- Limit of the sample: it is sorted by purl, so it shows one family. The other 19 packages
+  have not been read.
+
+### Step R2 part 2 as built (2026-11-28)
+
+The owner confirmed the scope of part 2 on 2026-11-28 (a Governance migration, one new read,
+two new events). Part 2 makes the judgement of part 1 run by itself and records what it said.
+**It starts no build.** Nothing consumes the two new events yet; Communication ignores event
+types it does not know, and its own rebuild loop (EDR-DELIVERY-01 M2-8) is unchanged until R3.
+
+- **Triggers (D3).** A trigger is a row in `rebuild_triggers`, written **in the same
+  transaction** as the event that causes it: the `release_evaluated` note of a new SBOM, or the
+  `fix_available` note. A re-discovery writes none. The trigger id is that event's id and the
+  source is `governance` (D27), so a trigger exists exactly when its event does and a repeated
+  write adds nothing.
+- **The worker.** Every 30 seconds it takes the open triggers, oldest first, and judges each
+  Release with the judgement of part 1. It then closes the trigger in **one transaction** with
+  what follows. It runs off the inbox transaction. It is wired only when both the Registry and
+  the Knowledge read seams are; without them triggers are recorded and wait.
+- **Outcome none.** The trigger keeps the reason and nothing else is written: `mode_off` (the
+  effective mode is off: no rebuild tag, or a level says off) or `nothing_counts` (the mode
+  allows a rebuild and no component counts).
+- **Outcome recommend or request (D27, D29).** A row in `rebuild_decisions` with a new decision
+  id and the facts frozen as JSON: the Release, Product and Project, the trigger, the effective
+  mode and who set it, the tag and its level, the policy in force with its scope, version and
+  **values**, the counts, every targeted entry with the fields of D34, and the `other_stream`
+  list. In the same transaction one event goes to the outbox with the Release as subject:
+  `governance.rebuild_recommended.v1` for mode ask, `governance.rebuild_requested.v1` for mode
+  auto. The event carries the same decision; the record is the audit copy (D29). Both have a
+  frozen v1 schema and a contract test.
+- **A trigger that cannot be judged** (Registry or Knowledge cannot be read) stays open and is
+  tried again on the next pass; the failure is logged once per trigger, not on every pass. Part 1's read answers with every fix unknown in that case; the
+  worker must not, or "nothing counts" would be recorded for a Release that was never judged.
+  After 24 hours the trigger is closed with reason `gave_up`: a rebuild asked for a day late
+  answers a question nobody is asking any more, and the next trigger judges the Release afresh.
+- **The read.** `GET /releases/{id}/rebuild-decisions` (read scope, `limit` default 20, at
+  most 200): the triggers of the Release, newest first, each open or closed, with the outcome,
+  the reason, and the decision when there is one.
+- **Storage.** Governance migration 30, reversible.
+
+**Open points of part 1, as settled for part 2.**
+
+1. **The event keeps `fixed_versions` as a list** (point 2). Governance orders no version
+   strings (D30), so it cannot pick one.
+2. **`fix_source` stays `knowledge_verdict`** (point 3). Naming the feed needs Knowledge to
+   store it; that stays backlog work.
+3. Points 1, 4, 5 and 6 are unchanged and carried by the event as they are: language packages
+   read unknown, the severity is the base score, a stale decision still counts as decided, and
+   a row the sweep has not reached is served as last judged.
+
+**What part 2 does not do, on purpose.**
+
+1. **No "do not ask twice".** Every trigger gives its own decision. One open cycle per Release
+   (D13) and the cool-down (D14) belong to the cycle, which Communication keeps from R3. Until
+   then two triggers on one Release give two decisions and two events that nobody acts on.
+2. **No approval.** A recommendation is recorded and published; approving it (D22) is a later
+   step.
+3. **No build profile on the event** (D10, step R2a).
+4. **Mode `off` does not stop anything that is open**, because nothing is open yet. The
+   question stays with the owner for R3.
+
+VM check of part 2: pending (task 4.5).
 
 ## Honest limits
 

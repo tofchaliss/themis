@@ -673,6 +673,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/releases/{releaseId}/rebuild-decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The rebuild triggers of this Release and how each ended (EDR-REBUILD-01 step R2, part 2), newest first. A trigger is a new SBOM that was judged, or a fix that became available (D3). Each one is judged once. It ends in `none` with the reason, or in `recommend` or `request` with the recorded decision and its frozen facts (D27, D29). A trigger not judged yet reads `settled` false. Reading starts nothing. Read scope. */
+        get: operations["getReleaseRebuildDecisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/faultlines/{faultlineId}/findings": {
         parameters: {
             query?: never;
@@ -1431,6 +1448,81 @@ export interface components {
             fix_verdicts_read: boolean;
             targeted: components["schemas"]["RebuildTargetEntry"][];
             /** @description The components that would count, were their fix not published only for another module stream. They are NOT targeted and never part of a request - switching a module stream is a person's change, not a rebuild. Listed so that a person can act. `fixed_versions` are the builds of the other stream. */
+            other_stream: components["schemas"]["RebuildTargetEntry"][];
+        };
+        RebuildTriggerList: {
+            items: components["schemas"]["RebuildTriggerRecord"][];
+        };
+        /** @description One rebuild trigger of a Release and how it ended. */
+        RebuildTriggerRecord: {
+            /** @description The id of the event that caused the judgement (D27). */
+            trigger_id: string;
+            trigger_source: string;
+            /** @enum {string} */
+            trigger_type: "new_sbom" | "fix_available";
+            release_id: string;
+            /** Format: date-time */
+            received_at: string;
+            /** @description False while the trigger waits to be judged. The fields below are then absent or zero. */
+            settled: boolean;
+            /** Format: date-time */
+            settled_at?: string;
+            /** @enum {string} */
+            outcome?: "none" | "recommend" | "request";
+            /**
+             * @description Set with outcome `none`. `mode_off` - the effective mode of the Release is off (no rebuild tag, or a level says off). `nothing_counts` - the mode allows a rebuild and no component counts. `gave_up` - the Release could not be judged for 24 hours and the trigger was closed unjudged.
+             * @enum {string}
+             */
+            reason?: "mode_off" | "nothing_counts" | "gave_up";
+            /** @enum {string} */
+            effective_mode?: "off" | "ask" | "auto";
+            /** @enum {string} */
+            effective_mode_set_by?: "installation" | "policy" | "tag";
+            considered: number;
+            targeted_count: number;
+            decision?: components["schemas"]["RebuildDecision"];
+        };
+        /** @description One recorded rebuild decision with the facts frozen as they were read (D29). It is also what `governance.rebuild_recommended.v1` and `governance.rebuild_requested.v1` carry. A decision starts no build. */
+        RebuildDecision: {
+            decision_id: string;
+            /** @enum {string} */
+            outcome: "recommend" | "request";
+            /** Format: date-time */
+            decided_at: string;
+            product_id: string;
+            project_id: string;
+            /** @enum {string} */
+            installation_mode: "off" | "ask" | "auto";
+            /** @enum {string} */
+            effective_mode: "ask" | "auto";
+            /** @enum {string} */
+            effective_mode_set_by: "installation" | "policy" | "tag";
+            /** @description The rebuild tag that applied. */
+            tag: string;
+            /** @description Where that tag was read (release, project or product). */
+            tag_level: string;
+            /** @description The policy in force as the decision read it - which record, which version, its values. */
+            policy: {
+                /** @enum {string} */
+                scope_kind: "installation" | "product" | "release";
+                scope_id: string;
+                version: number;
+                fix_required: boolean;
+                severity_floor: string;
+                count_known_exploited: boolean;
+                skip_decided: boolean;
+                carrier_only: boolean;
+                /** Format: int64 */
+                cool_down_seconds: number;
+                /** @enum {string} */
+                mode: "off" | "ask" | "auto";
+            };
+            considered: number;
+            /** @description How many occurrences did not count, by reason. */
+            skipped: {
+                [key: string]: number;
+            };
+            targeted: components["schemas"]["RebuildTargetEntry"][];
             other_stream: components["schemas"]["RebuildTargetEntry"][];
         };
         /** @description One counted component of one Finding (D34). The pair finding_id + purl is unique. */
@@ -2981,6 +3073,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RebuildEvaluation"];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseRebuildDecisions: {
+        parameters: {
+            query?: {
+                /** @description How many triggers to return. Default 20, at most 200. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildTriggerList"];
                 };
             };
             500: components["responses"]["Problem"];
