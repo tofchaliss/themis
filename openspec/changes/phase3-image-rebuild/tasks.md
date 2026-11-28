@@ -50,10 +50,10 @@ Every step waits for the owner's go and lands as its own PR.
 - [x] 3.4 API: `GET /releases/{id}/rebuild-evaluation`; `tag`, `effective_mode`,
   `effective_mode_set_by` on the in-force read; tests; lint, vet-tags, clean-arch, arch-test
   and the dashboard's generated API types green.
-- [ ] 3.5 VM check: a Release with no tag, with `rebuild:ask`, with `rebuild:off` on its
-  Product; the judgement of a real Release (counted components, skip counts). First run
-  2026-11-28: the no-tag case and the judgement PASSED; the tag cases FAILED (a tagged Release
-  read as untagged), see 3.6. To run again after 3.6.
+- [x] 3.5 VM check PASSED 2026-11-28 (second run, after 3.6): no tag, `rebuild:ask` and
+  `rebuild:auto` on the Release, `rebuild:off` on its Product, tags removed; the judgement of a
+  real Release (596 open occurrences, 92 counted, skip counts add up). The first run found the
+  defect of 3.6. Result in the EDR, "Step R2 part 1 as built".
 - [x] 3.6 Fix from the VM check: the Registry client reads each level's own tags from the tag
   reads, and refuses an answer with no `tags` field (the single-entity views do not carry
   tags; backlog `RG-VIEW-TAGS-1`).

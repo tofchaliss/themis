@@ -1274,6 +1274,24 @@ triggers (D3), the stored decision (D27, D29) and the two events (D9).
   without a `tags` field is an error. Registry follow-up: backlog `RG-VIEW-TAGS-1`.
 - The tag steps (ask on the Release, off on the Product) are to be run again after the fix.
 
+**VM check, second run 2026-11-28: PASSED** (task 3.5, main `27dffe3` with the tag fix; the same
+Release). In order:
+
+1. No rebuild tag: outcome `none`, mode `off`, set by `tag`.
+2. `rebuild:ask` on the Release: outcome `recommend`, mode `ask`, tag level `release`, 92
+   counted. Set by `installation`, because the tag and the installation policy both say `ask`
+   and the policy side is named on a tie.
+3. `rebuild:auto` on the Release: still `recommend`, mode `ask`, set by `installation`. The tag
+   asked for `auto` and the installation's `ask` held (D17).
+4. `rebuild:off` added on the Product, with `rebuild:auto` still on the Release: outcome `none`,
+   mode `off`, set by `tag`, tag level `product`. Off on any level wins (D4).
+5. Both tags removed: back to step 1.
+
+Nothing was sent at any step. Not tried on the VM: a tag on the Project level, mode `auto` on
+the installation (so `request` was not seen), and Knowledge switched off; the unit tests cover
+all three. Part 1 is closed. The count of 92 still holds the module-stream entries of open
+point 7.
+
 ## Honest limits
 
 - **A rebuild fixes only what a rebuild can fix.** If the base image has no fixed package yet,
