@@ -550,6 +550,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/rebuild-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every rebuild policy in force in the installation on one page (EDR-REBUILD-01 D11 item 3) - the installation policy first, then the Product policies, then the Release policies. Read scope. */
+        get: operations["listRebuildPolicies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/products/{productId}/rebuild-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The rebuild policy stored for this Product (EDR-REBUILD-01 D11). 404 when the Product has none and takes the installation policy. Read scope. */
+        get: operations["getProductRebuildPolicy"];
+        /** Store a new version of this Product's rebuild policy. The record is whole - it takes no single field from the level above (D11 item 2). Admin scope, or that Product's own `product:<id>` key. The change must name its actor and carry every field. A Product policy can lower the mode and can never lift it above the installation policy's (D17). */
+        put: operations["putProductRebuildPolicy"];
+        post?: never;
+        /** Remove this Product's rebuild policy, so the Product takes the installation policy again. Admin scope, or that Product's own `product:<id>` key. The removal is kept in the history with its actor. 404 when there is none. */
+        delete: operations["deleteProductRebuildPolicy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/products/{productId}/rebuild-policy/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every version of this Product's rebuild policy, newest first, removals included. Read scope. */
+        get: operations["getProductRebuildPolicyHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{releaseId}/rebuild-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The rebuild policy stored for this Release (EDR-REBUILD-01 D11). 404 when the Release has none and takes its Product's policy or the installation policy. Read scope. */
+        get: operations["getReleaseRebuildPolicy"];
+        /** Store a new version of this Release's rebuild policy. The record is whole - it takes no single field from the level above (D11 item 2). Admin scope, or the `product:<id>` key of the Product that owns the Release. The change must name its actor and carry every field. A Release policy can lower the mode and can never lift it above the installation policy's (D17). */
+        put: operations["putReleaseRebuildPolicy"];
+        post?: never;
+        /** Remove this Release's rebuild policy, so the Release takes its Product's policy or the installation policy again. Admin scope, or the `product:<id>` key of the Product that owns the Release. The removal is kept in the history with its actor. 404 when there is none. */
+        delete: operations["deleteReleaseRebuildPolicy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{releaseId}/rebuild-policy/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every version of this Release's rebuild policy, newest first, removals included. Read scope. */
+        get: operations["getReleaseRebuildPolicyHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/releases/{releaseId}/rebuild-policy/in-force": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The rebuild policy that applies to this Release and the level it comes from - the Release's own, else its Product's, else the installation's (EDR-REBUILD-01 D11 item 3) - with the highest mode the policies allow (D17). 503 when the Release's Product cannot be read from Registry - the installation policy is never shown in place of a Product policy that could not be looked up. Read scope. */
+        get: operations["getReleaseRebuildPolicyInForce"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/faultlines/{faultlineId}/findings": {
         parameters: {
             query?: never;
@@ -1174,10 +1280,15 @@ export interface components {
             updated_by: string;
         };
         RebuildPolicyRecord: {
-            /** @description Whose policy this is. Step R1 serves `installation` only. */
-            scope_kind: string;
-            /** @description Empty for the installation policy. */
+            /**
+             * @description The level this policy sits at (D11).
+             * @enum {string}
+             */
+            scope_kind: "installation" | "product" | "release";
+            /** @description Empty for the installation policy; otherwise the Product id or the Release id. */
             scope_id: string;
+            /** @description Only in a history: true on the entry that records the removal of a Product or Release policy. Its values are the removed policy's, its actor and time the removal's. */
+            removed?: boolean;
             /** @description Counts the changes from 1. 0 = nothing stored, the shipped defaults are in force. */
             version: number;
             /** @description Count a Finding only when a fixed version is known for its component. */
@@ -1209,6 +1320,29 @@ export interface components {
              */
             updated_at?: string;
             updated_by?: string;
+        };
+        RebuildPolicyInForce: {
+            release_id: string;
+            /** @description The Product that owns the Release, as Registry names it. */
+            product_id: string;
+            policy: components["schemas"]["RebuildPolicyRecord"];
+            /**
+             * @description The installation policy's mode - the ceiling nothing below can lift (D17).
+             * @enum {string}
+             */
+            installation_mode: "off" | "ask" | "auto";
+            /**
+             * @description The highest mode the policies allow for this Release - the lower of the installation policy's mode and the mode of the policy in force.
+             * @enum {string}
+             */
+            mode_ceiling: "off" | "ask" | "auto";
+            /**
+             * @description Which of the two set mode_ceiling.
+             * @enum {string}
+             */
+            mode_set_by: "installation" | "policy";
+            /** @description Whether the Release's tags were read. Always false until step R2. A tag can only lower mode_ceiling, and a Release with no rebuild tag takes no part at all (D4, D17), so mode_ceiling is not yet the effective mode. */
+            tags_applied: boolean;
         };
         SLAAcceptancePeriod: {
             /** Format: date-time */
@@ -2434,6 +2568,270 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RebuildPolicyRecord"][];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    listRebuildPolicies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"][];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getProductRebuildPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    putProductRebuildPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildPolicyPut"];
+            };
+        };
+        responses: {
+            /** @description Stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteProductRebuildPolicy: {
+        parameters: {
+            query: {
+                /** @description The person removing the policy, recorded with the removal. */
+                updated_by: string;
+            };
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. The body is the history entry of the removal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getProductRebuildPolicyHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                productId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"][];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseRebuildPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    putReleaseRebuildPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildPolicyPut"];
+            };
+        };
+        responses: {
+            /** @description Stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    deleteReleaseRebuildPolicy: {
+        parameters: {
+            query: {
+                /** @description The person removing the policy, recorded with the removal. */
+                updated_by: string;
+            };
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. The body is the history entry of the removal. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"];
+                };
+            };
+            400: components["responses"]["Problem"];
+            403: components["responses"]["Problem"];
+            404: components["responses"]["Problem"];
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseRebuildPolicyHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyRecord"][];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseRebuildPolicyInForce: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildPolicyInForce"];
                 };
             };
             500: components["responses"]["Problem"];

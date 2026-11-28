@@ -1,7 +1,7 @@
 # EDR-REBUILD-01 — A policy decides the image rebuild, a signed event carries it, a build connector starts it
 
-Status: **PROPOSED — 2026-11-26. Step R1 built 2026-11-27**, on the owner's go; every later step
-is design only. The owner picked the form factor on 2026-11-26 (choice 1 below: signed event plus
+Status: **PROPOSED — 2026-11-26. Step R1 built 2026-11-27 and step R1a (API) built 2026-11-28**,
+each on the owner's go; every later step is design only. The owner picked the form factor on 2026-11-26 (choice 1 below: signed event plus
 build connector) and accepted the picks of choices 2, 3 and 4 on 2026-11-27. Choice 5 carries an
 assumed pick and is asked again at step R5. Feature work stays behind the release freeze: each
 step needs the owner's go.
@@ -1079,7 +1079,7 @@ not say which new rules reach it. Decided:
 | --- | --- | --- |
 | R0 | this record and the backlog item | docs |
 | R1 | policy record, evaluation in the domain, read and write API | Governance domain, API, migration |
-| R1a | Product and Release policy overrides; the effective-policy read and the list read (D11) | Governance domain, API, migration; GUI |
+| R1a | Product and Release policy overrides; the effective-policy read and the list read (D11). API built 2026-11-28; the GUI page follows as `GUI-REBUILD-POLICY-1` | Governance domain, API, migration; GUI |
 | R2 | evaluation on `new_sbom` and on `fix_available`; the two new events; tag scope | Governance, Registry read seam |
 | R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule; the status call, attempt reservation, refusal counter and try number (D20, D28, D40); settling `uncertain` (D24) | Communication, API |
@@ -1127,7 +1127,50 @@ The owner gave the go for R1 on 2026-11-27. The tasks are in
   tests.
 - **Found in the VM check, fixed 2026-11-28:** the answer to a change carried the time in
   nanoseconds and the history carried it in microseconds, the database's precision. The service
-  now cuts the time to the microsecond before storing, so both read the same.
+  now cuts the time to the microsecond before storing, so both read the same. Checked on the
+  VM the same day (main `2087d83`): the answer to a change and the read after it both carried
+  `2026-11-28T06:00:19.605258Z`, version 4.
+
+### Step R1a as built (2026-11-28)
+
+The owner gave the go for R1a on 2026-11-28. This step is D11: a policy per Product and per
+Release beside the installation policy.
+
+- **Domain.** `ResolveRebuildPolicy` picks the policy in force for one Release: the Release's
+  own, else its Product's, else the installation's. The record is taken whole (D11 item 2). It
+  also returns the **mode ceiling**: the lower of the installation policy's mode and the mode
+  of the policy in force (D17 values 1 and 2), and which of the two set it. A Product or
+  Release policy can lower the mode and cannot lift it above the installation's.
+- **Store** (Governance migration 29). The table of migration 28 holds all three levels. The
+  migration names the three scope kinds, ties the scope id to the kind, and adds `removed` to
+  the history. The version of a scope is now counted from its history under a lock per scope,
+  so it keeps counting when a policy is removed and set again.
+- **Removing a policy.** D11 did not say how a Product or Release goes back to the level above.
+  As built: `DELETE` removes the policy in force and writes one history entry with
+  `removed: true`, the removed values, the actor and the time. The installation policy cannot
+  be removed.
+- **API.**
+  - `GET /rebuild-policies`: every policy in force on one page, installation first (D11 item 3).
+  - `GET` / `PUT` / `DELETE /products/{id}/rebuild-policy` and `.../history`.
+  - `GET` / `PUT` / `DELETE /releases/{id}/rebuild-policy` and `.../history`.
+  - `GET /releases/{id}/rebuild-policy/in-force`: the policy that applies, its level and
+    version, the installation mode, `mode_ceiling` and `mode_set_by`.
+- **Who may change** (D11 item 5): `admin`, or the `product:<id>` key of the Product concerned.
+  For a Release the Product is read from Registry; when it cannot be established, a product key
+  is refused (fail-closed). Reads need the read scope.
+- **The in-force read fails closed.** When the Product of the Release cannot be read it answers
+  503. It never shows the installation policy in place of a Product policy that could not be
+  looked up.
+- **`mode_ceiling` is not yet the effective mode.** D17 has a third value, the Release's tags,
+  and a Release with no rebuild tag takes no part (D4). Tags are read from step R2 on. Until
+  then the answer carries `tags_applied: false`, and D17's "which of the three values set it"
+  is answered for two of the three.
+- **Honest limits of this step.** Governance does not check that a Product id exists in
+  Registry, and it does not check a Release id when an `admin` writes. A policy written for an
+  id that does not exist applies to nothing; it shows on the list read and can be removed.
+- **Not in R1a.** The GUI page for the policies (backlog `GUI-REBUILD-POLICY-1`). Nothing
+  evaluates a Release and no build is asked for; that is still R2.
+- **Open test:** the VM check (task 2.4).
 
 ## Honest limits
 

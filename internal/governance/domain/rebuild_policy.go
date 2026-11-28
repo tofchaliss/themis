@@ -211,3 +211,58 @@ func EvaluateRebuild(p RebuildPolicy, candidates []RebuildCandidate) RebuildVerd
 	}
 	return out
 }
+
+// RebuildPolicyLevel names where a policy sits (D11): one for the installation, and an optional
+// one per Product and per Release. There is no Project level.
+type RebuildPolicyLevel string
+
+const (
+	RebuildLevelInstallation RebuildPolicyLevel = "installation"
+	RebuildLevelProduct      RebuildPolicyLevel = "product"
+	RebuildLevelRelease      RebuildPolicyLevel = "release"
+)
+
+// Valid reports whether l is one of the three levels.
+func (l RebuildPolicyLevel) Valid() bool {
+	return l == RebuildLevelInstallation || l == RebuildLevelProduct || l == RebuildLevelRelease
+}
+
+// Who set the mode ceiling of a Release (D17).
+const (
+	RebuildModeSetByInstallation = "installation"
+	RebuildModeSetByPolicy       = "policy"
+)
+
+// RebuildPolicyInForce is the policy that applies to one Release and the mode its policies
+// allow at most.
+type RebuildPolicyInForce struct {
+	// Policy is the ONE record in force, whole (D11 item 2: never a field-by-field mix).
+	Policy RebuildPolicy
+	// Level is where that record sits.
+	Level RebuildPolicyLevel
+	// ModeCeiling is the lowest of the installation policy's mode and the mode of the policy in
+	// force (D17 values 1 and 2). The Release's tags can only lower it further (D17 value 3);
+	// this function does not read tags.
+	ModeCeiling RebuildMode
+	// ModeSetBy says which of the two set the ceiling. When both give the same mode the
+	// installation is named: it is the ceiling nobody below can lift.
+	ModeSetBy string
+}
+
+// ResolveRebuildPolicy picks the policy in force for one Release (D11): the Release's own, else
+// its Product's, else the installation's. nil means that level has no policy. Pure.
+func ResolveRebuildPolicy(installation RebuildPolicy, product, release *RebuildPolicy) RebuildPolicyInForce {
+	out := RebuildPolicyInForce{Policy: installation, Level: RebuildLevelInstallation}
+	switch {
+	case release != nil:
+		out.Policy, out.Level = *release, RebuildLevelRelease
+	case product != nil:
+		out.Policy, out.Level = *product, RebuildLevelProduct
+	}
+	out.ModeCeiling = LowestRebuildMode(installation.Mode, out.Policy.Mode)
+	out.ModeSetBy = RebuildModeSetByInstallation
+	if out.Level != RebuildLevelInstallation && out.Policy.Mode.rank() < installation.Mode.rank() {
+		out.ModeSetBy = RebuildModeSetByPolicy
+	}
+	return out
+}

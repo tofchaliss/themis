@@ -11,5 +11,7 @@ This file only records how the steps map to the code.
   `/rebuild-policy` and `/rebuild-policy/history`.
 - R1 evaluates nothing against a Release and sends nothing. The rule is not wired to a trigger
   until R2, so the running system behaves as before.
-- The store already carries `scope_kind` and `scope_id`, so R1a adds Product and Release
-  policies without a second table.
+- **R1a** uses the same two tables for all three levels. `domain.ResolveRebuildPolicy` picks the
+  policy in force and the mode ceiling; the app service reads the Release's Product through
+  the existing Registry seam and fails closed without it. A removal is a history entry, and
+  the version of a scope is counted from its history under an advisory lock per scope.

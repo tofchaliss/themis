@@ -154,9 +154,9 @@ func Wire(
 	}
 	handler := govhttp.NewHandler(write, read).WithLogger(logger).WithSLA(sla).
 		WithMetrics(app.NewMetricsService(st, estate, sla, sysClock{})).
-		// EDR-REBUILD-01 step R1: the installation rebuild policy record. Stored and served
+		// EDR-REBUILD-01 steps R1 and R1a: the rebuild policy records. Stored and served
 		// only; nothing reads it to ask for a build yet.
-		WithRebuildPolicy(app.NewRebuildPolicyService(st, sysClock{}))
+		WithRebuildPolicy(app.NewRebuildPolicyService(st, sysClock{}).WithIdentity(productOf))
 	if reg != nil {
 		handler = handler.WithProductResolver(reg)
 	}

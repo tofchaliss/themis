@@ -929,6 +929,288 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /rebuild-policies:
+    get:
+      operationId: listRebuildPolicies
+      summary: >-
+        Every rebuild policy in force in the installation on one page (EDR-REBUILD-01 D11 item 3) -
+        the installation policy first, then the Product policies, then the Release policies.
+        Read scope.
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RebuildPolicyRecord'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /products/{productId}/rebuild-policy:
+    get:
+      operationId: getProductRebuildPolicy
+      summary: >-
+        The rebuild policy stored for this Product (EDR-REBUILD-01 D11). 404 when the Product has
+        none and takes the installation policy. Read scope.
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildPolicyRecord'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: putProductRebuildPolicy
+      summary: >-
+        Store a new version of this Product's rebuild policy. The record is whole - it takes no
+        single field from the level above (D11 item 2). Admin scope, or that Product's own `product:<id>` key. The change must name its actor and
+        carry every field. A Product policy can lower the mode and can never lift it above the
+        installation policy's (D17).
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RebuildPolicyPut'
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildPolicyRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteProductRebuildPolicy
+      summary: >-
+        Remove this Product's rebuild policy, so the Product takes the installation policy again. Admin scope, or that Product's own `product:<id>` key. The
+        removal is kept in the history with its actor. 404 when there is none.
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: updated_by
+          in: query
+          required: true
+          description: The person removing the policy, recorded with the removal.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Removed. The body is the history entry of the removal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildPolicyRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /products/{productId}/rebuild-policy/history:
+    get:
+      operationId: getProductRebuildPolicyHistory
+      summary: >-
+        Every version of this Product's rebuild policy, newest first, removals included. Read
+        scope.
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RebuildPolicyRecord'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /releases/{releaseId}/rebuild-policy:
+    get:
+      operationId: getReleaseRebuildPolicy
+      summary: >-
+        The rebuild policy stored for this Release (EDR-REBUILD-01 D11). 404 when the Release has
+        none and takes its Product's policy or the installation policy. Read scope.
+      parameters:
+        - name: releaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildPolicyRecord'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: putReleaseRebuildPolicy
+      summary: >-
+        Store a new version of this Release's rebuild policy. The record is whole - it takes no
+        single field from the level above (D11 item 2). Admin scope, or the `product:<id>` key of the Product that owns the Release. The change must name its actor and
+        carry every field. A Release policy can lower the mode and can never lift it above the
+        installation policy's (D17).
+      parameters:
+        - name: releaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RebuildPolicyPut'
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildPolicyRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteReleaseRebuildPolicy
+      summary: >-
+        Remove this Release's rebuild policy, so the Release takes its Product's policy or the installation policy again. Admin scope, or the `product:<id>` key of the Product that owns the Release. The
+        removal is kept in the history with its actor. 404 when there is none.
+      parameters:
+        - name: releaseId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: updated_by
+          in: query
+          required: true
+          description: The person removing the policy, recorded with the removal.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Removed. The body is the history entry of the removal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildPolicyRecord'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /releases/{releaseId}/rebuild-policy/history:
+    get:
+      operationId: getReleaseRebuildPolicyHistory
+      summary: >-
+        Every version of this Release's rebuild policy, newest first, removals included. Read
+        scope.
+      parameters:
+        - name: releaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RebuildPolicyRecord'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
+  /releases/{releaseId}/rebuild-policy/in-force:
+    get:
+      operationId: getReleaseRebuildPolicyInForce
+      summary: >-
+        The rebuild policy that applies to this Release and the level it comes from - the
+        Release's own, else its Product's, else the installation's (EDR-REBUILD-01 D11 item 3) -
+        with the highest mode the policies allow (D17). 503 when the Release's Product cannot be
+        read from Registry - the installation policy is never shown in place of a Product policy
+        that could not be looked up. Read scope.
+      parameters:
+        - name: releaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildPolicyInForce'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /faultlines/{faultlineId}/findings:
     get:
       operationId: getFaultlineFindings
@@ -2003,10 +2285,16 @@ components:
       properties:
         scope_kind:
           type: string
-          description: Whose policy this is. Step R1 serves `installation` only.
+          enum: [installation, product, release]
+          description: The level this policy sits at (D11).
         scope_id:
           type: string
-          description: Empty for the installation policy.
+          description: Empty for the installation policy; otherwise the Product id or the Release id.
+        removed:
+          type: boolean
+          description: >-
+            Only in a history: true on the entry that records the removal of a Product or
+            Release policy. Its values are the removed policy's, its actor and time the removal's.
         version:
           type: integer
           description: Counts the changes from 1. 0 = nothing stored, the shipped defaults are in force.
@@ -2044,6 +2332,37 @@ components:
           description: Absent for the shipped defaults (nothing stored yet).
         updated_by:
           type: string
+    RebuildPolicyInForce:
+      type: object
+      required: [release_id, product_id, policy, installation_mode, mode_ceiling, mode_set_by, tags_applied]
+      properties:
+        release_id:
+          type: string
+        product_id:
+          type: string
+          description: The Product that owns the Release, as Registry names it.
+        policy:
+          $ref: '#/components/schemas/RebuildPolicyRecord'
+        installation_mode:
+          type: string
+          enum: ['off', ask, auto]
+          description: The installation policy's mode - the ceiling nothing below can lift (D17).
+        mode_ceiling:
+          type: string
+          enum: ['off', ask, auto]
+          description: >-
+            The highest mode the policies allow for this Release - the lower of the installation
+            policy's mode and the mode of the policy in force.
+        mode_set_by:
+          type: string
+          enum: [installation, policy]
+          description: Which of the two set mode_ceiling.
+        tags_applied:
+          type: boolean
+          description: >-
+            Whether the Release's tags were read. Always false until step R2. A tag can only
+            lower mode_ceiling, and a Release with no rebuild tag takes no part at all (D4, D17),
+            so mode_ceiling is not yet the effective mode.
     SLAAcceptancePeriod:
       type: object
       required: [start, position_version]
