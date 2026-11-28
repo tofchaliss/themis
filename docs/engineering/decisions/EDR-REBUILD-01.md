@@ -1201,7 +1201,7 @@ triggers (D3), the stored decision (D27, D29) and the two events (D9).
   already recorded (`verdict_behind`, EDR-INCIDENT-01 D1). Nothing is judged or written. This
   is D30 as built: Governance orders no version strings.
 - **Tags** (D4, D17 value 3). `ResolveRebuildTag` reads the own tags of the Release, its Project
-  and its Product, from Registry's existing reads (no Registry change). `rebuild:off` on any
+  and its Product, from Registry's tag reads `GET /<kind>/{id}/tags` (no Registry change). `rebuild:off` on any
   level wins. Otherwise the nearest level with `rebuild:ask` or `rebuild:auto` decides. A level
   carrying both reads `ask`, because a tag only restricts. No rebuild tag is `off`.
 - **Effective mode** (D17 whole). The lowest of the installation mode, the mode of the policy in
@@ -1246,7 +1246,33 @@ triggers (D3), the stored decision (D27, D29) and the two events (D9).
 6. **A row the re-verdict sweep has not reached yet** is served as last judged. It can miss a
    bound that arrived since; the next sweep brings it up to date.
 
-VM check: pending (task 3.5).
+7. **A module-stream bound counts as a known fix, also for an install outside that stream**
+   (found on the VM check below). Knowledge records every same-EL-major bound the install is
+   below, and that includes builds of another module stream. Example: `python3-ply 3.9-9.el8`
+   is "below" four `3.11-10.module+el8...` builds. A plain rebuild does not pick those up, so
+   the request would be made, the build would run, and the comparison would show the Finding
+   still open. On the checked Release 44 of 92 counted entries had only module-stream bounds.
+   Knowledge's open reason already says "likely not reachable" for this shape, but the
+   structured `verdict_behind` does not tell the two apart. Part 2 must not send an event
+   before this is settled (backlog `KN-BEHIND-MODULE-1`).
+
+**VM check, first run 2026-11-28** (task 3.5, main after #275, auth on, admin key; one Release).
+
+- Knowledge answered for 640 live occurrences: 563 `known`, 44 `none`, 33 `unknown`.
+- With no rebuild tag: `tags_applied` true, tag mode `off`, effective mode `off` set by `tag`,
+  ceiling `ask`. Outcome `none`. Correct.
+- The judgement looked at 596 open occurrences: 92 counted, 235 below the floor, 234 scope
+  components, 33 fix unknown, 2 decided, 0 no fix. The sum is 596.
+- One CVE gave 37 of the 92 counted entries (one flaw, many packages of one build).
+- **Defect found: a tagged Release read as untagged.** `rebuild:ask` was set on the Release and
+  the judgement still said tag mode `off`. Cause: the client read `tags` from Registry's
+  single-entity views (`GET /releases/{id}` and the like), which the API schema lists but the
+  handler never fills; only the list views and the tag reads carry tags. So the read broke the
+  rule it states, "a tag list that could not be read never reads as no tag". The safe
+  direction held (nothing could be asked for), but no Release could ever take part.
+  **Fix:** the client reads each level's own tags from `GET /<kind>/{id}/tags`, and an answer
+  without a `tags` field is an error. Registry follow-up: backlog `RG-VIEW-TAGS-1`.
+- The tag steps (ask on the Release, off on the Product) are to be run again after the fix.
 
 ## Honest limits
 

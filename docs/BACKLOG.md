@@ -415,6 +415,24 @@ three angles, and two of them proposed fixes that would not have worked.
   (`value.CompareVersions`, `value.VersionParsable`, the per-world fixes of the card), record
   the result on the match row, and bump `VerdictGeneration` so the sweep writes it once.
 
+- [ ] **A module-stream bound is not a fix for an install outside that stream** (id
+  `KN-BEHIND-MODULE-1`, from the VM check of EDR-REBUILD-01 step R2 part 1, 2026-11-28, defect
+  in the making). `verdict_behind` holds every same-EL-major vendor bound an open rpm occurrence
+  is below, including builds of another module stream (`python3-ply 3.9-9.el8` reads as below
+  four `3.11-10.module+el8...` builds). `fix: known` follows from it, so the rebuild judgement
+  counts the occurrence (44 of 92 counted entries on the checked Release had only module-stream
+  bounds), and the fix-available alert announces it. A plain rebuild cannot pick such a build
+  up. To settle before R2 part 2 sends any event: keep reachable and unreachable bounds apart on
+  the verdict (the open reason already tells them apart in prose), and let only a reachable
+  bound make a known fix. Needs a `VerdictGeneration` bump.
+
+- [ ] **Registry's single-entity views list `tags` and never fill them** (id `RG-VIEW-TAGS-1`,
+  from the same VM check, 2026-11-28, defect). `ProductView`, `ProjectView` and `ReleaseView`
+  carry `tags` in the API schema; the list reads fill it, `GET /products/{id}`,
+  `GET /projects/{id}` and `GET /releases/{id}` do not. A client that trusts the schema reads
+  every entity as untagged (it cost the first VM run of the rebuild judgement). Fill the field
+  in the three handlers, or take it out of the schema for those reads.
+
 - [ ] **GUI page for the rebuild policies** (id `GUI-REBUILD-POLICY-1`, from EDR-REBUILD-01 step
   R1a, 2026-11-28, feature). One page that lists every policy in force (`GET /rebuild-policies`),
   shows the policy in force for a Release with its level and mode ceiling, and lets an admin
