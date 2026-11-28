@@ -1,1 +1,0 @@
-import{U as e,ot as t,st as n}from"./index-BkDoXjPa.js";n();var r=t();function i({className:t,...n}){return(0,r.jsx)(`select`,{className:e(`h-8 w-full rounded-lg border border-line bg-card px-2 text-[13px] text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50`,t),...n})}export{i as t};

@@ -1487,6 +1487,340 @@ event, a form in the current GUI).
    reads these events yet (Communication acts on them from R3). `rebuild_requested` now
    requires `build` and `build_profile`; `rebuild_recommended` requires `recommend_reason`.
 
+**GUI.** The Estate page has a "Build profile" card under the tag editor, in both GUIs: the
+React GUI (`/next/`, the one in daily use) and the old GUI. It follows the picked Project, or
+the Release whose "tags, build profile…" link was clicked; a Product has none. It shows the
+stored profile, which profile is in force for a Release, and the history; it saves and removes
+with the signed-in user as actor. The form checks only that the text is one JSON object; every
+other rule is Registry's, and its refusal is shown as it came. The no-secrets rule is stated on
+the form (D10 item 3).
+
+The first build (#280) put the card into the old GUI only. That was a mistake of reading "the
+current GUI": the owner works in the React GUI, and found no card there on the VM check. The
+React card followed the same day.
+
+**Honest limits of this step.** Governance does not check that a Product id exists in
+  Registry, and it does not check a Release id when an `admin` writes. A policy written for an
+  id that does not exist applies to nothing; it shows on the list read and can be removed.
+- **Not in R1a.** The GUI page for the policies (backlog `GUI-REBUILD-POLICY-1`). Nothing
+  evaluates a Release and no build is asked for; that is still R2.
+- **VM check PASSED 2026-11-28** (task 2.4, main `f90b036`, auth on, admin key; one Product,
+  two Releases of two of its Projects). Governance applied migration 29. In order:
+  1. Before any change both Releases took the installation policy, ceiling `ask`.
+  2. A Product policy with mode `off` and floor `medium` got version 1. Both Releases then took
+     it: level `product`, ceiling `off`, set by `policy`.
+  3. A Release policy with mode `auto` and floor `low` on the first Release got version 1. That
+     Release took its own policy whole (floor `low`), and its ceiling was `ask`, set by
+     `installation`: the Release asked for `auto` and the installation's `ask` held (D17).
+  4. The second Release still took the Product policy.
+  5. The list showed three entries: installation, product, release.
+  6. Both removals answered `removed: true` as version 2 with the actor. The Product history
+     showed the removal first, then version 1.
+  7. After the removals the first Release was back on the installation policy.
+  Every answer carried `tags_applied: false`. Not tried on the VM: a `product:<id>` key (none is
+  at hand there); the handler tests cover who may change.
+
+### Step R2 part 1 as built (2026-11-28)
+
+The owner gave the go for R2 on 2026-11-28. R2 is built in two parts. **Part 1 is the judgement
+as a read**: Themis can say, for one Release, whether a rebuild would be asked for and for which
+components. It stores nothing, publishes nothing and starts nothing. **Part 2** is the two
+triggers (D3), the stored decision (D27, D29) and the two events (D9).
+
+- **Knowledge: one new read** (an API addition in a second context, told to the owner before
+  building). `GET /releases/{id}/fix-verdicts` returns every live occurrence of the Release
+  with its recorded verdict and a `fix` value: `known` (open, and below at least one vendor
+  bound for its own package and world), `none` (already cleared, or compared and no bound on
+  record) or `unknown` (Themis could not compare). It serves what the occurrence verdict
+  already recorded (`verdict_behind`, EDR-INCIDENT-01 D1). Nothing is judged or written. This
+  is D30 as built: Governance orders no version strings.
+- **Tags** (D4, D17 value 3). `ResolveRebuildTag` reads the own tags of the Release, its Project
+  and its Product, from Registry's tag reads `GET /<kind>/{id}/tags` (no Registry change). `rebuild:off` on any
+  level wins. Otherwise the nearest level with `rebuild:ask` or `rebuild:auto` decides. A level
+  carrying both reads `ask`, because a tag only restricts. No rebuild tag is `off`.
+- **Effective mode** (D17 whole). The lowest of the installation mode, the mode of the policy in
+  force and the tag, with which of the three set it. When the tag and the policies give the same
+  mode, the policy side is named. A Release with no tag reads "set by `tag`": the missing tag
+  is what keeps it out. `GET /releases/{id}/rebuild-policy/in-force` now carries `tag`,
+  `effective_mode`, `effective_mode_set_by` and `tags_applied: true`.
+- **The judgement.** `GET /releases/{id}/rebuild-evaluation` (read scope). It looks at every
+  open component occurrence of every Finding that is not resolved or archived, applies the
+  policy in force, and returns: the policy, the tag, the effective mode, the `outcome`
+  (`none`, `recommend` for mode ask, `request` for mode auto), each counted component with the
+  fields of D34, and `skipped`: how many occurrences did not count, by the first rule that left
+  each out (`decided`, `scope_component`, `no_fix`, `fix_unknown`, `below_floor`). A Release
+  whose mode is `off` still shows what would count; its outcome is `none`.
+- **Failure directions.** Registry unreadable (Product or tags): 503, no judgement. A tag list
+  that could not be read never reads as "no tag". Knowledge unreadable: the read still answers,
+  `fix_verdicts_read` is false, every fix is unknown, so nothing counts under `fix_required`.
+- **D34 identity confirmed.** `finding_components` has the primary key (finding id, purl), so
+  the pair is unique and no occurrence index is needed.
+
+**Where part 1 differs from the decisions, and why. Each is open for part 2.**
+
+1. **A known fix exists only for RPM and APK components.** Knowledge records the bounds an
+   occurrence is below only where its fixed-verdict compares: RPM (same EL major) and APK. A
+   language package (npm, Go, Maven, PyPI) reads `unknown` and so never counts while
+   `fix_required` is on. That is the safe direction of D30. Widening it is Knowledge work
+   (backlog `KN-FIX-STANDING-LANG-1`).
+2. **`fixed_versions` is a list, not one `fixed_version`.** An occurrence can be below several
+   bounds (two errata, or a module stream beside the plain build). Governance may not order
+   them (D30). Part 2 must decide how the event names one, or keep the list.
+3. **`fix_source` is `knowledge_verdict`, not a feed name.** The match row does not store which
+   feed stated the bound, and the advisory is computed, not stored. Part 2 decides whether
+   Knowledge stores it.
+4. **Severity is the score priority and the SLA read, not the component assessment.** The
+   calculated assessment is in shadow (EDR-SCORING-01 9.1: computed and shown, not used). So
+   `score_source` is `base_score`, or `owner_set` when a person set the severity, and
+   `assessment.state` is `not_assessed` (or `not_eligible` for a scope component). `assessed`
+   comes with the shadow exit (S7).
+5. **A stale decision still counts as decided.** A `not_affected` or `accepted_risk` Position
+   that was re-surfaced is still skipped by `skip_decided` until a person decides again. This
+   follows D3: a stale decision re-opens a question for a person, and a build does not answer it.
+6. **A row the re-verdict sweep has not reached yet** is served as last judged. It can miss a
+   bound that arrived since; the next sweep brings it up to date.
+
+7. **A module-stream bound counts as a known fix, also for an install outside that stream**
+   (found on the VM check below). Knowledge records every same-EL-major bound the install is
+   below, and that includes builds of another module stream. Example: `python3-ply 3.9-9.el8`
+   is "below" four `3.11-10.module+el8...` builds. A plain rebuild does not pick those up, so
+   the request would be made, the build would run, and the comparison would show the Finding
+   still open. On the checked Release 44 of 92 counted entries had only module-stream bounds.
+   Knowledge's open reason already says "likely not reachable" for this shape, but the
+   structured `verdict_behind` does not tell the two apart. Part 2 must not send an event
+   before this is settled (backlog `KN-BEHIND-MODULE-1`).
+
+**VM check, first run 2026-11-28** (task 3.5, main after #275, auth on, admin key; one Release).
+
+- Knowledge answered for 640 live occurrences: 563 `known`, 44 `none`, 33 `unknown`.
+- With no rebuild tag: `tags_applied` true, tag mode `off`, effective mode `off` set by `tag`,
+  ceiling `ask`. Outcome `none`. Correct.
+- The judgement looked at 596 open occurrences: 92 counted, 235 below the floor, 234 scope
+  components, 33 fix unknown, 2 decided, 0 no fix. The sum is 596.
+- One CVE gave 37 of the 92 counted entries (one flaw, many packages of one build).
+- **Defect found: a tagged Release read as untagged.** `rebuild:ask` was set on the Release and
+  the judgement still said tag mode `off`. Cause: the client read `tags` from Registry's
+  single-entity views (`GET /releases/{id}` and the like), which the API schema lists but the
+  handler never fills; only the list views and the tag reads carry tags. So the read broke the
+  rule it states, "a tag list that could not be read never reads as no tag". The safe
+  direction held (nothing could be asked for), but no Release could ever take part.
+  **Fix:** the client reads each level's own tags from `GET /<kind>/{id}/tags`, and an answer
+  without a `tags` field is an error. Registry follow-up: backlog `RG-VIEW-TAGS-1`.
+- The tag steps (ask on the Release, off on the Product) are to be run again after the fix.
+
+**VM check, second run 2026-11-28: PASSED** (task 3.5, main `27dffe3` with the tag fix; the same
+Release). In order:
+
+1. No rebuild tag: outcome `none`, mode `off`, set by `tag`.
+2. `rebuild:ask` on the Release: outcome `recommend`, mode `ask`, tag level `release`, 92
+   counted. Set by `installation`, because the tag and the installation policy both say `ask`
+   and the policy side is named on a tie.
+3. `rebuild:auto` on the Release: still `recommend`, mode `ask`, set by `installation`. The tag
+   asked for `auto` and the installation's `ask` held (D17).
+4. `rebuild:off` added on the Product, with `rebuild:auto` still on the Release: outcome `none`,
+   mode `off`, set by `tag`, tag level `product`. Off on any level wins (D4).
+5. Both tags removed: back to step 1.
+
+Nothing was sent at any step. Not tried on the VM: a tag on the Project level, mode `auto` on
+the installation (so `request` was not seen), and Knowledge switched off; the unit tests cover
+all three. Part 1 is closed. The count of 92 still holds the module-stream entries of open
+point 7.
+
+**Open point 7 decided and built (owner, 2026-11-28).** The owner chose: a fix that exists only
+in another module stream does **not** count for a rebuild, and is shown as its own group. The
+other two choices were "count them like today" and "make it a policy field"; a field can still
+be added later.
+
+- **Knowledge.** `GET /releases/{id}/fix-verdicts` has a fourth `fix` value, `other_stream`: the
+  occurrence is open and below vendor bounds, and none of them can be reached by a plain update.
+  The rule is the structured form of the two shapes the open reason already states in prose:
+  (a) the install and every bound are module builds and no bound shares the install's upstream
+  series; (b) the install is a base-repository build and every bound is a module build. One
+  reachable bound (a plain build, or a module build of the install's own series) keeps it
+  `known`. The value is derived on read from the stored version and bounds, so there is no
+  migration, no stored row changes and no `VerdictGeneration` bump.
+- **Governance.** Under `fix_required` an `other_stream` occurrence is never targeted. When it
+  is severe enough to count otherwise, it is listed in `other_stream` on
+  `GET /releases/{id}/rebuild-evaluation` with the builds of the other stream, and counted under
+  `skipped.fix_other_stream`. When it is below the floor it is counted under `below_floor`
+  only. With `fix_required` off the stream does not matter. An older Governance reads the new
+  value as `unknown`, which also does not count.
+- **Not changed.** The fix-available alert (EDR-INCIDENT-01 D1) still announces such a bound.
+  That is the rest of backlog `KN-BEHIND-MODULE-1`.
+
+**VM check of this change (2026-11-28, task 4.0a): PASS.** Same Release as VM run 1 and 2, no
+tag set, installation policy at its defaults.
+
+| What | Before (#275) | After (#277) |
+| --- | --- | --- |
+| Fix answers `known` | 563 | 184 |
+| Fix answers `other_stream` | not a value | 379 |
+| Fix answers `none` / `unknown` | 44 / 33 | 44 / 33 |
+| Considered | 596 | 596 |
+| Counted (`targeted`) | 92 | 48 |
+| Listed in `other_stream` | not a list | 44 |
+| `skipped.fix_other_stream` | not a key | 44 |
+| `skipped` below_floor / scope_component / fix_unknown / decided | 235 / 234 / 33 / 2 | same |
+| Outcome | `none` (no tag) | `none` (no tag) |
+
+- The 92 entries split into 48 and 44, as measured by hand in VM run 2.
+- The groups still add up: 48 + 44 + 235 + 234 + 33 + 2 = 596.
+- The first `other_stream` entry is a base-repository build of a Python library whose four
+  bounds are all module builds of a newer series: shape (b) of the rule.
+- **Observation, not a defect of the judgement.** Knowledge answers `other_stream` for 379 of
+  the 563 occurrences that had a bound (67%). In the judgement only 44 of them surface, because
+  the others are scope components or below the floor and are grouped there first. The share is
+  higher than among the counted entries (48%), which fits: a module-stream advisory lists its
+  whole rebuild set, and scope components come from exactly those advisories. It has not been
+  sampled by hand yet; that is task 4.0b and backlog `KN-OTHER-STREAM-SAMPLE-1`.
+
+**Hand sample of the `other_stream` answers (2026-11-28, task 4.0b).** The 379 answers belong to
+39 different packages, so about ten CVEs each. The first 20 packages by purl were read with
+their bounds:
+
+- 20 of 20 are right. Each install is a base-repository build (`...el8`, two of them
+  `...el8_10.1`) and every one of its two to five bounds is a module build
+  (`...module+el8.x...`). That is shape (b) of the rule: no bound can be reached by a plain
+  update.
+- All 20 are Perl library packages, and the bounds are the builds of a newer Perl module
+  stream. One module stream with many packages and many CVEs explains the high count.
+- Limit of the sample: it is sorted by purl, so it shows one family. The other 19 packages
+  have not been read.
+
+### Step R2 part 2 as built (2026-11-28)
+
+The owner confirmed the scope of part 2 on 2026-11-28 (a Governance migration, one new read,
+two new events). Part 2 makes the judgement of part 1 run by itself and records what it said.
+**It starts no build.** Nothing consumes the two new events yet; Communication ignores event
+types it does not know, and its own rebuild loop (EDR-DELIVERY-01 M2-8) is unchanged until R3.
+
+- **Triggers (D3).** A trigger is a row in `rebuild_triggers`, written **in the same
+  transaction** as the event that causes it: the `release_evaluated` note of a new SBOM, or the
+  `fix_available` note. A re-discovery writes none. The trigger id is that event's id and the
+  source is `governance` (D27), so a trigger exists exactly when its event does and a repeated
+  write adds nothing.
+- **The worker.** Every 30 seconds it takes the open triggers, oldest first, and judges each
+  Release with the judgement of part 1. It then closes the trigger in **one transaction** with
+  what follows. It runs off the inbox transaction. It is wired only when both the Registry and
+  the Knowledge read seams are; without them triggers are recorded and wait.
+- **Outcome none.** The trigger keeps the reason and nothing else is written: `mode_off` (the
+  effective mode is off: no rebuild tag, or a level says off) or `nothing_counts` (the mode
+  allows a rebuild and no component counts).
+- **Outcome recommend or request (D27, D29).** A row in `rebuild_decisions` with a new decision
+  id and the facts frozen as JSON: the Release, Product and Project, the trigger, the effective
+  mode and who set it, the tag and its level, the policy in force with its scope, version and
+  **values**, the counts, every targeted entry with the fields of D34, and the `other_stream`
+  list. In the same transaction one event goes to the outbox with the Release as subject:
+  `governance.rebuild_recommended.v1` for mode ask, `governance.rebuild_requested.v1` for mode
+  auto. The event carries the same decision; the record is the audit copy (D29). Both have a
+  frozen v1 schema and a contract test.
+- **A trigger that cannot be judged** (Registry or Knowledge cannot be read) stays open and is
+  tried again on the next pass; the failure is logged once per trigger, not on every pass. Part 1's read answers with every fix unknown in that case; the
+  worker must not, or "nothing counts" would be recorded for a Release that was never judged.
+  After 24 hours the trigger is closed with reason `gave_up`: a rebuild asked for a day late
+  answers a question nobody is asking any more, and the next trigger judges the Release afresh.
+- **The read.** `GET /releases/{id}/rebuild-decisions` (read scope, `limit` default 20, at
+  most 200): the triggers of the Release, newest first, each open or closed, with the outcome,
+  the reason, and the decision when there is one.
+- **Storage.** Governance migration 30, reversible.
+
+**Open points of part 1, as settled for part 2.**
+
+1. **The event keeps `fixed_versions` as a list** (point 2). Governance orders no version
+   strings (D30), so it cannot pick one.
+2. **`fix_source` stays `knowledge_verdict`** (point 3). Naming the feed needs Knowledge to
+   store it; that stays backlog work.
+3. Points 1, 4, 5 and 6 are unchanged and carried by the event as they are: language packages
+   read unknown, the severity is the base score, a stale decision still counts as decided, and
+   a row the sweep has not reached is served as last judged.
+
+**What part 2 does not do, on purpose.**
+
+1. **No "do not ask twice".** Every trigger gives its own decision. One open cycle per Release
+   (D13) and the cool-down (D14) belong to the cycle, which Communication keeps from R3. Until
+   then two triggers on one Release give two decisions and two events that nobody acts on.
+2. **No approval.** A recommendation is recorded and published; approving it (D22) is a later
+   step.
+3. **No build profile on the event** (D10, step R2a). Added by step R2a, see below.
+4. **Mode `off` does not stop anything that is open**, because nothing is open yet. The
+   question stays with the owner for R3.
+
+**VM check of part 2 (2026-11-28, task 4.5): PASS.** Main after #278, auth on, the same
+Release as before, installation policy version 4 (mode ask). The two triggers were test rows
+written by hand into `rebuild_triggers` (source `vm-check`, type `fix_available`), because no
+new SBOM and no new fix arrived during the check.
+
+| Step | Expected | Seen |
+| --- | --- | --- |
+| Governance restart | migration 30 applied | `schema_migrations` reads 30 |
+| Worker | enabled | "rebuild-trigger worker enabled" in the log |
+| Trigger 1, Release has no tag | `none`, reason `mode_off`, no decision | `none`, `mode_off`, mode `off`, 48 would count, no decision |
+| Tag `rebuild:ask` set, trigger 2 | `recommend` with a decision | `recommend`, mode `ask` set by `installation`, tag `rebuild:ask` at level `release`, policy version 4 |
+| Frozen facts | as the judgement read | considered 596, targeted 48, other_stream 44, skipped 235 / 234 / 44 / 33 / 2 |
+| Outbox | one rebuild event | one `governance.rebuild_recommended` with schema `governance.rebuild_recommended.v1` |
+| `rebuild_decisions` | one row | one row, outcome `recommend` |
+| Tag removed | tags empty | tags empty |
+| Governance error log | nothing | nothing |
+
+- Each trigger was closed within one 45 second wait.
+- The numbers of the decision are the numbers of the read of part 1 on the same data, so the
+  worker and the read give one answer.
+- Nothing was sent out: no ticket, no mail, no card, no build.
+- **Not exercised on the VM:** a trigger written by a real event (the two write sites are
+  covered by the integration tests only), mode `auto` and the `rebuild_requested` event, and
+  the `gave_up` path. The first real `fix_available` or new SBOM on the VM is the natural
+  check of the write sites (backlog `GOV-REBUILD-TRIGGER-LIVE-1`).
+- The two test triggers and the one test decision stay in the VM database as the record of
+  this check; they are marked by the source `vm-check`.
+
+### Step R2a as built (2026-11-28)
+
+Owner go 2026-11-28, scope chosen by the owner: all three parts (Registry, the copy onto the
+event, a form in the current GUI).
+
+**Registry (D10 items 1 to 5).**
+
+1. Table `registry_build_profiles` (Registry migration 6, reversible). Records are only added:
+   every save and every removal is a new row with its own revision number (counted per
+   Project or Release from 1), the actor, the name of the API key, and the time. The current
+   value of a level is its latest row.
+2. The profile is kept as TEXT in compact form, with the keys in the order they were written.
+   The SHA-256 is taken over exactly these bytes, and the read API serves exactly these bytes.
+3. Checks on write: one JSON object, at most 16 KiB, at most 5 levels deep, and no key named
+   like a secret (`password`, `token`, `secret`, `apikey`, `credential`; any case, `_` and `-`
+   ignored, at any depth). Values are never looked at: the check guards against a mistake and
+   proves nothing.
+4. Addresses, all under `/api/v1`:
+   - `GET`, `PUT`, `DELETE` `/projects/{id}/build-profile`
+   - `GET`, `PUT`, `DELETE` `/releases/{id}/build-profile`
+   - `GET /releases/{id}/build-profile/resolved`: the profile in force for the Release (its
+     own, else its Project's) with `found`, `scope`, revision and digest.
+   Writers are `admin` or the Product's own key, as for tags. `PUT` takes `{profile, actor}`;
+   `DELETE` takes `?actor=`.
+5. A Release profile replaces the Project's as a whole. A removed Release profile gives the
+   Release its Project's profile again.
+
+**Governance (D10 items 6 and 7, D16).**
+
+1. The trigger worker reads the resolved profile from Registry only when the judgement would
+   ask for something (outcome `recommend` or `request`). An outcome of `none` reads nothing.
+2. **No profile, no request.** Mode `auto` with no profile gives a recommendation. Every
+   recommendation now says why it is one, in the new field `recommend_reason`: `mode_ask` or
+   `no_build_profile`. With no profile the reason is `no_build_profile` in both modes, because
+   that is what must be fixed first.
+3. With a profile, the decision and its event carry `build` (the profile) and `build_profile`
+   (`scope`, `revision`, `sha256`). The value is frozen in the decision row: a later edit in
+   Registry changes the next decision and not this one.
+4. **The read fails closed.** A Registry that cannot be reached, an answer with no `found`
+   field, or a "found" answer with a part missing keeps the trigger open and it is tried again,
+   up to the 24 hour limit. Only an explicit `found: false` reads as "no profile". **An older
+   Registry without the new address therefore holds every counting trigger open: upgrade and
+   restart Registry before or together with Governance.**
+5. The two event schemas `governance.rebuild_recommended.v1` and
+   `governance.rebuild_requested.v1` gained fields and kept their version, because nothing
+   reads these events yet (Communication acts on them from R3). `rebuild_requested` now
+   requires `build` and `build_profile`; `rebuild_recommended` requires `recommend_reason`.
+
 **GUI.** The Estate page of the current GUI has a "Build profile" card under the tag editor.
 It follows the picked Project, or the Release whose "tags, build profile…" link was clicked. It
 shows the stored profile, which profile is in force for a Release, and the history; it saves
@@ -1507,8 +1841,38 @@ rule is stated on the form (D10 item 3).
    query. The GUI always sends the signed-in user, but a hand-made request through the
    dashboard could name someone else. The API key name is recorded beside it either way
    (backlog `GUI-ACTOR-GATE-1`).
-3. The React GUI at `/next/` has no such form yet; it comes with that GUI's Estate work.
-4. Not yet checked on the VM (task 5.6).
+3. Checked on the VM, see below. The form in the React GUI was not yet looked at there.
+
+**VM check of R2a (2026-11-28, task 5.6): PASS.** Main after #280, auth on, the same Release
+as in the earlier checks, installation policy mode ask. Registry was restarted first, then
+Governance and the dashboard. The two triggers were test rows written by hand into
+`rebuild_triggers` (source `vm-check`).
+
+| Step | Expected | Seen |
+| --- | --- | --- |
+| Registry restart | migration 6 applied | `registry_schema_migrations` reads 6 |
+| Save a Project profile | revision and digest | revision 1, `sha256` returned, profile served as sent |
+| Profile with the key `api_token` | refused, 400 | 400, "the key \"api_token\" is named like a secret; credentials stay on the build side" |
+| Resolved read of the Release | found, scope `project` | found, scope `project`, revision 1, the same digest |
+| Tag `rebuild:ask`, trigger A | `recommend`, reason `mode_ask`, with `build` | `recommend`, `mode_ask`, `build` is the saved profile, `build_profile` scope `project` revision 1 with the same digest, 48 targeted |
+| Profile removed | a removal record | revision 2, `removed` true |
+| Trigger B, no profile | `recommend`, reason `no_build_profile`, no `build` | `recommend`, `no_build_profile`, `build` and `build_profile` absent, 48 targeted |
+| History of the Project profile | one saved, one removed, no current | revision 2 removed, revision 1 saved, no current |
+| Tag removed | tags empty | tags empty |
+| Registry and Governance error log | nothing | nothing |
+
+- Each trigger was closed within one 45 second wait.
+- The digest on the decision is the digest Registry gave on the save, so the decision names
+  the stored revision.
+- Nothing was sent out: no ticket, no mail, no card, no build.
+- **Not exercised on the VM:** a Release's own profile replacing the Project's, mode `auto`
+  with a profile (the `rebuild_requested` event with `build`), and an unreachable Registry
+  keeping a trigger open. These are covered by the tests.
+- **The form was looked for and not found:** the owner uses the React GUI, and #280 had the
+  card in the old GUI only. The React card was built after this check and still needs its own
+  look on the VM (task 5.7, backlog `GUI-BUILD-PROFILE-CHECK-1`).
+- The test profile was removed again; its two history rows and the two test triggers stay as
+  the record of this check.
 
 ## Honest limits
 
