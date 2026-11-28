@@ -115,6 +115,12 @@ const (
 	// FixKnown — the occurrence is open AND below at least one vendor bound published for its
 	// own package and world. The same fact the fix-available alert announces.
 	FixKnown FixStanding = "known"
+	// FixOtherStream — the occurrence is open and below vendor bounds, but every one of them is a
+	// build of ANOTHER module stream (EDR-REBUILD-01 KN-BEHIND-MODULE-1). A plain update or
+	// rebuild never reaches such a build; switching the stream is a person's change. So it is a
+	// fix that exists, and not one a rebuild can pick up. The caller decides this from the
+	// bounds (the app's reach rule); FixStandingOf never returns it.
+	FixOtherStream FixStanding = "other_stream"
 	// FixNone — nothing to pick up: the install already carries the fix (a clearance), or the
 	// comparison ran and no bound for this package and world is on record.
 	FixNone FixStanding = "none"

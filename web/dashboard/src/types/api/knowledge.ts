@@ -259,7 +259,7 @@ export interface paths {
         };
         /**
          * For every live occurrence of one release, whether a published fix exists that the install has not picked up (EDR-REBUILD-01 D19, D30).
-         * @description Serves the RECORDED occurrence verdict, so a consumer in another context never orders version strings itself. `fix` is `known` when the occurrence is open and below at least one vendor bound for its own package and world, `none` when there is nothing to pick up (already cleared, or compared with no bound on record), and `unknown` when Themis could not compare (an ecosystem the fixed-verdict does not cover, or an rpm build that names no EL stream). Unknown is not a known fix. Read-only; a release with no match is an empty list. 503 when the read is not wired.
+         * @description Serves the RECORDED occurrence verdict, so a consumer in another context never orders version strings itself. `fix` is `known` when the occurrence is open and below at least one vendor bound for its own package and world, `other_stream` when every such bound is a build of another module stream (a fix exists, a rebuild does not pick it up), `none` when there is nothing to pick up (already cleared, or compared with no bound on record), and `unknown` when Themis could not compare (an ecosystem the fixed-verdict does not cover, or an rpm build that names no EL stream). Unknown is not a known fix. Read-only; a release with no match is an empty list. 503 when the read is not wired.
          */
         get: operations["getReleaseFixVerdicts"];
         put?: never;
@@ -572,8 +572,11 @@ export interface components {
             ecosystem: string;
             /** @description The recorded occurrence verdict (`open` or `cleared_vendor_fix`). */
             state: string;
-            /** @enum {string} */
-            fix: "known" | "none" | "unknown";
+            /**
+             * @description `other_stream` - the occurrence is below vendor bounds, and every one of them is a build of another module stream, which a plain update or rebuild never reaches.
+             * @enum {string}
+             */
+            fix: "known" | "other_stream" | "none" | "unknown";
             /** @description The vendor fix bounds the open occurrence is below; empty unless `fix` is `known`. */
             behind: string[];
         };

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/themis-project/themis/internal/kernel/value"
 	"github.com/themis-project/themis/internal/knowledge/domain"
 )
 
@@ -64,10 +65,14 @@ func (s *ReadService) ReleaseFixVerdicts(ctx context.Context, releaseID string) 
 	}
 	out := make([]FixVerdict, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, FixVerdict{
-			MatchVerdict: r,
-			Fix:          domain.FixStandingOf(r.State, r.Ecosystem, r.Version, r.Behind),
-		})
+		fix := domain.FixStandingOf(r.State, r.Ecosystem, r.Version, r.Behind)
+		// A fix that lives only in another module stream is not one a rebuild picks up
+		// (KN-BEHIND-MODULE-1). Derived here from the recorded bounds, so no stored row changes.
+		if fix == domain.FixKnown && value.ClassifyEcosystem(r.Ecosystem) == value.VersionClassRPM &&
+			boundsOnlyInAnotherStream(r.Version, r.Behind) {
+			fix = domain.FixOtherStream
+		}
+		out = append(out, FixVerdict{MatchVerdict: r, Fix: fix})
 	}
 	return out, nil
 }

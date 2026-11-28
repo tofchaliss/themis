@@ -91,6 +91,10 @@ type RebuildEvaluation struct {
 	// Considered counts the open component occurrences of open Findings the policy looked at.
 	Considered int
 	Targeted   []RebuildEvaluationEntry
+	// OtherStream are the occurrences that would count, were their fix not published only for
+	// another module stream. A rebuild does not pick such a fix up, so they are not targeted;
+	// they are listed so that a person can act (switch the stream, or decide).
+	OtherStream []RebuildEvaluationEntry
 	// Skipped counts the occurrences that did not count, by reason (domain.RebuildSkipped*).
 	Skipped map[string]int
 	// FixVerdictsRead is false when Knowledge could not be asked: every fix then reads unknown,
@@ -178,8 +182,7 @@ func (s *RebuildEvaluationService) Evaluate(ctx context.Context, releaseID strin
 
 	verdict := domain.EvaluateRebuild(pol.InForce.Policy, candidates)
 	out.Skipped = verdict.Skipped
-	out.Targeted = make([]RebuildEvaluationEntry, 0, len(verdict.Targeted))
-	for _, t := range verdict.Targeted {
+	entry := func(t domain.RebuildTarget) RebuildEvaluationEntry {
 		d := details[occurrenceKey{string(t.FindingID), t.PURL}]
 		e := RebuildEvaluationEntry{
 			RebuildTarget: t, CurrentVersion: d.version, Score: d.score,
@@ -188,13 +191,21 @@ func (s *RebuildEvaluationService) Evaluate(ctx context.Context, releaseID strin
 		if d.ownerSet {
 			e.ScoreSource = RebuildScoreSourceOwner
 		}
-		if t.Fix == domain.RebuildFixKnown {
+		if t.Fix == domain.RebuildFixKnown || t.Fix == domain.RebuildFixOtherStream {
 			e.FixedVersions, e.FixSource = d.fixed, RebuildFixSourceVerdict
 		}
 		if !(domain.MatchedComponent{ClaimClass: t.ClaimClass}).ActsAsCarrier() {
 			e.AssessmentState = RebuildAssessmentNotEligible
 		}
-		out.Targeted = append(out.Targeted, e)
+		return e
+	}
+	out.Targeted = make([]RebuildEvaluationEntry, 0, len(verdict.Targeted))
+	for _, t := range verdict.Targeted {
+		out.Targeted = append(out.Targeted, entry(t))
+	}
+	out.OtherStream = make([]RebuildEvaluationEntry, 0, len(verdict.OtherStream))
+	for _, t := range verdict.OtherStream {
+		out.OtherStream = append(out.OtherStream, entry(t))
 	}
 	out.Outcome = domain.RebuildOutcome(pol.EffectiveMode, len(out.Targeted))
 	return out, nil

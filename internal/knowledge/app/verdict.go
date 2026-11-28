@@ -223,6 +223,24 @@ func openReason(view domain.EnterpriseView, comp InventoryComponent, pkg string)
 	return reason
 }
 
+// boundsOnlyInAnotherStream reports whether NONE of the bounds an open rpm occurrence is below
+// can be reached by a plain update of the installed package (KN-BEHIND-MODULE-1). It is the
+// structured form of the two "likely another module stream" shapes openReason states in prose:
+//
+//   - the install and every bound are module builds, and no bound shares the install's upstream
+//     series (mysql:8.0 against fixes published only for mysql:8.4);
+//   - the install is a base-repository build and every bound is a module build (base perl 5.26
+//     against perl:5.30 / perl:5.32 rebuilds).
+//
+// One reachable bound — a plain build, or a module build of the install's own series — makes
+// the answer false: then the install is simply behind. False for no bounds.
+func boundsOnlyInAnotherStream(installed string, bounds []string) bool {
+	if len(otherStreamSeries(installed, bounds)) > 0 {
+		return true
+	}
+	return !value.IsRPMModuleStream(installed) && allModuleBuilds(bounds)
+}
+
 // allModuleBuilds reports whether every bound is a module-stream rebuild.
 func allModuleBuilds(bounds []string) bool {
 	for _, b := range bounds {

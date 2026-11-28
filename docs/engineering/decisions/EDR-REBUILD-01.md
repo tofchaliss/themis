@@ -1274,6 +1274,48 @@ triggers (D3), the stored decision (D27, D29) and the two events (D9).
   without a `tags` field is an error. Registry follow-up: backlog `RG-VIEW-TAGS-1`.
 - The tag steps (ask on the Release, off on the Product) are to be run again after the fix.
 
+**VM check, second run 2026-11-28: PASSED** (task 3.5, main `27dffe3` with the tag fix; the same
+Release). In order:
+
+1. No rebuild tag: outcome `none`, mode `off`, set by `tag`.
+2. `rebuild:ask` on the Release: outcome `recommend`, mode `ask`, tag level `release`, 92
+   counted. Set by `installation`, because the tag and the installation policy both say `ask`
+   and the policy side is named on a tie.
+3. `rebuild:auto` on the Release: still `recommend`, mode `ask`, set by `installation`. The tag
+   asked for `auto` and the installation's `ask` held (D17).
+4. `rebuild:off` added on the Product, with `rebuild:auto` still on the Release: outcome `none`,
+   mode `off`, set by `tag`, tag level `product`. Off on any level wins (D4).
+5. Both tags removed: back to step 1.
+
+Nothing was sent at any step. Not tried on the VM: a tag on the Project level, mode `auto` on
+the installation (so `request` was not seen), and Knowledge switched off; the unit tests cover
+all three. Part 1 is closed. The count of 92 still holds the module-stream entries of open
+point 7.
+
+**Open point 7 decided and built (owner, 2026-11-28).** The owner chose: a fix that exists only
+in another module stream does **not** count for a rebuild, and is shown as its own group. The
+other two choices were "count them like today" and "make it a policy field"; a field can still
+be added later.
+
+- **Knowledge.** `GET /releases/{id}/fix-verdicts` has a fourth `fix` value, `other_stream`: the
+  occurrence is open and below vendor bounds, and none of them can be reached by a plain update.
+  The rule is the structured form of the two shapes the open reason already states in prose:
+  (a) the install and every bound are module builds and no bound shares the install's upstream
+  series; (b) the install is a base-repository build and every bound is a module build. One
+  reachable bound (a plain build, or a module build of the install's own series) keeps it
+  `known`. The value is derived on read from the stored version and bounds, so there is no
+  migration, no stored row changes and no `VerdictGeneration` bump.
+- **Governance.** Under `fix_required` an `other_stream` occurrence is never targeted. When it
+  is severe enough to count otherwise, it is listed in `other_stream` on
+  `GET /releases/{id}/rebuild-evaluation` with the builds of the other stream, and counted under
+  `skipped.fix_other_stream`. When it is below the floor it is counted under `below_floor`
+  only. With `fix_required` off the stream does not matter. An older Governance reads the new
+  value as `unknown`, which also does not count.
+- **Not changed.** The fix-available alert (EDR-INCIDENT-01 D1) still announces such a bound.
+  That is the rest of backlog `KN-BEHIND-MODULE-1`.
+
+VM check of this change: pending (task 4.0).
+
 ## Honest limits
 
 - **A rebuild fixes only what a rebuild can fix.** If the base image has no fixed package yet,

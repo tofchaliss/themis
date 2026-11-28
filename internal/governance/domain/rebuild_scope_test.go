@@ -100,3 +100,33 @@ func TestEvaluateRebuildCountsWhatItSkipped(t *testing.T) {
 		}
 	}
 }
+
+// Owner decision 2026-11-28 (KN-BEHIND-MODULE-1): a fix that lives only in another module stream
+// never counts under fix_required. One severe enough to count is listed apart; one below the
+// floor is just below the floor. With fix_required off the stream does not matter.
+func TestEvaluateRebuildOtherStream(t *testing.T) {
+	cands := []domain.RebuildCandidate{
+		{FindingID: "f1", PURL: "a", Severity: domain.SLABucketHigh, Fix: domain.RebuildFixOtherStream},
+		{FindingID: "f2", PURL: "b", Severity: domain.SLABucketLow, Fix: domain.RebuildFixOtherStream},
+		{FindingID: "f3", PURL: "c", Severity: domain.SLABucketLow, KnownExploited: true, Fix: domain.RebuildFixOtherStream},
+		{FindingID: "f4", PURL: "d", Severity: domain.SLABucketHigh, Fix: domain.RebuildFixKnown},
+	}
+	got := domain.EvaluateRebuild(domain.DefaultRebuildPolicy(), cands)
+	if len(got.Targeted) != 1 || got.Targeted[0].FindingID != "f4" {
+		t.Fatalf("targeted = %+v", got.Targeted)
+	}
+	if len(got.OtherStream) != 2 || got.OtherStream[0].FindingID != "f1" || got.OtherStream[1].FindingID != "f3" ||
+		got.OtherStream[1].CountedBecause[0] != domain.RebuildCountedKnownExploited {
+		t.Errorf("other stream = %+v", got.OtherStream)
+	}
+	if got.Skipped[domain.RebuildSkippedOtherStream] != 2 || got.Skipped[domain.RebuildSkippedBelowFloor] != 1 || len(got.Skipped) != 2 {
+		t.Errorf("skipped = %+v", got.Skipped)
+	}
+
+	loose := domain.DefaultRebuildPolicy()
+	loose.FixRequired = false
+	got = domain.EvaluateRebuild(loose, cands)
+	if len(got.Targeted) != 3 || len(got.OtherStream) != 0 || got.Skipped[domain.RebuildSkippedBelowFloor] != 1 {
+		t.Errorf("fix not required: targeted %d other %d skipped %+v", len(got.Targeted), len(got.OtherStream), got.Skipped)
+	}
+}

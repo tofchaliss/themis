@@ -76,10 +76,13 @@ func evalFixture() (evalFacts, evalFixes) {
 			Components: []domain.MatchedComponent{open("pkg:rpm/redhat/zlib@1.2-1.el8", "1.2-1.el8", "")}},
 		{FindingID: "f3", FaultlineID: "fl-3", CVE: "CVE-2026-0003", Stage: "triage", BaseScore: 95,
 			Components: []domain.MatchedComponent{open("pkg:npm/left-pad@1.0.0", "1.0.0", "")}},
+		{FindingID: "f4", FaultlineID: "fl-4", CVE: "CVE-2026-0004", Stage: "triage", BaseScore: 95,
+			Components: []domain.MatchedComponent{open("pkg:rpm/redhat/python3-ply@3.9-9.el8", "3.9-9.el8", "")}},
 	}}
 	fixes := evalFixes{rows: []app.ReleaseFixVerdict{
 		{FaultlineID: "fl-1", PURL: "pkg:rpm/redhat/kernel@4.18.0-1.el8", Fix: domain.RebuildFixKnown, FixedVersions: []string{"0:4.18.0-2.el8"}},
 		{FaultlineID: "fl-2", PURL: "pkg:rpm/redhat/zlib@1.2-1.el8", Fix: domain.RebuildFixKnown, FixedVersions: []string{"0:1.2-9.el8"}},
+		{FaultlineID: "fl-4", PURL: "pkg:rpm/redhat/python3-ply@3.9-9.el8", Fix: domain.RebuildFixOtherStream, FixedVersions: []string{"0:3.11-10.module+el8.10.0+1+a"}},
 	}}
 	return facts, fixes
 }
@@ -100,7 +103,7 @@ func TestRebuildEvaluation_Read(t *testing.T) {
 	if got.ReleaseId != "rel-1" || got.ProductId != "prod-1" || got.ProjectId != "proj-1" || got.Outcome != "recommend" ||
 		got.EffectiveMode != "ask" || got.EffectiveModeSetBy != "installation" || got.ModeCeiling != "ask" ||
 		got.InstallationMode != "ask" || got.Tag.Mode != "auto" || got.Tag.Tag == nil || *got.Tag.Tag != "rebuild:auto" ||
-		got.Tag.Level == nil || *got.Tag.Level != "project" || !got.FixVerdictsRead || got.Considered != 3 ||
+		got.Tag.Level == nil || *got.Tag.Level != "project" || !got.FixVerdictsRead || got.Considered != 4 ||
 		got.Policy.ScopeKind != "installation" || got.EvaluatedAt.IsZero() {
 		t.Fatalf("judgement = %+v", got)
 	}
@@ -109,6 +112,11 @@ func TestRebuildEvaluation_Read(t *testing.T) {
 	}
 	if len(got.Targeted) != 1 {
 		t.Fatalf("targeted = %+v", got.Targeted)
+	}
+	// The fix that lives only in another module stream is listed apart and not targeted.
+	if got.Skipped.FixOtherStream != 1 || len(got.OtherStream) != 1 || got.OtherStream[0].FindingId != "f4" ||
+		len(got.OtherStream[0].FixedVersions) != 1 || got.OtherStream[0].Severity != "critical" {
+		t.Errorf("other stream = %+v skipped %+v", got.OtherStream, got.Skipped)
 	}
 	e := got.Targeted[0]
 	if e.FindingId != "f1" || e.Cve != "CVE-2026-0001" || e.Purl != "pkg:rpm/redhat/kernel@4.18.0-1.el8" || e.CurrentVersion != "4.18.0-1.el8" ||
@@ -148,7 +156,8 @@ func TestRebuildEvaluation_LoosePolicyAndNoTag(t *testing.T) {
 	}
 	code, got := getJSON[gen.RebuildEvaluation](t, srv.URL+"/releases/rel-1/rebuild-evaluation")
 	if code != http.StatusOK || got.Outcome != "none" || got.EffectiveMode != "off" || got.EffectiveModeSetBy != "tag" ||
-		got.Tag.Mode != "off" || got.Tag.Tag != nil || got.Tag.Level != nil || got.FixVerdictsRead || len(got.Targeted) != 2 {
+		got.Tag.Mode != "off" || got.Tag.Tag != nil || got.Tag.Level != nil || got.FixVerdictsRead || len(got.Targeted) != 2 ||
+		got.OtherStream == nil || len(got.OtherStream) != 0 {
 		t.Fatalf("judgement = %d %+v", code, got)
 	}
 	scope, odd := got.Targeted[0], got.Targeted[1]
