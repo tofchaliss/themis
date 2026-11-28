@@ -24,7 +24,8 @@
     "skipped",
     "targeted",
     "other_stream",
-    "decided_at"
+    "decided_at",
+    "recommend_reason"
   ],
   "properties": {
     "decision_id": {
@@ -326,6 +327,52 @@
     "decided_at": {
       "type": "string",
       "format": "date-time"
+    },
+    "build": {
+      "type": "object",
+      "description": "The build profile that applies to the Release, copied as stored and frozen on the decision (D10). Opaque: Themis does not read inside it."
+    },
+    "build_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "revision",
+        "sha256"
+      ],
+      "description": "Names the build profile the decision used (D16).",
+      "properties": {
+        "scope": {
+          "enum": [
+            "project",
+            "release"
+          ],
+          "description": "Where the profile is stored."
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Hex SHA-256 of the stored profile bytes, which are the bytes of `build`."
+        }
+      }
+    },
+    "recommend_reason": {
+      "enum": [
+        "mode_ask",
+        "no_build_profile"
+      ],
+      "description": "Why this is a recommendation and not a request. no_build_profile: no build profile applies to the Release, so no build could be asked for whatever the mode (D10 item 6); `build` and `build_profile` are then absent."
     }
+  },
+  "dependentRequired": {
+    "build": [
+      "build_profile"
+    ],
+    "build_profile": [
+      "build"
+    ]
   }
 }

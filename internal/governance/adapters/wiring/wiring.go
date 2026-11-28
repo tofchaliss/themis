@@ -181,7 +181,7 @@ func Wire(
 	// was never judged. Without them no worker is wired and the triggers simply hold.
 	var rebuildTriggers *app.RebuildTriggerWorker
 	if reg != nil && kn != nil {
-		rebuildTriggers = app.NewRebuildTriggerWorker(st, rebuildEval, idGen{}, sysClock{}, evaluationLog{logger})
+		rebuildTriggers = app.NewRebuildTriggerWorker(st, rebuildEval, reg, idGen{}, sysClock{}, evaluationLog{logger})
 	}
 	if reg != nil {
 		handler = handler.WithProductResolver(reg)

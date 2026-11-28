@@ -4,6 +4,7 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -106,6 +107,9 @@ func TestSettleRebuildTrigger(t *testing.T) {
 		Policy:     domain.RebuildDecisionPolicy{ScopeKind: "installation", Version: 2, FixRequired: true, SeverityFloor: domain.SLABucketHigh, Mode: "ask", CoolDownSeconds: 86400},
 		Considered: 9, Skipped: map[string]int{domain.RebuildSkippedBelowFloor: 8},
 		Targeted: []domain.RebuildDecisionEntry{entry}, OtherStream: []domain.RebuildDecisionEntry{}, DecidedAt: at,
+		RecommendReason: domain.RebuildRecommendModeAsk,
+		Build:           []byte(`{"image":"registry.example/app","args":{"BASE":"el8"}}`),
+		BuildProfile:    &domain.RebuildDecisionBuildProfile{Scope: "project", Revision: 3, SHA256: "abc123"},
 	}
 	rec := app.RebuildTriggerResult{Outcome: domain.RebuildOutcomeRecommend, EffectiveMode: "ask", ModeSetBy: "installation",
 		Considered: 9, Targeted: 1, SettledAt: at}
@@ -154,6 +158,16 @@ func TestSettleRebuildTrigger(t *testing.T) {
 		got.Targeted[0].FixedVersions[0] != "0:2.el8" || got.Skipped[domain.RebuildSkippedBelowFloor] != 8 || !got.DecidedAt.Equal(at) ||
 		got.TriggerID != pending[1].TriggerID {
 		t.Errorf("frozen facts read back = %+v", got)
+	}
+	// The build profile is frozen with the decision: the same JSON value, named by revision.
+	var build struct {
+		Image string            `json:"image"`
+		Args  map[string]string `json:"args"`
+	}
+	if err := json.Unmarshal(got.Build, &build); err != nil || build.Image != "registry.example/app" || build.Args["BASE"] != "el8" ||
+		got.RecommendReason != domain.RebuildRecommendModeAsk || got.BuildProfile == nil ||
+		*got.BuildProfile != (domain.RebuildDecisionBuildProfile{Scope: "project", Revision: 3, SHA256: "abc123"}) {
+		t.Errorf("frozen build read back = %s %+v %q (%v)", got.Build, got.BuildProfile, got.RecommendReason, err)
 	}
 	if !withReason.Settled || withReason.Result.Outcome != domain.RebuildOutcomeNone || withReason.Result.Reason != domain.RebuildNoneModeOff ||
 		withReason.Result.EffectiveMode != "off" || withReason.Result.ModeSetBy != "tag" || withReason.Result.Considered != 9 {

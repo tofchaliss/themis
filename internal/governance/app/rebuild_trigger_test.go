@@ -53,14 +53,40 @@ func (l *triggerLog) Error(msg, _ string, _ error) { l.msgs = append(l.msgs, msg
 
 var triggerNow = time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC)
 
+// buildProfiles is the Registry build profile read, canned.
+type buildProfiles struct {
+	profile app.ReleaseBuildProfile
+	err     error
+	calls   int
+	asked   string
+}
+
+func (b *buildProfiles) ReleaseBuildProfile(_ context.Context, releaseID string) (app.ReleaseBuildProfile, error) {
+	b.calls++
+	b.asked = releaseID
+	return b.profile, b.err
+}
+
+const triggerProfileJSON = `{"image":"registry.example/app","args":{"BASE":"el8"}}`
+
+func foundProfile() *buildProfiles {
+	return &buildProfiles{profile: app.ReleaseBuildProfile{Found: true, Profile: []byte(triggerProfileJSON),
+		Scope: "project", Revision: 3, SHA256: "abc123"}}
+}
+
 func triggerWorker(t *testing.T, st *triggerStore, mode domain.RebuildMode, tags []string, fixes app.ReleaseFixVerdictReader, log app.EvaluationLog) *app.RebuildTriggerWorker {
+	t.Helper()
+	return triggerWorkerWith(t, st, mode, tags, fixes, foundProfile(), log)
+}
+
+func triggerWorkerWith(t *testing.T, st *triggerStore, mode domain.RebuildMode, tags []string, fixes app.ReleaseFixVerdictReader, profiles app.BuildProfileReader, log app.EvaluationLog) *app.RebuildTriggerWorker {
 	t.Helper()
 	policy := app.NewRebuildPolicyService(&fakeRebuildPolicyStore{}, rebuildClock{}).WithTags(taggedRelease(tags...))
 	if _, err := policy.PutInstallation(context.Background(), policyWith(mode, domain.SLABucketHigh), "alice"); err != nil {
 		t.Fatal(err)
 	}
 	eval := app.NewRebuildEvaluationService(policy, rebuildFixture(), fixes, rebuildClock{triggerNow})
-	return app.NewRebuildTriggerWorker(st, eval, fixedIDs{}, rebuildClock{triggerNow}, log)
+	return app.NewRebuildTriggerWorker(st, eval, profiles, fixedIDs{}, rebuildClock{triggerNow}, log)
 }
 
 func oneTrigger(age time.Duration) []app.RebuildTrigger {
@@ -75,9 +101,10 @@ func TestRebuildTriggerRecordsADecisionAndItsEvent(t *testing.T) {
 		mode      domain.RebuildMode
 		outcome   string
 		eventType string
+		why       string
 	}{
-		{domain.RebuildModeAsk, domain.RebuildOutcomeRecommend, app.EventRebuildRecommended},
-		{domain.RebuildModeAuto, domain.RebuildOutcomeRequest, app.EventRebuildRequested},
+		{domain.RebuildModeAsk, domain.RebuildOutcomeRecommend, app.EventRebuildRecommended, domain.RebuildRecommendModeAsk},
+		{domain.RebuildModeAuto, domain.RebuildOutcomeRequest, app.EventRebuildRequested, ""},
 	}
 	for _, c := range cases {
 		st := &triggerStore{pending: oneTrigger(time.Minute)}
@@ -104,6 +131,11 @@ func TestRebuildTriggerRecordsADecisionAndItsEvent(t *testing.T) {
 			d.Tag != domain.RebuildTagAuto || d.TagLevel != domain.RebuildTagLevelRelease || !d.DecidedAt.Equal(triggerNow) {
 			t.Errorf("%s: decision head %+v", c.mode, d)
 		}
+		// D10 item 7, D16: the profile is copied as stored and named by scope, revision, digest.
+		if d.RecommendReason != c.why || string(d.Build) != triggerProfileJSON || d.BuildProfile == nil ||
+			*d.BuildProfile != (domain.RebuildDecisionBuildProfile{Scope: "project", Revision: 3, SHA256: "abc123"}) {
+			t.Errorf("%s: build %s %+v why %q", c.mode, d.Build, d.BuildProfile, d.RecommendReason)
+		}
 		p := d.Policy
 		if p.ScopeKind != app.RebuildScopeInstallation || p.Version != 1 || !p.FixRequired || p.SeverityFloor != domain.SLABucketHigh ||
 			p.Mode != string(c.mode) || p.CoolDownSeconds != int64(domain.RebuildCoolDownDefault/time.Second) {
@@ -123,6 +155,46 @@ func TestRebuildTriggerRecordsADecisionAndItsEvent(t *testing.T) {
 		if b.FindingID != "f2" || b.ClaimClass != "unknown" || !b.KnownExploited || b.ScoreSource != app.RebuildScoreSourceOwner {
 			t.Errorf("%s: bash entry %+v", c.mode, b)
 		}
+	}
+}
+
+// D10 item 6, no profile, no request: with no build profile the decision is a recommendation
+// that says so, whatever the mode, and carries no build.
+func TestRebuildTriggerNoProfileNoRequest(t *testing.T) {
+	for _, mode := range []domain.RebuildMode{domain.RebuildModeAuto, domain.RebuildModeAsk} {
+		st := &triggerStore{pending: oneTrigger(time.Minute)}
+		profiles := &buildProfiles{}
+		w := triggerWorkerWith(t, st, mode, []string{"rebuild:auto"}, rebuildFixVerdicts(), profiles, nil)
+		if n := w.Tick(context.Background()); n != 1 || len(st.settled) != 1 {
+			t.Fatalf("%s: settled %d", mode, n)
+		}
+		got := st.settled[0]
+		d := got.decision
+		if d == nil || d.Outcome != domain.RebuildOutcomeRecommend || d.RecommendReason != domain.RebuildRecommendNoBuildProfile ||
+			d.Build != nil || d.BuildProfile != nil || d.EffectiveMode != string(mode) {
+			t.Fatalf("%s: decision %+v", mode, d)
+		}
+		if got.res.Outcome != domain.RebuildOutcomeRecommend || got.note.EventType != app.EventRebuildRecommended {
+			t.Errorf("%s: result %+v note %q", mode, got.res, got.note.EventType)
+		}
+		if profiles.calls != 1 || profiles.asked != "rel-1" {
+			t.Errorf("%s: profile read %d times for %q", mode, profiles.calls, profiles.asked)
+		}
+	}
+}
+
+// A build profile that cannot be read keeps the trigger open: it must not read as "no
+// profile". A judgement that asks for nothing does not read the profile at all.
+func TestRebuildTriggerProfileUnreadAndUnneeded(t *testing.T) {
+	down := &buildProfiles{err: errors.New("registry down")}
+	log := &triggerLog{}
+	st := &triggerStore{pending: oneTrigger(time.Minute)}
+	if n := triggerWorkerWith(t, st, domain.RebuildModeAuto, []string{"rebuild:auto"}, rebuildFixVerdicts(), down, log).Tick(context.Background()); n != 0 || len(st.settled) != 0 || len(log.msgs) != 1 {
+		t.Fatalf("unread profile: settled %d %+v log %v", n, st.settled, log.msgs)
+	}
+	st = &triggerStore{pending: oneTrigger(time.Minute)}
+	if n := triggerWorkerWith(t, st, domain.RebuildModeAuto, nil, rebuildFixVerdicts(), down, nil).Tick(context.Background()); n != 1 || down.calls != 1 {
+		t.Fatalf("outcome none: settled %d, profile read %d times in all", n, down.calls)
 	}
 }
 

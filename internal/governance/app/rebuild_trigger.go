@@ -16,6 +16,10 @@ import (
 // that transaction, with the judgement of part 1, and closes it in one transaction with what
 // follows: a decision and its event (outcome recommend or request), or only the reason
 // (outcome none). It starts no build. Nothing consumes the two events until a later step.
+//
+// Step R2a adds the build profile (D10, D16): a decision carries the profile that applies to
+// the Release, frozen, with its scope, revision and digest. With no profile there is no
+// request: the decision is a recommendation whose reason says so.
 
 // The two rebuild events. One carries a recommendation for a person (mode ask), the other a
 // request (mode auto). Both carry a domain.RebuildDecision.
@@ -43,6 +47,24 @@ var ErrRebuildFixVerdictsUnread = errors.New("governance: the fix verdicts of th
 
 // ErrRebuildDecisionsUnavailable is returned when the decision read is not wired.
 var ErrRebuildDecisionsUnavailable = errors.New("governance: rebuild decisions not configured")
+
+// ReleaseBuildProfile is the build profile that applies to one Release, as Registry resolves
+// it (EDR-REBUILD-01 D10, D16): the Release's own, else its Project's.
+type ReleaseBuildProfile struct {
+	// Found is false when neither states one. The other fields are then empty.
+	Found bool
+	// Profile is the stored JSON object, byte for byte.
+	Profile  []byte
+	Scope    string
+	Revision int
+	SHA256   string
+}
+
+// BuildProfileReader reads it from Registry. It fails closed: an error, never "none" for a
+// profile that could not be read.
+type BuildProfileReader interface {
+	ReleaseBuildProfile(ctx context.Context, releaseID string) (ReleaseBuildProfile, error)
+}
 
 // RebuildTrigger is one recorded trigger.
 type RebuildTrigger struct {
@@ -93,11 +115,12 @@ type RebuildTriggerStore interface {
 
 // RebuildTriggerWorker judges open triggers.
 type RebuildTriggerWorker struct {
-	store RebuildTriggerStore
-	eval  *RebuildEvaluationService
-	ids   IDGenerator
-	clock Clock
-	log   EvaluationLog
+	store    RebuildTriggerStore
+	eval     *RebuildEvaluationService
+	profiles BuildProfileReader
+	ids      IDGenerator
+	clock    Clock
+	log      EvaluationLog
 	// waiting holds the open triggers whose failure was already reported, so that a Release
 	// that cannot be judged is said once and not on every pass. Process-local: a restart says
 	// it once more.
@@ -105,8 +128,8 @@ type RebuildTriggerWorker struct {
 }
 
 // NewRebuildTriggerWorker wires the worker. log may be nil.
-func NewRebuildTriggerWorker(store RebuildTriggerStore, eval *RebuildEvaluationService, ids IDGenerator, clock Clock, log EvaluationLog) *RebuildTriggerWorker {
-	return &RebuildTriggerWorker{store: store, eval: eval, ids: ids, clock: clock, log: log, waiting: map[int64]struct{}{}}
+func NewRebuildTriggerWorker(store RebuildTriggerStore, eval *RebuildEvaluationService, profiles BuildProfileReader, ids IDGenerator, clock Clock, log EvaluationLog) *RebuildTriggerWorker {
+	return &RebuildTriggerWorker{store: store, eval: eval, profiles: profiles, ids: ids, clock: clock, log: log, waiting: map[int64]struct{}{}}
 }
 
 // RunEvery judges on a cadence until ctx is cancelled.
@@ -154,6 +177,13 @@ func (w *RebuildTriggerWorker) settle(ctx context.Context, trig RebuildTrigger) 
 	if err == nil && !ev.FixVerdictsRead {
 		err = ErrRebuildFixVerdictsUnread
 	}
+	// The build profile is read only when something would be asked for (D10). A profile that
+	// cannot be read keeps the trigger open, like any other unreadable fact: it must not read
+	// as "no profile".
+	var profile ReleaseBuildProfile
+	if err == nil && ev.Outcome != domain.RebuildOutcomeNone {
+		profile, err = w.profiles.ReleaseBuildProfile(ctx, ev.Policy.ReleaseID)
+	}
 	if err != nil {
 		if now.Sub(trig.ReceivedAt) < domain.RebuildTriggerMaxAge {
 			return err
@@ -173,8 +203,15 @@ func (w *RebuildTriggerWorker) settle(ctx context.Context, trig RebuildTrigger) 
 		return w.store.SettleRebuildTrigger(ctx, trig, res, nil, OutboxNote{})
 	}
 	decision := newRebuildDecision(w.ids.NewID(), trig, ev, now)
+	// No profile, no request (D10 item 6): the decision is then a recommendation that says so.
+	decision.Outcome, decision.RecommendReason = domain.RebuildOutcomeWithProfile(ev.Outcome, profile.Found)
+	if profile.Found {
+		decision.Build = append([]byte{}, profile.Profile...)
+		decision.BuildProfile = &domain.RebuildDecisionBuildProfile{Scope: profile.Scope, Revision: profile.Revision, SHA256: profile.SHA256}
+	}
+	res.Outcome = decision.Outcome
 	eventType := EventRebuildRecommended
-	if ev.Outcome == domain.RebuildOutcomeRequest {
+	if decision.Outcome == domain.RebuildOutcomeRequest {
 		eventType = EventRebuildRequested
 	}
 	return w.store.SettleRebuildTrigger(ctx, trig, res, &decision,

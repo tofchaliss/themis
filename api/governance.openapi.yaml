@@ -2616,6 +2616,33 @@ components:
         outcome:
           type: string
           enum: [recommend, request]
+        recommend_reason:
+          type: string
+          enum: [mode_ask, no_build_profile]
+          description: >-
+            Why the outcome is `recommend`. `mode_ask` - the effective mode is ask, a person
+            decides. `no_build_profile` - no build profile applies to the Release, own or
+            inherited, so no build could be asked for whatever the mode (D10 item 6). Absent
+            on a request.
+        build:
+          type: object
+          description: >-
+            The build profile that applied to the Release, copied as stored and frozen on the
+            decision (D10). Themis does not read inside it. Absent when no profile applied.
+          additionalProperties: true
+          x-go-type: json.RawMessage
+        build_profile:
+          type: object
+          description: Names that profile (D16). Present exactly when `build` is.
+          required: [scope, revision, sha256]
+          properties:
+            scope:
+              type: string
+              enum: [project, release]
+            revision:
+              type: integer
+            sha256:
+              type: string
         decided_at:
           type: string
           format: date-time

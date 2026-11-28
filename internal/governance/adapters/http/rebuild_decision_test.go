@@ -73,6 +73,12 @@ func TestRebuildDecisions_Read(t *testing.T) {
 		Considered: 4, Targeted: []domain.RebuildDecisionEntry{entry, noFix}, OtherStream: []domain.RebuildDecisionEntry{},
 		DecidedAt: at,
 	}
+	// A decision with no build profile: a recommendation that says so, and no build.
+	bare := *decision
+	bare.DecisionID, bare.RecommendReason = "dec-0", domain.RebuildRecommendNoBuildProfile
+	decision.RecommendReason = domain.RebuildRecommendModeAsk
+	decision.Build = []byte(`{"image":"registry.example/app"}`)
+	decision.BuildProfile = &domain.RebuildDecisionBuildProfile{Scope: "release", Revision: 2, SHA256: "abc123"}
 	trig := func(id, typ string) app.RebuildTrigger {
 		return app.RebuildTrigger{TriggerID: id, Source: "governance", Type: typ, ReleaseID: "rel-1", ReceivedAt: at}
 	}
@@ -83,11 +89,13 @@ func TestRebuildDecisions_Read(t *testing.T) {
 		{RebuildTrigger: trig("evt-2", domain.RebuildTriggerNewSBOM), Settled: true,
 			Result: app.RebuildTriggerResult{Outcome: domain.RebuildOutcomeNone, Reason: domain.RebuildNoneGaveUp, SettledAt: at}},
 		{RebuildTrigger: trig("evt-1", domain.RebuildTriggerNewSBOM)},
+		{RebuildTrigger: trig("evt-0", domain.RebuildTriggerNewSBOM), Settled: true, Decision: &bare,
+			Result: app.RebuildTriggerResult{Outcome: domain.RebuildOutcomeRecommend, SettledAt: at}},
 	}}
 	srv := decisionServer(t, st)
 
 	code, got := getJSON[gen.RebuildTriggerList](t, srv.URL+"/releases/rel-1/rebuild-decisions?limit=7")
-	if code != http.StatusOK || len(got.Items) != 3 || st.limit != 7 {
+	if code != http.StatusOK || len(got.Items) != 4 || st.limit != 7 {
 		t.Fatalf("code %d items %d limit %d", code, len(got.Items), st.limit)
 	}
 	a := got.Items[0]
@@ -103,6 +111,15 @@ func TestRebuildDecisions_Read(t *testing.T) {
 		d.Policy.Version != 3 || !d.Policy.FixRequired || d.Policy.CoolDownSeconds != 3600 || string(d.Policy.Mode) != "ask" ||
 		d.Skipped == nil || len(d.Targeted) != 2 || len(d.OtherStream) != 0 || d.OtherStream == nil {
 		t.Fatalf("decision = %+v", d)
+	}
+	if d.RecommendReason == nil || string(*d.RecommendReason) != "mode_ask" || d.Build == nil ||
+		string(*d.Build) != `{"image":"registry.example/app"}` || d.BuildProfile == nil ||
+		string(d.BuildProfile.Scope) != "release" || d.BuildProfile.Revision != 2 || d.BuildProfile.Sha256 != "abc123" {
+		t.Errorf("build of the decision = %+v", d)
+	}
+	if n := got.Items[3].Decision; n == nil || n.RecommendReason == nil || string(*n.RecommendReason) != "no_build_profile" ||
+		n.Build != nil || n.BuildProfile != nil {
+		t.Errorf("decision without a profile = %+v", n)
 	}
 	if e := d.Targeted[0]; e.FindingId != "f1" || e.FixSource == nil || *e.FixSource != app.RebuildFixSourceVerdict ||
 		len(e.FixedVersions) != 1 || string(e.Assessment.State) != "not_assessed" || len(e.CountedBecause) != 1 || e.Position != "none" {

@@ -467,6 +467,24 @@ three angles, and two of them proposed fixes that would not have worked.
   every entity as untagged (it cost the first VM run of the rebuild judgement). Fill the field
   in the three handlers, or take it out of the schema for those reads.
 
+- [ ] **The build profile on the rebuild event is the same value, not the same bytes** (id
+  `GOV-BUILD-BYTES-1`, from EDR-REBUILD-01 step R2a, 2026-11-28, design). Registry keeps the
+  profile as text and takes the SHA-256 over it. Governance keeps the decision and the outbox
+  payload in JSON columns, which reorder keys, so a receiver cannot recompute the digest from
+  the event's `build`. Settle in R3 with D36: either the intent reads the stored bytes from
+  Registry by revision, or the event carries the profile as text.
+
+- [ ] **The dashboard gate does not check `actor`** (id `GUI-ACTOR-GATE-1`, from EDR-REBUILD-01
+  step R2a, 2026-11-28, hardening). The gate compares `actor_id` and `proposer_id` in a write
+  body with the signed-in user. The build profile, the rebuild policy and the security
+  requirements use `actor`, and their `DELETE` carries it in the query. Through the dashboard a
+  write-capable user could record another name. Add `actor` (body and query) to the gate's
+  check; this changes the security model, so it needs the owner's go.
+
+- [ ] **Build profile form in the React GUI** (id `GUI-NEXT-BUILD-PROFILE-1`, from EDR-REBUILD-01
+  step R2a, 2026-11-28, feature). The form exists in the current GUI only. Add it to the Estate
+  page at `/next/` when that page gets its edit actions.
+
 - [ ] **GUI page for the rebuild policies** (id `GUI-REBUILD-POLICY-1`, from EDR-REBUILD-01 step
   R1a, 2026-11-28, feature). One page that lists every policy in force (`GET /rebuild-policies`),
   shows the policy in force for a Release with its level and mode ceiling, and lets an admin

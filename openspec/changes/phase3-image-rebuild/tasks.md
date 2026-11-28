@@ -88,6 +88,25 @@ Every step waits for the owner's go and lands as its own PR.
 - [ ] 4.6 See one trigger written by a real event on the VM (a new SBOM or a real
   `fix_available`), and its outcome on the decisions read (backlog `GOV-REBUILD-TRIGGER-LIVE-1`).
 
+## Group 5 — R2a build profile (owner go 2026-11-28, all three parts)
+
+- [x] 5.1 Registry domain and app: the profile checks (JSON object, 16 KiB, 5 levels, no key
+  named like a secret), records with revision, actor and digest, removal as a record, and the
+  resolved profile of a Release (own, else the Project's, never merged).
+- [x] 5.2 Registry store and API: migration 6 `registry_build_profiles`, reversible; `GET`,
+  `PUT`, `DELETE` on Project and Release, and `GET /releases/{id}/build-profile/resolved`.
+- [x] 5.3 Governance: the worker reads the resolved profile when a judgement would ask for
+  something; "no profile, no request"; `recommend_reason`, `build` and `build_profile` on the
+  decision, the two events and the decisions read; schemas and contract tests updated.
+- [x] 5.4 GUI: the build profile card on the Estate page of the current GUI, with the
+  no-secrets rule on the form.
+- [x] 5.5 Gates: unit tests, `make vet-tags`, `make lint`, `make clean-arch`, `make arch-test`,
+  Registry and Governance integration tests on embedded Postgres.
+- [ ] 5.6 VM check: Registry migration 6 applies; a Project profile is saved and read back; a
+  profile with a secret-like key is refused; a forced trigger on a tagged Release gives a
+  decision with `build`; with the profile removed the decision says `no_build_profile`; the
+  form works in the GUI.
+
 ## Later groups
 
-- [ ] R2a to R6 as in the EDR's order of work, each on the owner's go.
+- [ ] R3 to R6 as in the EDR's order of work, each on the owner's go.

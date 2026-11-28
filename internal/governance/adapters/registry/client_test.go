@@ -341,3 +341,47 @@ func TestClient_ReleaseTagLevels(t *testing.T) {
 		}
 	}
 }
+
+// EDR-REBUILD-01 D10: the build profile of a Release is read raw and named by scope, revision
+// and digest. The read fails closed: only an explicit `found: false` is "no profile".
+func TestClient_ReleaseBuildProfile(t *testing.T) {
+	const profile = `{"image":"registry.example/app","args":{"BASE":"el8"}}`
+	rec := `{"revision":4,"sha256":"abc123","profile":` + profile + `}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := map[string]string{
+			"/api/v1/releases/rel-1/build-profile/resolved":       `{"release_id":"rel-1","project_id":"proj-1","found":true,"scope":"project","record":` + rec + `}`,
+			"/api/v1/releases/rel-none/build-profile/resolved":    `{"release_id":"rel-none","project_id":"proj-1","found":false}`,
+			"/api/v1/releases/rel-nofound/build-profile/resolved": `{"release_id":"rel-nofound"}`,
+			"/api/v1/releases/rel-norec/build-profile/resolved":   `{"found":true,"scope":"project"}`,
+			"/api/v1/releases/rel-noscope/build-profile/resolved": `{"found":true,"record":` + rec + `}`,
+			"/api/v1/releases/rel-norev/build-profile/resolved":   `{"found":true,"scope":"release","record":{"sha256":"abc123","profile":{}}}`,
+			"/api/v1/releases/rel-nosha/build-profile/resolved":   `{"found":true,"scope":"release","record":{"revision":1,"profile":{}}}`,
+			"/api/v1/releases/rel-noprof/build-profile/resolved":  `{"found":true,"scope":"release","record":{"revision":1,"sha256":"abc123"}}`,
+		}[r.URL.Path]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	c := registry.NewClient(srv.URL, srv.Client())
+	ctx := context.Background()
+
+	got, err := c.ReleaseBuildProfile(ctx, "rel-1")
+	if err != nil {
+		t.Fatalf("ReleaseBuildProfile: %v", err)
+	}
+	if !got.Found || got.Scope != "project" || got.Revision != 4 || got.SHA256 != "abc123" || string(got.Profile) != profile {
+		t.Errorf("profile = %+v (%s)", got, got.Profile)
+	}
+	if got, err := c.ReleaseBuildProfile(ctx, "rel-none"); err != nil || got.Found || got.Profile != nil {
+		t.Errorf("no profile = %+v %v", got, err)
+	}
+	// an older Registry without the address · no found field · found with parts missing.
+	for _, id := range []string{"missing", "rel-nofound", "rel-norec", "rel-noscope", "rel-norev", "rel-nosha", "rel-noprof"} {
+		if got, err := c.ReleaseBuildProfile(ctx, id); err == nil || got.Found {
+			t.Errorf("release %q: want an error, got %+v", id, got)
+		}
+	}
+}

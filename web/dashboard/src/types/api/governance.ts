@@ -1487,6 +1487,22 @@ export interface components {
             decision_id: string;
             /** @enum {string} */
             outcome: "recommend" | "request";
+            /**
+             * @description Why the outcome is `recommend`. `mode_ask` - the effective mode is ask, a person decides. `no_build_profile` - no build profile applies to the Release, own or inherited, so no build could be asked for whatever the mode (D10 item 6). Absent on a request.
+             * @enum {string}
+             */
+            recommend_reason?: "mode_ask" | "no_build_profile";
+            /** @description The build profile that applied to the Release, copied as stored and frozen on the decision (D10). Themis does not read inside it. Absent when no profile applied. */
+            build?: {
+                [key: string]: unknown;
+            };
+            /** @description Names that profile (D16). Present exactly when `build` is. */
+            build_profile?: {
+                /** @enum {string} */
+                scope: "project" | "release";
+                revision: number;
+                sha256: string;
+            };
             /** Format: date-time */
             decided_at: string;
             product_id: string;

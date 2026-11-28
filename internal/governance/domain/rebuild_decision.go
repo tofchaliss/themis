@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // The rebuild decision (EDR-REBUILD-01 D9, D27, D29; step R2 part 2). A trigger of D3 makes
 // Governance judge one Release. When the judgement ends in "recommend" or "request", Governance
@@ -90,6 +93,40 @@ type RebuildDecisionPolicy struct {
 	Mode                string `json:"mode"`
 }
 
+// Why a decision is a recommendation and not a request (D5, D10 item 6).
+const (
+	// RebuildRecommendModeAsk: the effective mode of the Release is ask, so a person decides.
+	RebuildRecommendModeAsk = "mode_ask"
+	// RebuildRecommendNoBuildProfile: no build profile applies to the Release, own or
+	// inherited, so no build could be asked for whatever the mode. No profile, no request.
+	RebuildRecommendNoBuildProfile = "no_build_profile"
+)
+
+// RebuildOutcomeWithProfile applies "no profile, no request" (D10 item 6) to the outcome the
+// mode gives. A request with no build profile becomes a recommendation that says so; a
+// recommendation says whether the mode or the missing profile holds it. An outcome of none is
+// returned as it is.
+func RebuildOutcomeWithProfile(outcome string, profileFound bool) (out, recommendReason string) {
+	switch {
+	case outcome != RebuildOutcomeRequest && outcome != RebuildOutcomeRecommend:
+		return outcome, ""
+	case !profileFound:
+		return RebuildOutcomeRecommend, RebuildRecommendNoBuildProfile
+	case outcome == RebuildOutcomeRecommend:
+		return RebuildOutcomeRecommend, RebuildRecommendModeAsk
+	default:
+		return RebuildOutcomeRequest, ""
+	}
+}
+
+// RebuildDecisionBuildProfile names the build profile a decision used (D16): where it is
+// stored (project or release), its revision there, and the digest of its stored bytes.
+type RebuildDecisionBuildProfile struct {
+	Scope    string `json:"scope"`
+	Revision int    `json:"revision"`
+	SHA256   string `json:"sha256"`
+}
+
 // RebuildDecision is one recorded decision and the payload of
 // governance.rebuild_recommended.v1 (outcome recommend) and governance.rebuild_requested.v1
 // (outcome request). Its DecisionID is the identity of a recommendation (D27).
@@ -105,6 +142,15 @@ type RebuildDecision struct {
 	TriggerType   string `json:"trigger_type"`
 	// Outcome is recommend or request. A judgement with outcome none records no decision.
 	Outcome string `json:"outcome"`
+	// RecommendReason says why the outcome is recommend (RebuildRecommend*); "" on a request.
+	RecommendReason string `json:"recommend_reason,omitempty"`
+	// Build is the build profile that applies to the Release, copied and frozen here (D10 item
+	// 7). Themis does not read inside it. Absent when no profile applies. It is the same JSON
+	// value Registry stores; a JSON store may reorder its keys, so BuildProfile.SHA256 names
+	// the stored revision and is not a digest of these bytes.
+	Build json.RawMessage `json:"build,omitempty"`
+	// BuildProfile names that profile (D16). Nil exactly when Build is absent.
+	BuildProfile *RebuildDecisionBuildProfile `json:"build_profile,omitempty"`
 	// EffectiveMode is D17 whole, and EffectiveModeSetBy the value that set it.
 	EffectiveMode      string `json:"effective_mode"`
 	EffectiveModeSetBy string `json:"effective_mode_set_by"`
