@@ -1084,7 +1084,7 @@ not say which new rules reach it. Decided:
 | R2a | build profile on Project and Release: storage, history, read and write API, the secret-name and size checks, a GUI form. Built 2026-11-28, with the copy onto the event and "no profile, no request" | Registry domain, API, migration; GUI |
 | R3 | Communication consumes the events; the cycle opens from them; `rebuild_requested` and `rebuild_recommended` webhook routes; signed-only rule; the status call, attempt reservation, refusal counter and try number (D20, D28, D40); settling `uncertain` (D24) | Communication, API |
 | R4 | mode `ask`: the "start rebuild" action in API and GUI; one standing recommendation and its states (D41, D44, D45, D46); the expiry sweep (D32) | Governance or Communication API, GUI |
-| R5 | reference build connector, with the durable event record of D12, the stored states and recovery worker of D37, the per-intent claim of D39, and the required checks of D18 | new repository |
+| R5 | reference build connector, with the durable event record of D12, the stored states and recovery worker of D37, the per-intent claim of D39, and the required checks of D18. Built 2026-11-28 as a Go module of its own under `connectors/jenkins-rebuild/` until the repository exists | new repository (for now a nested module here) |
 | R6 | VM check: one release tagged, one fix published, one build, one comparison | test VM |
 
 R1 changes the domain model and an API, R3 changes event contracts, R5 is a new repository. Each
@@ -1768,6 +1768,100 @@ now carry an empty list of joined decisions.
 100%. Store tests on a real database: Governance 83%, Communication 85%, migration 32 down and
 up. `make lint`, `make vet-tags`, `make clean-arch`, `make arch-test`; GUI `npm run check` and
 the bundle rebuilt.
+
+### Step R5 as built (2026-11-28)
+
+Same owner go as R3. Where a choice was open the recommended pick was taken and is named as
+**Pick**.
+
+**What it is.** A small program, `themis-rebuild-connector`, that receives the signed request
+`themis.rebuild.requested.v1`, checks it, starts one job in Jenkins through the Jenkins API,
+and tells Themis the result with the status call. It uses the Go standard library only and
+imports nothing from Themis. Its own guide is `connectors/jenkins-rebuild/README.md`.
+
+**Pick: where it lives.** D8 says "own repository". A repository could not be created in this
+step, so the connector lives in `connectors/jenkins-rebuild/` as a Go module of its own
+(module `github.com/themis-project/themis-rebuild-connector`). The Themis build does not
+compile it and it cannot import Themis code, so the boundary D8 wants holds. Moving it later
+is one `git subtree split` (the README says how). Backlog `CONN-REBUILD-OWN-REPO-1`.
+
+**How each decision is met.**
+
+1. **D12, durable record first.** `POST /events` stores the request under the event id before
+   it answers. The same id again returns the stored state and starts nothing.
+2. **D18, required checks.** Signature, event type, age (default 24 hours), allow-list of jobs
+   per Product and Project, parameter schema per job. The connector does not start with an
+   empty allow-list, with a job that has no schema, or with a missing secret. An unknown field
+   in the configuration is an error.
+3. **D31, value rules.** Seven built-in rules (`branch`, `image_tag`, `registry_path`, `enum`,
+   `bool`, `int`, `text`), each with a length limit. A list or an object is refused. Values go
+   to Jenkins as form parameters only. A test runs a list of command-syntax values against
+   every rule.
+4. **D33, narrow credential.** At start the connector asks Jenkins who it is and which jobs it
+   can see. It starts only when every allowed job is visible and no other job is. The stated
+   exception is `accept_broad_credential`, logged at every start and shown on `/status`.
+   **Pick:** Jenkins has no call for "jobs this user may build", so the check uses the jobs
+   the user can see. That is the wider right, so the check errs to the safe side.
+5. **D37, stored states.** `received`, `submitting`, `submitted`, `refused`, `uncertain`, and
+   a flag `reported`. A recovery pass at start and every 30 seconds picks up every record that
+   is not finished or not reported.
+6. **D39, one worker per intent.** The claim is one conditional write with a counter. A result
+   names the counter, so a worker that lost its claim cannot write. A record left in
+   `submitting` is never called again directly: the connector asks Jenkins first. The call
+   timeout must be shorter than the claim, and the configuration is refused otherwise.
+7. **D39 item 5, when "no build found" is believed.** The search reads the queue and the
+   newest 100 builds of the job, twice, a few seconds apart. "Not found" counts only when both
+   passes agree and the builds read reach back before the request arrived. Otherwise the
+   request becomes `uncertain`.
+8. **D28, the status call.** `POST` to `/callbacks/ci-rebuild` with a key of scope
+   `delivery:callback`. It is sent again until Themis confirms it.
+9. **D38.** The connector reports `submitted` when Jenkins accepts the build. It does not
+   report the start of execution; the new SBOM is what tells Themis the build ran.
+
+**Pick: the store.** One JSON file per request in a directory, with a file lock, replaced by
+rename. Several instances may share it on one host or on a file system with working locks. A
+database store is a second implementation of the `Store` interface
+(`CONN-REBUILD-STORE-DB-1`).
+
+**What the job receives beside the build profile.** `THEMIS_INTENT_ID`, `THEMIS_PRODUCT_ID`,
+`THEMIS_PROJECT_ID`, `THEMIS_RELEASE_ID`, `THEMIS_PRIOR_SBOM_ID`, `THEMIS_ATTEMPT`,
+`THEMIS_TARGETED_CVES`. A build profile may not set a name that starts with `THEMIS_`.
+
+**A build change, stated.** The Makefile has a new target `connector-check` (vet and tests of
+the nested module), and `make check` and `make check-ci` run it. Without it no gate would
+ever compile the connector. This is on the "must ask" list; it was done under the owner's go
+for the whole run and is named here so it can be taken out again.
+
+**Known limits of this step.**
+
+1. Tested against a fake Jenkins and a fake Themis only. No real Jenkins has seen it
+   (`CONN-REBUILD-REAL-JENKINS-1`).
+2. More than 100 builds of one job between the request and the search gives `uncertain`, not
+   a second call.
+3. The credential check sees visibility, not the build right.
+4. The connector's coverage is not in the coverage gate of this repository; its tests run in
+   `connector-check` (statement coverage 94% when measured by hand).
+
+**Checked.** `go vet`, `go test` and `go test -race` of the module; `make connector-check`.
+
+### Step R6: the VM check (handed to the owner 2026-11-28, result pending)
+
+The check runs on the test VM by the owner's hand. It covers, in this order:
+
+1. Migrations: Governance at 32, Communication at 12 (`scripts/vm-verify.sh`).
+2. Communication with `THEMIS_COMMUNICATION_REBUILD_OPEN_FROM=decision` and a signed
+   `rebuild_requested` route to a local connector.
+3. One Release tagged `rebuild:ask` with a build profile.
+4. A trigger for that Release, then the standing recommendation on
+   `GET /releases/{id}/rebuild-recommendation` and on the Release page of the GUI.
+5. Approval ("Start rebuild"), then the cycle and its request on
+   `GET /releases/{id}/rebuild-cycle`.
+6. The connector's record and the status call back to Themis.
+7. With a real Jenkins: one build, one new SBOM, one comparison.
+
+Steps 1 to 6 need no Jenkins job to succeed: with no reachable Jenkins the connector refuses
+to start (D33), which is itself one thing to see. Step 7 needs a Jenkins the owner picks.
+Results go here and into tasks 6.9, 7.8 and 9.1.
 
 ## Honest limits
 

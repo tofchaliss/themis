@@ -494,6 +494,26 @@ three angles, and two of them proposed fixes that would not have worked.
   the recommendation as approved; the hold is only on Communication's
   `GET /releases/{id}/rebuild-cycle`. Show the hold beside the approval.
 
+- [ ] **Move the build connector to its own repository** (id `CONN-REBUILD-OWN-REPO-1`, from
+  EDR-REBUILD-01 step R5, 2026-11-28, owner action). D8 wants a repository of its own. The
+  connector lives in `connectors/jenkins-rebuild/` as a nested Go module until the owner
+  creates one. Then: `git subtree split`, push, remove the directory and the Makefile target
+  `connector-check` here.
+
+- [ ] **Run the build connector against a real Jenkins** (id `CONN-REBUILD-REAL-JENKINS-1`,
+  from EDR-REBUILD-01 step R5, 2026-11-28, verification). Only a fake Jenkins has seen it.
+  To see: the `Location` of a queued build, the queue and build lists with the
+  `THEMIS_INTENT_ID` parameter, `whoAmI`, and the job tree of a user with a narrow right.
+
+- [ ] **A database store for the build connector** (id `CONN-REBUILD-STORE-DB-1`, from
+  EDR-REBUILD-01 step R5, 2026-11-28, follow-up). The file store needs one host or a file
+  system with working locks. Several hosts need the `Store` interface on a database.
+
+- [ ] **The build connector is outside the coverage gate** (id `CONN-REBUILD-COVERAGE-1`, from
+  EDR-REBUILD-01 step R5, 2026-11-28, hardening). `make connector-check` runs its tests;
+  `scripts/check-coverage.sh` does not measure the nested module. Settle together with the
+  move to its own repository.
+
 - [ ] **Show the rebuild cycle and its requests in the GUI** (id `GUI-REBUILD-CYCLE-1`, from
   EDR-REBUILD-01 step R4, 2026-11-28, follow-up). The Release page shows the recommendation
   and "Start rebuild". The cycle, its requests, the hold, and the actions settle, request

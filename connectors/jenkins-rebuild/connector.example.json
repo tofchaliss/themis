@@ -1,0 +1,40 @@
+{
+  "listen": "127.0.0.1:8090",
+  "store_dir": "/var/lib/themis-rebuild-connector",
+  "signing_secret_env": "CONNECTOR_SIGNING_SECRET",
+  "themis": {
+    "callback_url": "https://themis.example/communication/api/v1/callbacks/ci-rebuild",
+    "api_key_env": "CONNECTOR_THEMIS_API_KEY"
+  },
+  "jenkins": {
+    "url": "https://ci.example",
+    "user": "themis-builder",
+    "token_env": "CONNECTOR_JENKINS_TOKEN",
+    "accept_broad_credential": false
+  },
+  "max_event_age": "24h",
+  "claim_ttl": "2m",
+  "call_timeout": "30s",
+  "recovery_interval": "30s",
+  "retention": "720h",
+  "allow": [
+    {
+      "product_id": "00000000-0000-0000-0000-000000000001",
+      "project_id": "00000000-0000-0000-0000-000000000002",
+      "jobs": ["team/build-image"]
+    }
+  ],
+  "jobs": {
+    "team/build-image": {
+      "parameters": {
+        "BRANCH": { "rule": "branch", "required": true },
+        "IMAGE_TAG": { "rule": "image_tag" },
+        "REGISTRY": { "rule": "registry_path" },
+        "MODE": { "rule": "enum", "values": ["full", "quick"] },
+        "PUSH": { "rule": "bool" },
+        "RETRIES": { "rule": "int" },
+        "NOTE": { "rule": "text", "max_len": 80 }
+      }
+    }
+  }
+}

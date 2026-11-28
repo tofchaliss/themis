@@ -146,6 +146,24 @@ Every step waits for the owner's go and lands as its own PR.
 - [x] 7.7 `make vet-tags`, lint, clean-arch, arch-test, unit and store tests green.
 - [ ] 7.8 VM check: part of R6.
 
-## Later groups
+## Group 8 — R5 reference build connector (same owner go)
 
-- [ ] R5 and R6 as in the EDR's order of work.
+- [x] 8.1 Nested Go module `connectors/jenkins-rebuild` (standard library only, imports no
+  Themis code); own repository later (`CONN-REBUILD-OWN-REPO-1`).
+- [x] 8.2 Signed event intake with the durable record first (D12) and the required checks
+  (D18): type, age, allow-list per Product and Project, parameter schema per job.
+- [x] 8.3 Value rules with a command-syntax test per rule (D31).
+- [x] 8.4 Stored states, per-intent claim with counter, recovery pass, "ask before calling
+  again" (D37, D39).
+- [x] 8.5 Jenkins client: submit as form parameters, search of queue and builds in two
+  passes, credential check that fails closed (D33).
+- [x] 8.6 Status call to Themis, sent again until confirmed (D28).
+- [x] 8.7 README, example configuration (loaded by a test), `make connector-check` in
+  `check` and `check-ci`.
+- [ ] 8.8 Run against a real Jenkins (`CONN-REBUILD-REAL-JENKINS-1`), part of R6 step 7.
+
+## Group 9 — R6 VM check (handed to the owner 2026-11-28)
+
+- [ ] 9.1 The seven steps of "Step R6" in the EDR, on the test VM. Closes 6.9 and 7.8.
+- [ ] 9.2 After a pass: move the default of `THEMIS_COMMUNICATION_REBUILD_OPEN_FROM` to
+  `decision` (`COMM-REBUILD-OPEN-FROM-1`).

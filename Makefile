@@ -32,7 +32,7 @@ COVERAGE_PKGS_GREENFIELD := ./internal/kernel/... ./internal/registry/... ./inte
 # cannot disagree about what "greenfield" means.
 GREENFIELD_DIRS := $(patsubst ./%/...,%,$(COVERAGE_PKGS_GREENFIELD))
 
-.PHONY: all build vet-tags clean tidy js-check web-install web-build web-check web-verify web-dev test test-greenfield test-integration test-property test-property-greenfield property-run lint coverage coverage-greenfield coverage-pkg deadcode clean-arch arch-test check check-ci \
+.PHONY: all build vet-tags clean tidy js-check web-install web-build web-check web-verify web-dev test test-greenfield test-integration test-property test-property-greenfield property-run lint connector-check coverage coverage-greenfield coverage-pkg deadcode clean-arch arch-test check check-ci \
 	migrate-up migrate-down generate-api generate-api-evidence generate-api-registry generate-api-knowledge e2e-evidence e2e-pipeline e2e-llm e2e-embed verify-build
 
 # Greenfield context-first trees under internal/ (ring names domain/app/adapters).
@@ -208,14 +208,14 @@ clean-arch:
 arch-test:
 	$(GO) test $(GO_TEST_FLAGS) ./tests/architecture/...
 
-check: build vet-tags test lint js-check web-check web-verify clean-arch arch-test coverage deadcode
+check: build vet-tags connector-check test lint js-check web-check web-verify clean-arch arch-test coverage deadcode
 
 # CI gate — greenfield-scoped: same as `check`, but BOTH the unit tests and coverage cover only
 # the go-forward tree (the frozen v0.3.x legacy tests are green only on macOS's coarse clock,
 # are reference-only, and include a known-flaky property that cannot be fixed under the freeze —
 # CI-PROP-1). Run by .github/workflows/{pr,main}.yml; `make check` stays whole-repo
 # for local use.
-check-ci: build vet-tags test-greenfield lint js-check web-check web-verify clean-arch arch-test coverage-greenfield deadcode
+check-ci: build vet-tags connector-check test-greenfield lint js-check web-check web-verify clean-arch arch-test coverage-greenfield deadcode
 
 # Type-check EVERY build tag, not just the untagged default.
 #
@@ -231,6 +231,12 @@ vet-tags:
 	$(GO) vet -tags=e2e ./tests/...
 	$(GO) vet -tags=llm ./...
 	$(GO) vet -tags=postgres ./...
+
+# The reference build connector (EDR-REBUILD-01 step R5) is a Go module of its own under
+# connectors/, so `go build ./...`, `go vet ./...` and the tests of this module never see it.
+# Without this target it would rot in silence, the same way an unset build tag does.
+connector-check:
+	cd connectors/jenkins-rebuild && $(GO) vet ./... && $(GO) test -count=1 ./...
 
 # golang-migrate registers the postgres driver only with -tags postgres.
 MIGRATE := $(GO) run -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.19.1
