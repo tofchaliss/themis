@@ -32,8 +32,9 @@ Every step waits for the owner's go and lands as its own PR.
 - [x] 2.3 API: `/rebuild-policies`, `/products/{id}/rebuild-policy`, `/releases/{id}/rebuild-policy`
   (+ `/history`, `/in-force`); admin or the Product's key to change; tests; `make check` parts
   and the dashboard's generated API types green.
-- [ ] 2.4 VM check: a Product policy and a Release policy, the in-force read for three
-  releases, the list, a removal, the history.
+- [x] 2.4 VM check PASSED 2026-11-28: a Product policy and a Release policy, the in-force read
+  for two releases at each stage, the list, both removals, the history. Result in the EDR,
+  "Step R1a as built".
 - [ ] 2.5 GUI page for the policies (`GUI-REBUILD-POLICY-1`), on the owner's go.
 
 ## Later groups
