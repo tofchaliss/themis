@@ -95,3 +95,33 @@ func (s *Store) MatchComponentsForRelease(ctx context.Context, releaseID string)
 	}
 	return out, rows.Err()
 }
+
+// ReleaseMatchVerdicts returns the live (not retired) match rows of one release with their
+// recorded verdict (EDR-REBUILD-01 D30), ordered by card then purl. Implements
+// app.FixVerdictLister. Read-only: the rows are served as judged, stale or not — the
+// re-verdict sweep is what brings a lagging row up to date.
+func (s *Store) ReleaseMatchVerdicts(ctx context.Context, releaseID string) ([]app.MatchVerdict, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT m.faultline_id, f.cve, m.component_purl, m.component_version,
+		       m.component_ecosystem, m.verdict_state, m.verdict_behind
+		FROM faultline_matches m
+		JOIN faultlines f ON f.id = m.faultline_id
+		WHERE m.release_id = $1 AND m.retired_at IS NULL
+		ORDER BY m.faultline_id, m.component_purl`, releaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []app.MatchVerdict
+	for rows.Next() {
+		var v app.MatchVerdict
+		var state string
+		if err := rows.Scan(&v.FaultlineID, &v.CVE, &v.PURL, &v.Version, &v.Ecosystem, &state, &v.Behind); err != nil {
+			return nil, err
+		}
+		v.State = domain.VerdictState(state)
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}

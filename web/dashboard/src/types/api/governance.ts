@@ -656,6 +656,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/releases/{releaseId}/rebuild-evaluation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What the rebuild policy says about this Release right now (EDR-REBUILD-01 step R2, part 1) - a dry run. It applies the policy in force, the tags (D4) and the effective mode (D17) to the facts on record and lists the components that count and why (D34). It stores nothing, publishes nothing and starts no build. 503 when the Release's Product or tags cannot be read from Registry. When Knowledge cannot be asked the read still answers, with `fix_verdicts_read` false and every fix unknown (D30). Read scope. */
+        get: operations["getReleaseRebuildEvaluation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/faultlines/{faultlineId}/findings": {
         parameters: {
             query?: never;
@@ -1341,8 +1358,112 @@ export interface components {
              * @enum {string}
              */
             mode_set_by: "installation" | "policy";
-            /** @description Whether the Release's tags were read. Always false until step R2. A tag can only lower mode_ceiling, and a Release with no rebuild tag takes no part at all (D4, D17), so mode_ceiling is not yet the effective mode. */
+            /** @description Whether the Release's tags were read. When true, `tag`, `effective_mode` and `effective_mode_set_by` are present. A tag can only lower mode_ceiling, and a Release with no rebuild tag takes no part at all (D4, D17). */
             tags_applied: boolean;
+            /** @description The Project of the Release. Present when tags_applied is true. */
+            project_id?: string;
+            tag?: components["schemas"]["RebuildTagMode"];
+            /**
+             * @description The mode that applies to this Release - the lowest of the installation mode, the mode of the policy in force and the tag (D17).
+             * @enum {string}
+             */
+            effective_mode?: "off" | "ask" | "auto";
+            /**
+             * @description Which of the three set effective_mode. `tag` also covers a Release with no rebuild tag at all - the missing tag is what keeps it out.
+             * @enum {string}
+             */
+            effective_mode_set_by?: "installation" | "policy" | "tag";
+        };
+        /** @description What the tags of the Release, its Project and its Product say (D4, D17). */
+        RebuildTagMode: {
+            /**
+             * @description `off` when `rebuild:off` sits on any level or when no rebuild tag exists; otherwise from the nearest level carrying `rebuild:ask` or `rebuild:auto`.
+             * @enum {string}
+             */
+            mode: "off" | "ask" | "auto";
+            /** @description The tag that decided. Absent when no rebuild tag exists on any level. */
+            tag?: string;
+            /**
+             * @description Where that tag sits.
+             * @enum {string}
+             */
+            level?: "release" | "project" | "product";
+        };
+        RebuildEvaluation: {
+            release_id: string;
+            product_id: string;
+            project_id: string;
+            /** Format: date-time */
+            evaluated_at: string;
+            policy: components["schemas"]["RebuildPolicyRecord"];
+            /** @enum {string} */
+            installation_mode: "off" | "ask" | "auto";
+            /** @enum {string} */
+            mode_ceiling: "off" | "ask" | "auto";
+            tag: components["schemas"]["RebuildTagMode"];
+            /** @enum {string} */
+            effective_mode: "off" | "ask" | "auto";
+            /** @enum {string} */
+            effective_mode_set_by: "installation" | "policy" | "tag";
+            /**
+             * @description What the policy would do now. `recommend` - mode ask and at least one component counts, a person decides. `request` - mode auto and at least one counts. `none` - nothing counts, or the effective mode is off. Nothing is sent in any case.
+             * @enum {string}
+             */
+            outcome: "none" | "recommend" | "request";
+            /** @description The open component occurrences of open Findings the policy looked at. */
+            considered: number;
+            /** @description The occurrences that did not count, by the first rule that left each out. */
+            skipped: {
+                /** @description The Finding's Position is not_affected or accepted_risk (skip_decided). */
+                decided: number;
+                /** @description A scope-class component (carrier_only). */
+                scope_component: number;
+                /** @description No fixed version applies to the occurrence (fix_required). */
+                no_fix: number;
+                /** @description Themis could not tell whether the occurrence is below a fixed version (fix_required). Unknown is not a known fix (D30). */
+                fix_unknown: number;
+                /** @description Below the severity floor and not counted as known exploited. */
+                below_floor: number;
+            };
+            /** @description False when Knowledge could not be asked. Every fix then reads unknown, so nothing counts while fix_required is on. */
+            fix_verdicts_read: boolean;
+            targeted: components["schemas"]["RebuildTargetEntry"][];
+        };
+        /** @description One counted component of one Finding (D34). The pair finding_id + purl is unique. */
+        RebuildTargetEntry: {
+            finding_id: string;
+            cve: string;
+            purl: string;
+            current_version: string;
+            /** @description The vendor fix bounds the installed version is below, as Knowledge recorded them. Empty only when fix_required is off and no fix is known. */
+            fixed_versions: string[];
+            /** @description Where the fix comes from. `knowledge_verdict` - the bound Knowledge recorded on the occurrence verdict. Absent when no fix is known. */
+            fix_source?: string;
+            /** @description The severity bucket the policy compared with its floor; empty with no severity evidence. */
+            severity: string;
+            /**
+             * @description Where the severity came from - the score priority and the SLA read, or the one a person set. The calculated component assessment is in shadow and is not read.
+             * @enum {string}
+             */
+            score_source: "base_score" | "owner_set";
+            /** @description That score on the 0-100 scale. */
+            score: number;
+            known_exploited: boolean;
+            /**
+             * @description `scope` can occur only while carrier_only is off.
+             * @enum {string}
+             */
+            claim_class: "carrier" | "unknown" | "scope";
+            /** @description `none`, or the stance in force. */
+            position: string;
+            counted_because: ("severity_floor" | "known_exploited")[];
+            assessment: {
+                /**
+                 * @description D35. `not_assessed` - the component assessment's severity was not used. `not_eligible` - a scope-class component. `assessed` does not occur while the assessment is in shadow.
+                 * @enum {string}
+                 */
+                state: "assessed" | "not_assessed" | "not_eligible";
+            };
         };
         SLAAcceptancePeriod: {
             /** Format: date-time */
@@ -2832,6 +2953,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RebuildPolicyInForce"];
+                };
+            };
+            500: components["responses"]["Problem"];
+            503: components["responses"]["Problem"];
+        };
+    };
+    getReleaseRebuildEvaluation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                releaseId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RebuildEvaluation"];
                 };
             };
             500: components["responses"]["Problem"];

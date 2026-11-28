@@ -1654,3 +1654,64 @@ func TestRebuildPolicyStoreOverrides(t *testing.T) {
 		t.Fatalf("concurrent history has %d rows", len(hist))
 	}
 }
+
+// EDR-REBUILD-01 step R2 part 1: the facts the rebuild policy reads, for one Release — every
+// Finding in id order with its stage, stance, the score priority reads (the owner-set one when
+// set), the known-exploited signal, and its live components. A retired component is not served,
+// another Release's Findings are not either, and an unknown Release is empty.
+func TestRebuildFacts(t *testing.T) {
+	pool := newPool(t)
+	st := store.New(pool)
+	ctx := context.Background()
+
+	if got, err := st.RebuildFacts(ctx, "rel-r"); err != nil || len(got) != 0 {
+		t.Fatalf("empty release = %+v %v", got, err)
+	}
+	seed := func(id, rel, fl, cve string, comps ...domain.MatchedComponent) {
+		t.Helper()
+		f := newFinding(t, id, rel, fl, cve)
+		for _, c := range comps {
+			if _, err := f.AbsorbComponent(c); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := st.Save(ctx, f, true, 0, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed("r-a", "rel-r", "fl-a", "CVE-2026-0001",
+		domain.MatchedComponent{PURL: "pkg:rpm/redhat/kernel@4.18.0-1.el8", Name: "kernel", Version: "4.18.0-1.el8", Ecosystem: "rpm", ClaimClass: "carrier", VerdictState: "open"},
+		domain.MatchedComponent{PURL: "pkg:rpm/redhat/kernel-core@4.18.0-2.el8", Name: "kernel-core", Version: "4.18.0-2.el8", Ecosystem: "rpm", VerdictState: "cleared_vendor_fix"},
+		domain.MatchedComponent{PURL: "app:kernel@4.18.0-1.el8", Name: "kernel", Version: "4.18.0-1.el8"})
+	seed("r-b", "rel-r", "fl-b", "CVE-2026-0002")
+	seed("r-z", "rel-other", "fl-a", "CVE-2026-0001",
+		domain.MatchedComponent{PURL: "pkg:rpm/redhat/kernel@4.18.0-1.el8", Name: "kernel", Version: "4.18.0-1.el8", Ecosystem: "rpm"})
+	for _, q := range []string{
+		`UPDATE findings SET base_score = 80, signal_kev = true WHERE id = 'r-a'`,
+		`UPDATE findings SET base_score = 95, owner_base_score = 20, current_stance = 'accepted_risk' WHERE id = 'r-b'`,
+		`UPDATE finding_components SET retired_at = now() WHERE finding_id = 'r-a' AND purl LIKE 'app:%'`,
+	} {
+		if _, err := pool.Exec(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+
+	got, err := st.RebuildFacts(ctx, "rel-r")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("facts = %+v %v", got, err)
+	}
+	a, b := got[0], got[1]
+	if a.FindingID != "r-a" || a.FaultlineID != "fl-a" || a.CVE != "CVE-2026-0001" || a.Stance != "" || a.BaseScore != 80 ||
+		a.OwnerSet || !a.KnownExploited || a.Stage == "" || len(a.Components) != 2 {
+		t.Fatalf("a = %+v", a)
+	}
+	if c := a.Components[0]; c.PURL != "pkg:rpm/redhat/kernel-core@4.18.0-2.el8" || c.VerdictIsOpen() || c.Version != "4.18.0-2.el8" {
+		t.Errorf("cleared component = %+v", c)
+	}
+	if c := a.Components[1]; c.PURL != "pkg:rpm/redhat/kernel@4.18.0-1.el8" || !c.VerdictIsOpen() || c.ClaimClass != "carrier" || c.Ecosystem != "rpm" || c.Name != "kernel" {
+		t.Errorf("open component = %+v", c)
+	}
+	if b.FindingID != "r-b" || b.Stance != domain.StanceAcceptedRisk || b.BaseScore != 20 || !b.OwnerSet || b.KnownExploited || len(b.Components) != 0 {
+		t.Errorf("b = %+v", b)
+	}
+}

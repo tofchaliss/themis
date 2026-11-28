@@ -328,11 +328,118 @@ func (h *Handler) GetReleaseRebuildPolicyInForce(w http.ResponseWriter, r *http.
 	case err != nil:
 		writeRebuildPolicyChange(w, app.RebuildPolicyRecord{}, err)
 	default:
-		writeJSON(w, http.StatusOK, gen.RebuildPolicyInForce{
+		out := gen.RebuildPolicyInForce{
 			ReleaseId: res.ReleaseID, ProductId: res.ProductID, Policy: toRebuildPolicyRecord(res.InForce),
 			InstallationMode: gen.RebuildPolicyInForceInstallationMode(res.InstallationMode),
 			ModeCeiling:      gen.RebuildPolicyInForceModeCeiling(res.ModeCeiling),
 			ModeSetBy:        gen.RebuildPolicyInForceModeSetBy(res.ModeSetBy),
-		})
+			TagsApplied:      res.TagsApplied,
+		}
+		if res.TagsApplied {
+			tag := toRebuildTagMode(res.Tag)
+			mode := gen.RebuildPolicyInForceEffectiveMode(res.EffectiveMode)
+			setBy := gen.RebuildPolicyInForceEffectiveModeSetBy(res.EffectiveSetBy)
+			out.ProjectId, out.Tag, out.EffectiveMode, out.EffectiveModeSetBy = strptr(res.ProjectID), &tag, &mode, &setBy
+		}
+		writeJSON(w, http.StatusOK, out)
 	}
+}
+
+// toRebuildTagMode maps what the tags say to the wire; the tag and its level are absent when
+// the Release carries no rebuild tag on any level.
+func toRebuildTagMode(t domain.RebuildTagMode) gen.RebuildTagMode {
+	out := gen.RebuildTagMode{Mode: gen.RebuildTagModeMode(t.Mode)}
+	if t.Tag != "" {
+		level := gen.RebuildTagModeLevel(t.Level)
+		out.Tag, out.Level = strptr(t.Tag), &level
+	}
+	return out
+}
+
+// GetReleaseRebuildEvaluation handles GET /releases/{releaseId}/rebuild-evaluation: what the
+// rebuild policy says about the Release now (EDR-REBUILD-01 step R2 part 1). A dry run — it
+// stores nothing, publishes nothing and starts nothing.
+func (h *Handler) GetReleaseRebuildEvaluation(w http.ResponseWriter, r *http.Request, releaseID string) {
+	if h.rebuildEval == nil {
+		writeProblem(w, http.StatusServiceUnavailable, "rebuild evaluation unavailable", rebuildPolicyUnwired)
+		return
+	}
+	res, err := h.rebuildEval.Evaluate(r.Context(), releaseID)
+	switch {
+	case errors.Is(err, app.ErrRebuildPolicyIdentityUnavailable):
+		writeProblem(w, http.StatusServiceUnavailable, "rebuild evaluation unavailable",
+			"the product and the tags of this release could not be read, so its rebuild mode is not known")
+	case errors.Is(err, app.ErrRebuildEvaluationUnavailable):
+		writeProblem(w, http.StatusServiceUnavailable, "rebuild evaluation unavailable",
+			"the release tags cannot be read on this node (no Registry seam), so no rebuild mode can be established")
+	case err != nil:
+		writeRebuildPolicyChange(w, app.RebuildPolicyRecord{}, err)
+	default:
+		writeJSON(w, http.StatusOK, toRebuildEvaluation(res))
+	}
+}
+
+func toRebuildEvaluation(res app.RebuildEvaluation) gen.RebuildEvaluation {
+	pol := res.Policy
+	out := gen.RebuildEvaluation{
+		ReleaseId: pol.ReleaseID, ProductId: pol.ProductID, ProjectId: pol.ProjectID,
+		EvaluatedAt: res.EvaluatedAt, Policy: toRebuildPolicyRecord(pol.InForce),
+		InstallationMode:   gen.RebuildEvaluationInstallationMode(pol.InstallationMode),
+		ModeCeiling:        gen.RebuildEvaluationModeCeiling(pol.ModeCeiling),
+		Tag:                toRebuildTagMode(pol.Tag),
+		EffectiveMode:      gen.RebuildEvaluationEffectiveMode(pol.EffectiveMode),
+		EffectiveModeSetBy: gen.RebuildEvaluationEffectiveModeSetBy(pol.EffectiveSetBy),
+		Outcome:            gen.RebuildEvaluationOutcome(res.Outcome),
+		Considered:         res.Considered,
+		FixVerdictsRead:    res.FixVerdictsRead,
+		Targeted:           make([]gen.RebuildTargetEntry, 0, len(res.Targeted)),
+	}
+	out.Skipped.Decided = res.Skipped[domain.RebuildSkippedDecided]
+	out.Skipped.ScopeComponent = res.Skipped[domain.RebuildSkippedScope]
+	out.Skipped.NoFix = res.Skipped[domain.RebuildSkippedNoFix]
+	out.Skipped.FixUnknown = res.Skipped[domain.RebuildSkippedFixUnknown]
+	out.Skipped.BelowFloor = res.Skipped[domain.RebuildSkippedBelowFloor]
+	for _, t := range res.Targeted {
+		e := gen.RebuildTargetEntry{
+			FindingId: string(t.FindingID), Cve: t.CVE, Purl: t.PURL,
+			CurrentVersion: t.CurrentVersion, FixedVersions: t.FixedVersions,
+			Severity: t.Severity, Score: t.Score,
+			ScoreSource:    gen.RebuildTargetEntryScoreSource(t.ScoreSource),
+			KnownExploited: t.KnownExploited,
+			ClaimClass:     gen.RebuildTargetEntryClaimClass(rebuildClaimClass(t.ClaimClass)),
+			Position:       rebuildPosition(t.Position),
+			CountedBecause: make([]gen.RebuildTargetEntryCountedBecause, 0, len(t.CountedBecause)),
+		}
+		if e.FixedVersions == nil {
+			e.FixedVersions = []string{}
+		}
+		if t.FixSource != "" {
+			e.FixSource = strptr(t.FixSource)
+		}
+		for _, b := range t.CountedBecause {
+			e.CountedBecause = append(e.CountedBecause, gen.RebuildTargetEntryCountedBecause(b))
+		}
+		e.Assessment.State = gen.RebuildTargetEntryAssessmentState(t.AssessmentState)
+		out.Targeted = append(out.Targeted, e)
+	}
+	return out
+}
+
+// rebuildClaimClass is D34's claim class: `carrier`, `scope`, and `unknown` for everything else
+// (an empty or unreadable class acts as carrier and is said to be unknown).
+func rebuildClaimClass(c string) string {
+	switch c {
+	case "carrier", domain.ClaimScope:
+		return c
+	default:
+		return "unknown"
+	}
+}
+
+// rebuildPosition is D34's position: `none`, or the stance in force.
+func rebuildPosition(s domain.Stance) string {
+	if s == "" {
+		return "none"
+	}
+	return string(s)
 }

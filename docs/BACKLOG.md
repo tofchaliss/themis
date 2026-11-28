@@ -399,7 +399,21 @@ three angles, and two of them proposed fixes that would not have worked.
   yet); VM check PASSED 2026-11-28 (EDR "Step R1 as built"). **R1a API built 2026-11-28**
   (Product and Release policies, removal with history, list read, in-force read with the mode
   ceiling; Governance migration 29); VM check PASSED 2026-11-28 (EDR "Step R1a as built").
-  Next: R2, on the owner's go.
+  **R2 part 1 built 2026-11-28** (owner go for R2 the same day): tag scope and effective mode,
+  the judgement of one Release as a read (`GET /releases/{id}/rebuild-evaluation`), and one new
+  Knowledge read (`GET /releases/{id}/fix-verdicts`); no migration, nothing is sent; VM check
+  pending. Next: R2 part 2 (the two triggers, the stored decision, the two events), which first
+  settles the open points of EDR "Step R2 part 1 as built".
+
+- [ ] **A known fix for language packages** (id `KN-FIX-STANDING-LANG-1`, from EDR-REBUILD-01
+  step R2 part 1, 2026-11-28, feature). Knowledge records the vendor bounds an open occurrence is
+  below (`verdict_behind`) only for RPM and APK components, where its fixed-verdict compares.
+  For npm, Go, Maven, PyPI and the rest, `GET /releases/{id}/fix-verdicts` answers `unknown`, so
+  such a component never counts toward a rebuild while `fix_required` is on (the safe direction
+  of D30), and no fix-available alert is raised for it either. To widen it: judge "below the
+  published fix" with the per-ecosystem comparison that already gates a match
+  (`value.CompareVersions`, `value.VersionParsable`, the per-world fixes of the card), record
+  the result on the match row, and bump `VerdictGeneration` so the sweep writes it once.
 
 - [ ] **GUI page for the rebuild policies** (id `GUI-REBUILD-POLICY-1`, from EDR-REBUILD-01 step
   R1a, 2026-11-28, feature). One page that lists every policy in force (`GET /rebuild-policies`),

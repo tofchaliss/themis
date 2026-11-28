@@ -289,6 +289,36 @@ func (h *Handler) GetFaultlinesByAdvisory(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, out)
 }
 
+// GetReleaseFixVerdicts handles GET /releases/{releaseId}/fix-verdicts (EDR-REBUILD-01 D30): the
+// recorded fix standing of every live occurrence of the release. A blank id is a 400, an unwired
+// read a 503, a release with no match an empty list.
+func (h *Handler) GetReleaseFixVerdicts(w http.ResponseWriter, r *http.Request, releaseID string) {
+	rows, err := h.read.ReleaseFixVerdicts(r.Context(), releaseID)
+	if err != nil {
+		switch {
+		case errors.Is(err, app.ErrInvalidRelease):
+			writeProblem(w, http.StatusBadRequest, "invalid release id", err.Error())
+		case errors.Is(err, app.ErrFixVerdictsUnavailable):
+			writeProblem(w, http.StatusServiceUnavailable, "fix verdicts unavailable", err.Error())
+		default:
+			writeProblem(w, http.StatusInternalServerError, "cannot read fix verdicts", err.Error())
+		}
+		return
+	}
+	out := make([]gen.FixVerdict, 0, len(rows))
+	for _, v := range rows {
+		behind := v.Behind
+		if behind == nil {
+			behind = []string{}
+		}
+		out = append(out, gen.FixVerdict{
+			FaultlineId: v.FaultlineID, Cve: v.CVE, Purl: v.PURL, Version: v.Version,
+			Ecosystem: v.Ecosystem, State: string(v.State), Fix: gen.FixVerdictFix(v.Fix), Behind: behind,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // GetRecentFaultlines handles GET /faultlines/recent — the newest cards by creation time
 // (GUI-16). Paging rules are the app's; an unwired lister is a 503, never an empty page.
 func (h *Handler) GetRecentFaultlines(w http.ResponseWriter, r *http.Request, params gen.GetRecentFaultlinesParams) {

@@ -1211,6 +1211,33 @@ paths:
           $ref: '#/components/responses/Problem'
         '503':
           $ref: '#/components/responses/Problem'
+  /releases/{releaseId}/rebuild-evaluation:
+    get:
+      operationId: getReleaseRebuildEvaluation
+      summary: >-
+        What the rebuild policy says about this Release right now (EDR-REBUILD-01 step R2,
+        part 1) - a dry run. It applies the policy in force, the tags (D4) and the effective
+        mode (D17) to the facts on record and lists the components that count and why (D34).
+        It stores nothing, publishes nothing and starts no build. 503 when the Release's
+        Product or tags cannot be read from Registry. When Knowledge cannot be asked the read
+        still answers, with `fix_verdicts_read` false and every fix unknown (D30). Read scope.
+      parameters:
+        - name: releaseId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RebuildEvaluation'
+        '500':
+          $ref: '#/components/responses/Problem'
+        '503':
+          $ref: '#/components/responses/Problem'
   /faultlines/{faultlineId}/findings:
     get:
       operationId: getFaultlineFindings
@@ -2360,9 +2387,180 @@ components:
         tags_applied:
           type: boolean
           description: >-
-            Whether the Release's tags were read. Always false until step R2. A tag can only
-            lower mode_ceiling, and a Release with no rebuild tag takes no part at all (D4, D17),
-            so mode_ceiling is not yet the effective mode.
+            Whether the Release's tags were read. When true, `tag`, `effective_mode` and
+            `effective_mode_set_by` are present. A tag can only lower mode_ceiling, and a
+            Release with no rebuild tag takes no part at all (D4, D17).
+        project_id:
+          type: string
+          description: The Project of the Release. Present when tags_applied is true.
+        tag:
+          $ref: '#/components/schemas/RebuildTagMode'
+        effective_mode:
+          type: string
+          enum: ['off', ask, auto]
+          description: >-
+            The mode that applies to this Release - the lowest of the installation mode, the
+            mode of the policy in force and the tag (D17).
+        effective_mode_set_by:
+          type: string
+          enum: [installation, policy, tag]
+          description: >-
+            Which of the three set effective_mode. `tag` also covers a Release with no rebuild
+            tag at all - the missing tag is what keeps it out.
+    RebuildTagMode:
+      type: object
+      description: What the tags of the Release, its Project and its Product say (D4, D17).
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: ['off', ask, auto]
+          description: >-
+            `off` when `rebuild:off` sits on any level or when no rebuild tag exists; otherwise
+            from the nearest level carrying `rebuild:ask` or `rebuild:auto`.
+        tag:
+          type: string
+          description: The tag that decided. Absent when no rebuild tag exists on any level.
+        level:
+          type: string
+          enum: [release, project, product]
+          description: Where that tag sits.
+    RebuildEvaluation:
+      type: object
+      required: [release_id, product_id, project_id, evaluated_at, policy, installation_mode, mode_ceiling,
+                 tag, effective_mode, effective_mode_set_by, outcome, considered, skipped,
+                 fix_verdicts_read, targeted]
+      properties:
+        release_id:
+          type: string
+        product_id:
+          type: string
+        project_id:
+          type: string
+        evaluated_at:
+          type: string
+          format: date-time
+        policy:
+          $ref: '#/components/schemas/RebuildPolicyRecord'
+        installation_mode:
+          type: string
+          enum: ['off', ask, auto]
+        mode_ceiling:
+          type: string
+          enum: ['off', ask, auto]
+        tag:
+          $ref: '#/components/schemas/RebuildTagMode'
+        effective_mode:
+          type: string
+          enum: ['off', ask, auto]
+        effective_mode_set_by:
+          type: string
+          enum: [installation, policy, tag]
+        outcome:
+          type: string
+          enum: [none, recommend, request]
+          description: >-
+            What the policy would do now. `recommend` - mode ask and at least one component
+            counts, a person decides. `request` - mode auto and at least one counts. `none` -
+            nothing counts, or the effective mode is off. Nothing is sent in any case.
+        considered:
+          type: integer
+          description: The open component occurrences of open Findings the policy looked at.
+        skipped:
+          type: object
+          description: >-
+            The occurrences that did not count, by the first rule that left each out.
+          required: [decided, scope_component, no_fix, fix_unknown, below_floor]
+          properties:
+            decided:
+              type: integer
+              description: The Finding's Position is not_affected or accepted_risk (skip_decided).
+            scope_component:
+              type: integer
+              description: A scope-class component (carrier_only).
+            no_fix:
+              type: integer
+              description: No fixed version applies to the occurrence (fix_required).
+            fix_unknown:
+              type: integer
+              description: >-
+                Themis could not tell whether the occurrence is below a fixed version
+                (fix_required). Unknown is not a known fix (D30).
+            below_floor:
+              type: integer
+              description: Below the severity floor and not counted as known exploited.
+        fix_verdicts_read:
+          type: boolean
+          description: >-
+            False when Knowledge could not be asked. Every fix then reads unknown, so nothing
+            counts while fix_required is on.
+        targeted:
+          type: array
+          items:
+            $ref: '#/components/schemas/RebuildTargetEntry'
+    RebuildTargetEntry:
+      type: object
+      description: One counted component of one Finding (D34). The pair finding_id + purl is unique.
+      required: [finding_id, cve, purl, current_version, fixed_versions, severity, score_source,
+                 score, known_exploited, claim_class, position, counted_because, assessment]
+      properties:
+        finding_id:
+          type: string
+        cve:
+          type: string
+        purl:
+          type: string
+        current_version:
+          type: string
+        fixed_versions:
+          type: array
+          description: >-
+            The vendor fix bounds the installed version is below, as Knowledge recorded them.
+            Empty only when fix_required is off and no fix is known.
+          items:
+            type: string
+        fix_source:
+          type: string
+          description: >-
+            Where the fix comes from. `knowledge_verdict` - the bound Knowledge recorded on the
+            occurrence verdict. Absent when no fix is known.
+        severity:
+          type: string
+          description: The severity bucket the policy compared with its floor; empty with no severity evidence.
+        score_source:
+          type: string
+          enum: [base_score, owner_set]
+          description: >-
+            Where the severity came from - the score priority and the SLA read, or the one a
+            person set. The calculated component assessment is in shadow and is not read.
+        score:
+          type: integer
+          description: That score on the 0-100 scale.
+        known_exploited:
+          type: boolean
+        claim_class:
+          type: string
+          enum: [carrier, unknown, scope]
+          description: "`scope` can occur only while carrier_only is off."
+        position:
+          type: string
+          description: "`none`, or the stance in force."
+        counted_because:
+          type: array
+          items:
+            type: string
+            enum: [severity_floor, known_exploited]
+        assessment:
+          type: object
+          required: [state]
+          properties:
+            state:
+              type: string
+              enum: [assessed, not_assessed, not_eligible]
+              description: >-
+                D35. `not_assessed` - the component assessment's severity was not used.
+                `not_eligible` - a scope-class component. `assessed` does not occur while the
+                assessment is in shadow.
     SLAAcceptancePeriod:
       type: object
       required: [start, position_version]
