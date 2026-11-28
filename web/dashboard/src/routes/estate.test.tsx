@@ -33,7 +33,7 @@ describe("Estate", () => {
     renderWithQuery(<Estate />);
     fireEvent.click(await screen.findByRole("button", { name: /example-product/ }));
     fireEvent.click(await screen.findByRole("button", { name: /project-a/ }));
-    fireEvent.click(await screen.findByRole("button", { name: "tags…" }));
+    fireEvent.click(await screen.findByRole("button", { name: "tags, build profile…" }));
     const input = await screen.findByLabelText("Tags");
     fireEvent.change(input, { target: { value: "env:prod, " } });
     fireEvent.click(screen.getByRole("button", { name: "Save tags" }));

@@ -1,8 +1,9 @@
 // The estate cascade: products → projects → releases, with the tag filter and the tag editor
-// (EDR-REMEDIATION-01 D7: tags are filters only). A release opens its posture, which is still
-// a classic-GUI screen until EDR-GUI-02 step G2.
+// (EDR-REMEDIATION-01 D7: tags are filters only) and, for a project or a release, the build
+// profile editor (EDR-REBUILD-01 D10). A release opens its posture.
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { BuildProfileEditor } from "@/components/build-profile";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -269,7 +270,7 @@ export function Estate() {
                   className="text-xs text-ink-2 hover:text-accent"
                   onClick={() => setTarget({ kind: "release", id: r.id ?? "", name: `v${r.version}` })}
                 >
-                  tags…
+                  tags, build profile…
                 </button>
                 <span className="ml-auto font-mono text-[11px] text-muted">{(r.id ?? "").slice(0, 8)}</span>
               </div>
@@ -279,6 +280,16 @@ export function Estate() {
       </div>
 
       {target && <TagEditor key={`${target.kind}:${target.id}`} target={target} canWrite={who.data?.can_write !== false} />}
+      {target && target.kind !== "product" && (
+        <BuildProfileEditor
+          key={`bp:${target.kind}:${target.id}`}
+          kind={target.kind}
+          id={target.id}
+          name={target.name}
+          actor={who.data?.user ?? "operator"}
+          canWrite={who.data?.can_write !== false}
+        />
+      )}
     </div>
   );
 }
