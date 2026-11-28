@@ -392,8 +392,12 @@ three angles, and two of them proposed fixes that would not have worked.
   of D45: the approval locks the policies it checks, reads the tags fresh and fails closed, and
   expiry is recorded before withdrawal. Not decided: stopping an open cycle on mode `off`.
   Owner choice 10 (2026-11-27): the tag limit of D46 item 9 is accepted.
-  Design in EDR-REBUILD-01 (PROPOSED); choices 2 to 5 open. Steps R1-R6 plus R1a and R2a, one
-  PR each on the owner's go (release freeze).
+  Design in EDR-REBUILD-01 (PROPOSED); owner choices 2, 3 and 4 answered 2026-11-27, choice 5
+  asked again at R5. Steps R1-R6 plus R1a and R2a, one PR each on the owner's go (release
+  freeze). **R1 built 2026-11-27** (installation policy record, pure evaluation rule, Governance
+  migration 28, `GET/PUT /rebuild-policy` and `/rebuild-policy/history`; nothing triggers a build
+  yet); its VM check is task 1.6 of `openspec/changes/phase3-image-rebuild`. Next: R1a, on the
+  owner's go.
 
 - [ ] **PSIRT early alert on the Overview** (id `GUI-PSIRT-1`, owner 2026-11-23, feature).
   Newly published critical/high CVEs in the world (original source score, no Themis score),

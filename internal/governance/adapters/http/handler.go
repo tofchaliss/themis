@@ -39,6 +39,9 @@ type Handler struct {
 	products ProductResolver
 	// sla serves the SLA policy (EDR-REMEDIATION-01 D1). Nil ⇒ /sla-policy answers 503.
 	sla *app.SLAService
+	// rebuild serves the installation rebuild policy (EDR-REBUILD-01 step R1). Nil ⇒
+	// /rebuild-policy answers 503.
+	rebuild *app.RebuildPolicyService
 	// metrics serves the remediation metrics (D6). Nil ⇒ /metrics/remediation answers 503.
 	metrics *app.MetricsService
 	// scope previews who a scoped decision reaches (EDR-SYNC-01 D7). Nil ⇒ no Registry seam, and
@@ -93,6 +96,12 @@ func (h *Handler) WithScopePropagation(sp *app.ScopePropagation) *Handler {
 // WithSLA attaches the SLA policy service behind /sla-policy.
 func (h *Handler) WithSLA(sla *app.SLAService) *Handler {
 	h.sla = sla
+	return h
+}
+
+// WithRebuildPolicy attaches the rebuild policy service behind /rebuild-policy.
+func (h *Handler) WithRebuildPolicy(rp *app.RebuildPolicyService) *Handler {
+	h.rebuild = rp
 	return h
 }
 
